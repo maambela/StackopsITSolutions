@@ -11956,10 +11956,6 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     grid-template-columns: 1fr;
   }
 
-  .sunbird-id-table {
-    min-width: 980px;
-  }
-
   .sunbird-id-metric-value {
     font-size: 1.35rem;
   }
@@ -13236,6 +13232,123 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 
   body.sunbird-client-portal .projects-view.portal-mobile-tab-dashboard .dashboard-cards-section {
     margin-top: 4px;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table-wrap,
+  body.sunbird-client-portal .sunbird-incidents-table-wrap,
+  body.sunbird-client-portal .sunbird-id-table-wrap,
+  body.sunbird-client-portal .sunbird-devices-table-wrap,
+  body.sunbird-client-portal .sunbird-email-table-wrap,
+  body.sunbird-client-portal .sunbird-security-table-wrap {
+    overflow-x: hidden;
+    max-height: none;
+    border-radius: 10px;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table,
+  body.sunbird-client-portal .sunbird-incidents-table,
+  body.sunbird-client-portal .sunbird-id-table,
+  body.sunbird-client-portal .sunbird-devices-table,
+  body.sunbird-client-portal .sunbird-email-table,
+  body.sunbird-client-portal .sunbird-security-table {
+    width: 100%;
+    min-width: 0;
+    display: block;
+    border-collapse: collapse;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table thead,
+  body.sunbird-client-portal .sunbird-incidents-table thead,
+  body.sunbird-client-portal .sunbird-id-table thead,
+  body.sunbird-client-portal .sunbird-devices-table thead,
+  body.sunbird-client-portal .sunbird-email-table thead,
+  body.sunbird-client-portal .sunbird-security-table thead {
+    display: none;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table tbody,
+  body.sunbird-client-portal .sunbird-incidents-table tbody,
+  body.sunbird-client-portal .sunbird-id-table tbody,
+  body.sunbird-client-portal .sunbird-devices-table tbody,
+  body.sunbird-client-portal .sunbird-email-table tbody,
+  body.sunbird-client-portal .sunbird-security-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table tr,
+  body.sunbird-client-portal .sunbird-incidents-table tr,
+  body.sunbird-client-portal .sunbird-id-table tr,
+  body.sunbird-client-portal .sunbird-devices-table tr,
+  body.sunbird-client-portal .sunbird-email-table tr,
+  body.sunbird-client-portal .sunbird-security-table tr {
+    display: grid;
+    gap: 6px;
+    padding: 12px 10px;
+    background: rgba(15, 23, 42, 0.52);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table td,
+  body.sunbird-client-portal .sunbird-incidents-table td,
+  body.sunbird-client-portal .sunbird-id-table td,
+  body.sunbird-client-portal .sunbird-devices-table td,
+  body.sunbird-client-portal .sunbird-email-table td,
+  body.sunbird-client-portal .sunbird-security-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    border-bottom: 0;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: #dfe9f4;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table td:first-child,
+  body.sunbird-client-portal .sunbird-incidents-table td:first-child,
+  body.sunbird-client-portal .sunbird-id-table td:first-child,
+  body.sunbird-client-portal .sunbird-devices-table td:first-child,
+  body.sunbird-client-portal .sunbird-email-table td:first-child,
+  body.sunbird-client-portal .sunbird-security-table td:first-child {
+    display: block;
+    color: #ffffff;
+    font-size: 0.83rem;
+    font-weight: 500;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table td::before,
+  body.sunbird-client-portal .sunbird-incidents-table td::before,
+  body.sunbird-client-portal .sunbird-id-table td::before,
+  body.sunbird-client-portal .sunbird-devices-table td::before,
+  body.sunbird-client-portal .sunbird-email-table td::before,
+  body.sunbird-client-portal .sunbird-security-table td::before {
+    content: attr(data-label);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table td:not(:first-child),
+  body.sunbird-client-portal .sunbird-incidents-table td:not(:first-child),
+  body.sunbird-client-portal .sunbird-id-table td:not(:first-child),
+  body.sunbird-client-portal .sunbird-devices-table td:not(:first-child),
+  body.sunbird-client-portal .sunbird-email-table td:not(:first-child),
+  body.sunbird-client-portal .sunbird-security-table td:not(:first-child) {
+    padding-top: 0;
+  }
+
+  body.sunbird-client-portal .sunbird-governance-table td:first-child::before,
+  body.sunbird-client-portal .sunbird-incidents-table td:first-child::before,
+  body.sunbird-client-portal .sunbird-id-table td:first-child::before,
+  body.sunbird-client-portal .sunbird-devices-table td:first-child::before,
+  body.sunbird-client-portal .sunbird-email-table td:first-child::before,
+  body.sunbird-client-portal .sunbird-security-table td:first-child::before {
+    content: none;
   }
 }
 
