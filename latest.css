@@ -287,7 +287,7 @@ body {
     0 0 20px rgba(51, 115, 255, 0.411),
     0 8px 40px rgba(0, 0, 0, 0.25);
 
-  border-radius: 18px;
+  border-radius: 50px;
 }
 
 
@@ -938,6 +938,7 @@ box-shadow:
     max-width: 100%;
     padding: 1rem clamp(0.5rem, 1vw, 1rem);
     box-sizing: border-box;
+    border-radius: 50px;
   }
 
   /* Main element - Full width */
@@ -2478,6 +2479,23 @@ box-shadow:
 
   .about-content {
     padding: 0 2vw;
+    display: contents;
+  }
+
+  .about-content h1 {
+    order: 1;
+  }
+
+  .about-image {
+    order: 2;
+  }
+
+  .about-content p {
+    order: 3;
+  }
+
+  .about-content .glow-wrap {
+    order: 4;
   }
 
   .about-content h1 {
@@ -7847,7 +7865,7 @@ footer a:hover {
     min-height: 58px !important;
     margin: 8px auto 0 !important;
     padding: 8px 12px !important;
-    border-radius: 18px !important;
+    border-radius: 50px !important;
     background: linear-gradient(135deg, rgba(255,255,255,.11), rgba(255,255,255,.035)) !important;
     border: 1px solid rgba(255,255,255,.16) !important;
     backdrop-filter: blur(22px) saturate(145%) !important;
@@ -7867,7 +7885,7 @@ footer a:hover {
     width: calc(100% - 16px) !important;
     min-height: 54px !important;
     padding: 7px 10px !important;
-    border-radius: 16px !important;
+    border-radius: 50px !important;
   }
 
   .navbar .logo img,
@@ -8840,7 +8858,7 @@ footer a:hover {
   padding: 0 !important;
 }
 
-.solutions-art-action > .glow-wrap {
+.solutions-art-action > .solutions-art-cta {
   position: relative !important;
   display: inline-block !important;
   width: 200px !important;
@@ -8852,30 +8870,22 @@ footer a:hover {
   border-radius: 25px !important;
   overflow: hidden !important;
   padding: 0 !important;
-  background: transparent !important;
-  box-shadow: 0 4px 15px rgba(0, 162, 255, 0.199) !important;
+  background: #000000 !important;
+  box-shadow: none !important;
   transition: transform 0.2s ease !important;
   isolation: isolate;
 }
 
-.solutions-art-action > .glow-wrap:hover {
-  transform: scale(1.05) !important;
-  animation: live-glow 1.5s infinite alternate !important;
+.solutions-art-action > .solutions-art-cta:hover {
+  transform: none !important;
+  animation: none !important;
 }
 
-.solutions-art-action > .glow-wrap > .glowing-border-layer {
-  display: block !important;
-  position: absolute !important;
-  top: -80px !important;
-  left: -80px !important;
-  width: 360px !important;
-  height: 210px !important;
-  z-index: 1 !important;
-  background: conic-gradient(#0068e0 0%, hsla(207, 100%, 50%, 0) 25%, #0084ff00 50%, #0077ff00 75%, #005ae0 100%) !important;
-  animation: spin 3s linear infinite !important;
+.solutions-art-action > .solutions-art-cta > .glowing-border-layer {
+  display: none !important;
 }
 
-.solutions-art-action > .glow-wrap > .link-content {
+.solutions-art-action > .solutions-art-cta > .link-content {
   position: absolute !important;
   top: 2px !important;
   left: 2px !important;
@@ -8886,9 +8896,9 @@ footer a:hover {
   align-items: center !important;
   text-decoration: none !important;
   border: 0 !important;
-  border-radius: 23px !important;
+  border-radius: 4px !important;
   background: #000000 !important;
-  color: #008cff !important;
+  color: #ffffff !important;
   font-size: 15px !important;
   font-weight: 200 !important;
   letter-spacing: 2px !important;
@@ -8903,30 +8913,30 @@ footer a:hover {
   text-transform: none !important;
 }
 
-.solutions-art-action > .glow-wrap > .link-content:hover {
+.solutions-art-action > .solutions-art-cta > .link-content:hover {
   color: #ffffff !important;
   transform: none !important;
 }
 
 @media (max-width: 768px) {
-  .solutions-art-action > .glow-wrap {
+  .solutions-art-action > .solutions-art-cta {
     width: 160px !important;
     height: 42px !important;
   }
 
-  .solutions-art-action > .glow-wrap > .link-content {
+  .solutions-art-action > .solutions-art-cta > .link-content {
     font-size: 13px !important;
     letter-spacing: 1.8px !important;
   }
 }
 
 @media (max-width: 480px) {
-  .solutions-art-action > .glow-wrap {
+  .solutions-art-action > .solutions-art-cta {
     width: 140px !important;
     height: 38px !important;
   }
 
-  .solutions-art-action > .glow-wrap > .link-content {
+  .solutions-art-action > .solutions-art-cta > .link-content {
     font-size: 12px !important;
     letter-spacing: 1.5px !important;
   }

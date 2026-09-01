@@ -53,6 +53,7 @@ header {
     align-items: center;
     z-index: 1000;
     transition: 0.5s;
+    border-radius: 50px;
     background: rgba(28, 28, 28, 0.5);
     backdrop-filter: blur(10px);
 }

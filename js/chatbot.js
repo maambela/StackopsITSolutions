@@ -582,6 +582,17 @@ class StackOpsChatbot {
                         max-width: calc(100vw - 50px);
                     }
                 }
+
+                /* The client portal phone layout reserves space for its fixed bottom navigation. */
+                @media (max-width: 600px) {
+                    .chatbot-widget {
+                        bottom: 92px;
+                    }
+
+                    .chat-corner {
+                        bottom: 156px;
+                    }
+                }
             </style>
 
             <div class="chatbot-widget" id="chatbot-widget">

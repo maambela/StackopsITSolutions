@@ -17,8 +17,11 @@
     .about-content, .about-image {
         flex: 100%;
         padding: 0;
-        display: block;
         margin-bottom: 30px;
+    }
+
+    .about-content {
+        display: contents;
     }
 }
 
