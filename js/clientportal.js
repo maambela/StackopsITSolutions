@@ -620,6 +620,10 @@ function goBackToProjects() {
 
 // Check if current user is a Sunbird client
 function isSunbirdUser() {
+    // StackOps demo tenant (user 36 / company 5) mirrors the Sunbird dashboard
+    // design but is fed entirely by local mock data (js/clientportal-stackops-mock.js).
+    // This clause only widens the "true" set — real Sunbird/Sedfa detection below is unchanged.
+    if (typeof isStackOpsMockUser === 'function' && isStackOpsMockUser()) return true;
     try {
         const rawUser = localStorage.getItem('user');
         if (!rawUser) return false;
@@ -691,9 +695,19 @@ function updateSunbirdLogoVisibility() {
     document.body?.classList.toggle('sunbird-client-portal', isSunbird);
     syncNonSunbirdBlurGatedPanels();
 
+    const isStackOpsMock = typeof isStackOpsMockUser === 'function' && isStackOpsMockUser();
+
     const logoImg = document.querySelector('.sunbird-logo-img');
     if (logoImg) {
-        if (isSunbird) {
+        if (isStackOpsMock) {
+            // StackOps demo tenant: use the StackOps logo (same asset as the Home page header)
+            if (!logoImg.dataset.stackopsLogoApplied) {
+                logoImg.src = 'Images/Logos/RemovedStackOps.png';
+                logoImg.alt = 'StackOps';
+                logoImg.dataset.stackopsLogoApplied = 'true';
+            }
+            logoImg.style.display = 'block';
+        } else if (isSunbird) {
             logoImg.style.display = 'block';
         } else {
             logoImg.style.display = 'none';
