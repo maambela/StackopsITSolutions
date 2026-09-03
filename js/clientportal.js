@@ -12495,6 +12495,30 @@ function hideProjectPreview() {
     }
 }
 
+// Small black "data source" chip (same look as the Cloudflare One badge on the
+// Network Security card). Microsoft Graph for Graph-backed cards, 1Password for
+// the Credential Security card.
+function renderMicrosoftGraphBadgeMarkup() {
+    return `<span class="sunbird-id-ms-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
+}
+
+function renderProjectCardProviderBadge(project) {
+    if (!project) return '';
+    if (Number(project.id) === 9) {
+        return `<div class="card-provider-badge card-provider-badge--onepassword" aria-label="1Password"><img src="Images/1password.webp" alt="" aria-hidden="true"></div>`;
+    }
+    if (project.microsoftGraphEnabled === true) {
+        return `<div class="card-provider-badge card-provider-badge--ms" aria-label="Microsoft Graph">${renderMicrosoftGraphBadgeMarkup()}</div>`;
+    }
+    return '';
+}
+
+// Microsoft Graph chip for the billing-card panels that are Graph-backed
+// (Security Alerts, Backup & Recovery, Applications).
+function renderSunbirdPanelProviderBadge() {
+    return `<div class="card-provider-badge card-provider-badge--ms card-provider-badge--panel" aria-label="Microsoft Graph">${renderMicrosoftGraphBadgeMarkup()}</div>`;
+}
+
 function createProjectCard(project) {
     const card = document.createElement('div');
     card.className = 'project-card' + (project.noDashboard ? ' no-interaction' : '');
@@ -12514,7 +12538,9 @@ function createProjectCard(project) {
            </div>`
         : '';
     const networkSecurityPanelHTML = project.id === 10 ? renderNetworkSecurityCardPanel(project) : '';
-    
+    const providerBadgeHTML = renderProjectCardProviderBadge(project);
+    if (providerBadgeHTML) card.classList.add('has-provider-badge');
+
     const isSummaryCard = isSummaryProjectCard(project);
     const metrics = isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []);
     const statusMeta = getSummaryCardStatusMeta(project);
@@ -12580,6 +12606,7 @@ function createProjectCard(project) {
             </div>
         </div>
         ${networkSecurityCtaHTML}
+        ${providerBadgeHTML}
     `;
 
     const networkSecurityCta = card.querySelector('[data-network-security-cta]');
@@ -15284,6 +15311,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                 
                 ${renderSunbirdFullDashboardButton('security')}
             </div>
+            ${renderSunbirdPanelProviderBadge()}
         `;
     } catch (error) {
         console.error('[Sunbird Security Alerts] Error:', error);
@@ -15353,6 +15381,7 @@ async function renderSunbirdBackupRecoveryView(forceRefresh = false) {
                 </div>
                 ${renderSunbirdFullDashboardButton('backup')}
             </div>
+            ${renderSunbirdPanelProviderBadge()}
         `;
     } catch (error) {
         console.error('[Sunbird Backup Recovery] Error:', error);
@@ -15455,6 +15484,7 @@ function renderSunbirdApplicationsBillingMarkup(model) {
 
             ${renderSunbirdFullDashboardButton('applications')}
         </div>
+        ${renderSunbirdPanelProviderBadge()}
     `;
 }
 

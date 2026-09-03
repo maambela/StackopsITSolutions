@@ -352,6 +352,23 @@
       }
     }
   </style>
+
+  <style id="left-hero-image-border">
+    /* Desktop only: mirror the right panel's white border on the left hero,
+       but only while an image (or video) slide is showing. Text-only slides
+       keep no border. */
+    @media (min-width: 769px) {
+      .left-section .cube .face:has(> img),
+      .left-section .cube .face:has(> video) {
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 15px;
+      }
+
+      .left-section .cube .face:not(:has(> img)):not(:has(> video)) {
+        border: 0;
+      }
+    }
+  </style>
 </head>
 
 <body>
