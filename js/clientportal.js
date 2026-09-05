@@ -12602,11 +12602,11 @@ function createProjectCard(project) {
         <div class="project-risks">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
             <div class="risk-indicator">
+                ${providerBadgeHTML}
                 <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
             </div>
         </div>
         ${networkSecurityCtaHTML}
-        ${providerBadgeHTML}
     `;
 
     const networkSecurityCta = card.querySelector('[data-network-security-cta]');

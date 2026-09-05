@@ -4088,54 +4088,68 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
    (Microsoft Graph, 1Password, ...).
    =========================================================================== */
 .card-provider-badge {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 26px;
-  padding: 4px;
+  flex: 0 0 auto;
+  width: 58px;
+  min-height: 50px;
+  padding: 7px;
   border: 1px solid rgba(0, 0, 0, 0.9);
-  border-radius: 7px;
+  border-radius: 8px;
   background: #000000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
   pointer-events: none;
 }
 
-/* Two classes so this out-ranks `.billing-card > *` (which forces position:relative). */
+/* Billing-card panel usage floats in the panel's bottom-right corner (no
+   risk-indicator to sit beside there), so it stays absolutely positioned at
+   its original, smaller size. Two classes so this out-ranks
+   `.billing-card > *` (which forces position:relative). */
 .card-provider-badge.card-provider-badge--panel {
   position: absolute;
   right: 14px;
   bottom: 12px;
   z-index: 6;
+  width: 34px;
+  min-height: 26px;
+  padding: 4px;
 }
 
 .card-provider-badge .sunbird-id-ms-logo {
   position: static;
   display: grid;
+  grid-template-columns: repeat(2, 12px);
+  grid-template-rows: repeat(2, 12px);
+  gap: 3px;
+}
+
+.card-provider-badge--panel .sunbird-id-ms-logo {
   grid-template-columns: repeat(2, 6px);
   grid-template-rows: repeat(2, 6px);
   gap: 2px;
 }
 
 .card-provider-badge .sunbird-id-ms-logo i {
+  width: 12px;
+  height: 12px;
+}
+
+.card-provider-badge--panel .sunbird-id-ms-logo i {
   width: 6px;
   height: 6px;
 }
 
 .card-provider-badge img {
-  width: 18px;
-  height: 18px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
   display: block;
 }
 
-/* Give the card footer room so the risk dot / footer text clear the badge. */
-.project-card.has-provider-badge .project-risks {
-  padding-right: 42px;
+.card-provider-badge--panel img {
+  width: 18px;
+  height: 18px;
 }
 
 .network-security-compact-panel {

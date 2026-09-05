@@ -360,12 +360,435 @@
     @media (min-width: 769px) {
       .left-section .cube .face:has(> img),
       .left-section .cube .face:has(> video) {
-        border: 1px solid rgba(255, 255, 255, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.3);
         border-radius: 15px;
       }
 
       .left-section .cube .face:not(:has(> img)):not(:has(> video)) {
         border: 0;
+      }
+    }
+
+    /* ======================================================================
+       PHONES + TABLETS (<=1024px): one clean 16:9 slide container.
+       The slide image fills it 100% (object-fit: cover), rounded corners and
+       a 1px white border, and every slide's CTA / text is pulled inside it.
+       This block deliberately out-ranks the older, scattered cube rules in
+       latest.css (it loads afterwards) using !important where needed.
+       ====================================================================== */
+    @media (max-width: 1024px) {
+
+      /* --- The container itself -------------------------------------------- */
+      .left-section {
+        width: 100% !important;
+        max-width: min(100%, 640px) !important;
+        margin: 0 auto !important;
+        padding-right: 0 !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+
+      .left-section .cube-container,
+      .left-section .content .cube-container {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        transform: none !important;
+        overflow: hidden !important;
+      }
+
+      .left-section .cube-container .cube,
+      .left-section .cube-container > .cube {
+        position: relative !important;
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        aspect-ratio: 16 / 9 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important; /* clip the off-screen (translateX 100%) slides */
+        transform: none !important;
+      }
+
+      /* --- Every slide (.face) is the rounded, bordered picture box ------- */
+      .left-section .cube-container .cube .face {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+        border-radius: clamp(14px, 4vw, 20px) !important;
+        border: 2px solid rgba(255, 255, 255, 0.3) !important;
+        background: #000 !important;
+      }
+
+      /* text-only slide keeps no border */
+      .left-section .cube-container .cube .face:not(:has(> img)):not(:has(> video)) {
+        border: 0 !important;
+        background: transparent !important;
+      }
+
+      /* --- Image fills the box completely -------------------------------- */
+      .left-section .cube-container .cube .face > img,
+      .left-section .cube-container .cube .face > video {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        object-fit: cover !important;
+        object-position: center !important;
+        border-radius: inherit !important;
+        -webkit-mask-image: none !important;
+        mask-image: none !important;
+        border: 0 !important;
+        margin: 0 !important;
+      }
+
+      /* Legibility for HTML text overlays sitting on top of the cover image */
+      .left-section .cube-container .cube .face .text-overlay,
+      .left-section .cube-container .cube .face .text-overlay5,
+      .left-section .cube-container .cube .face .text-overlay-sap {
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8) !important;
+      }
+
+      /* ================= PER-SLIDE CTA / TEXT ==========================
+         Selectors carry `.cube-container` so they out-rank latest.css's most
+         specific cube rules (e.g. `.left-section .cube-container .cube .face
+         .text-overlay5`). Every CTA is forced visible and un-collapsed from
+         the desktop "button fills a fixed-size glow-wrap" pattern. */
+
+      /* Shared: every slide CTA is a normal small pill, on top of the image */
+      .left-section .cube-container .cube .face .glow-wrap,
+      .left-section .cube-container .cube .face .glow-wrap-shop,
+      .left-section .cube-container .cube .face .glow-wrap-stackcon,
+      .left-section .cube-container .cube .face .glow-wrap-consultation,
+      .left-section .cube-container .cube .face .glow-wrap-sap,
+      .left-section .cube-container .cube .face .glow-wrap-audit,
+      .left-section .cube-container .cube .face .text-overlay5 .glow-wrap-face3 {
+        position: absolute !important;
+        display: inline-flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        width: fit-content !important;
+        min-width: 0 !important;
+        max-width: 82% !important;
+        height: auto !important;
+        right: auto !important;
+        transform: none !important;
+        overflow: hidden !important; /* clip the oversized spinning glow layer to the pill */
+        border-radius: 999px !important;
+        z-index: 12 !important;
+      }
+      .left-section .cube-container .cube .face .link-content,
+      .left-section .cube-container .cube .face .shop-now-btn,
+      .left-section .cube-container .cube .face .link-content-stackcon,
+      .left-section .cube-container .cube .face .link-content-consultation,
+      .left-section .cube-container .cube .face .link-content-sap,
+      .left-section .cube-container .cube .face .link-content-audit,
+      .left-section .cube-container .cube .face .text-overlay5 .link-content-face3 {
+        position: relative !important;
+        inset: auto !important;
+        top: auto !important;
+        left: auto !important;
+        right: auto !important;
+        width: auto !important;
+        height: auto !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        white-space: nowrap !important;
+        font-size: 0.66rem !important;
+        letter-spacing: 0.5px !important;
+        padding: 0.4rem 0.85rem !important;
+        border-radius: 999px !important;
+      }
+
+      /* Slide 3 - TV1.png "Tech doesn't have to feel like a different language":
+         the Services button, small, centred both horizontally and vertically.
+         Design matches the "Learn more" button in the About section exactly
+         (black pill, blue text, same soft glow) - just scaled down to fit. */
+      .left-section .cube-container .cube .face .glow-wrap {
+        left: 50% !important;
+        top: 50% !important;
+        bottom: auto !important;
+        right: auto !important;
+        transform: translate(-50%, -50%) !important;
+      }
+      .left-section .cube-container .cube .face .glow-wrap .link-content {
+        color: #008cff !important;
+        letter-spacing: 0.5px !important;
+        font-size: 0.58rem !important;
+        padding: 0.28rem 0.6rem !important;
+      }
+      .left-section .cube-container .cube .face .glow-wrap .link-content:hover {
+        color: #ffffff !important;
+      }
+
+      /* Slide 5 - .face.bottom "Tech Gadgets Center": heading + button share
+         one left edge; button sits below the heading; smaller; no underline. */
+      .left-section .cube-container .cube .face.bottom .text-overlay {
+        position: absolute !important;
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        right: auto !important;
+        top: 9% !important;
+        transform: none !important;
+        width: auto !important;
+        max-width: 64% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        text-align: left !important;
+      }
+      .left-section .cube-container .cube .face.bottom .text-overlay h3 {
+        position: static !important;
+        inset: auto !important;
+        left: auto !important;
+        top: auto !important;
+        text-align: left !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        transform: none !important;
+        font-size: clamp(1rem, 5vw, 1.5rem) !important;
+        line-height: 1.12 !important;
+      }
+      .left-section .cube-container .cube .face.bottom .glow-wrap-shop {
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        top: auto !important;
+        bottom: 9% !important;
+      }
+      .left-section .cube-container .cube .face.bottom .glow-wrap-shop .shop-now-btn {
+        gap: 0.4rem !important;
+        text-decoration: none !important;
+        background: #000 !important;
+      }
+      .left-section .cube-container .cube .face.bottom .glow-wrap-shop .shop-now-btn span {
+        text-decoration: none !important;
+        border-bottom: 0 !important;
+        letter-spacing: 0.5px !important;
+      }
+      .left-section .cube-container .cube .face.bottom .glow-wrap-shop .shop-now-btn .arrow-circle {
+        width: 1.15rem !important;
+        height: 1.15rem !important;
+        flex: 0 0 1.15rem !important;
+      }
+      .left-section .cube-container .cube .face.bottom .glow-wrap-shop .shop-now-btn .arrow {
+        font-size: 0.8rem !important;
+        margin-top: -0.15rem !important;
+      }
+
+      /* Slide 4 - .text-overlay5 "WHY CLIENTS TRUST US": mirrors the desktop
+         layout - the block sits on the RIGHT side, clear of the ribbon
+         graphic on the left. h2 stays on one line; h1 wraps short (one/two
+         words per line, like desktop); button sits below, same left edge. */
+      .left-section .cube-container .cube .face .text-overlay5 {
+        position: absolute !important;
+        left: auto !important;
+        right: clamp(0.4rem, 2vw, 0.7rem) !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: clamp(0.3rem, 1.4vw, 0.55rem) !important;
+        /* Fixed % of the face (not max-content) so the block's left edge is
+           always safely past the 50%-wide graphic on the left, at every
+           screen size, instead of depending on how wide the text wants to be. */
+        width: 46% !important;
+        max-width: 46% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        text-align: left !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay5 > * {
+        position: static !important;
+        inset: auto !important;
+        left: auto !important;
+        top: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        transform: none !important;
+        align-self: flex-start !important;
+        margin: 0 !important;
+        padding-left: 0 !important;
+        text-indent: 0 !important;
+        text-align: left !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay5 h2 {
+        font-size: clamp(0.28rem, 1.35vw, 0.4rem) !important;
+        line-height: 1.2 !important;
+        letter-spacing: 0 !important;
+        margin: 0 !important;
+        /* Small enough + no letter-spacing so it always stays one line. */
+        white-space: nowrap !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: visible !important;
+        opacity: 0.85 !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay5 h1 {
+        font-size: clamp(1rem, 5vw, 1.55rem) !important;
+        line-height: 1.15 !important;
+        margin: 0 !important;
+        margin-top: clamp(0.5rem, 2.6vw, 0.9rem) !important;
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay5 .glow-wrap-face3 {
+        position: relative !important;
+        left: auto !important;
+        top: auto !important;
+        bottom: auto !important;
+        transform: none !important;
+        margin-top: clamp(0.9rem, 4.2vw, 1.4rem) !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay5 .link-content-face3 {
+        color: #9900ff !important;
+        background: #000 !important;
+        font-size: 0.52rem !important;
+        padding: 0.28rem 0.6rem !important;
+      }
+
+      /* Slide 7 - STACKCON: small button tucked into the bottom-right corner,
+         inside the white footer strip below the color panel (the panel spans
+         the full width above it, so the button must stay low + to the right
+         to avoid touching the graphic or the wordmark). */
+      .left-section .cube-container .cube .face .glow-wrap-stackcon {
+        left: auto !important;
+        right: clamp(0.6rem, 4vw, 1rem) !important;
+        top: auto !important;
+        bottom: 1% !important;
+      }
+      .left-section .cube-container .cube .face .link-content-stackcon {
+        background: #000 !important;
+        color: #fff !important;
+        font-size: 0.4rem !important;
+        padding: 0.16rem 0.4rem !important;
+      }
+
+      /* Slide 8 - "Get a free 1 hour consultation": smaller, and lowered
+         clear of the baked-in "WE ARE ATTENTIVE..." caption text above it. */
+      .left-section .cube-container .cube .face .glow-wrap-consultation {
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        top: auto !important;
+        bottom: 3% !important;
+      }
+      .left-section .cube-container .cube .face .link-content-consultation {
+        font-size: 0.42rem !important;
+        padding: 0.2rem 0.45rem !important;
+      }
+
+      /* Slide 9 - "SAP Business one": caption pinned bottom-left, button
+         pinned bottom-right, sharing the same bottom value so they line up
+         on the same y, clear of the baked-in "SAP Business One" logo. */
+      .left-section .cube-container .cube .face .text-overlay-sap {
+        position: absolute !important;
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        right: auto !important;
+        top: auto !important;
+        bottom: 2% !important;
+        transform: none !important;
+        width: auto !important;
+        max-width: 58% !important;
+        text-align: left !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay-sap p {
+        font-size: clamp(0.46rem, 1.9vw, 0.6rem) !important;
+        line-height: 1.15 !important;
+        margin: 0 !important;
+        text-align: left !important;
+        /* Hard cap at 2 lines no matter how the width forces a wrap, so it
+           can never grow tall enough to climb back up into the baked-in
+           "SAP Business One" logo sitting just above this corner. */
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+      }
+      .left-section .cube-container .cube .face .glow-wrap-sap {
+        left: auto !important;
+        right: clamp(0.9rem, 5vw, 1.4rem) !important;
+        top: auto !important;
+        bottom: 2% !important;
+      }
+      .left-section .cube-container .cube .face .link-content-sap {
+        font-size: 0.5rem !important;
+        padding: 0.24rem 0.55rem !important;
+      }
+
+      /* Slide 10 - IT Audit "Secure, Compliant, Confident.": the shared pill
+         rule above forces position:absolute on every glow-wrap, which pulls
+         this one out of the text-overlay-audit flow. With no top/bottom set
+         it falls back to its flow "static position" - right after the
+         paragraph - but the ancestor's own height no longer accounts for it,
+         so it renders past the bottom edge of the card. Put it back in
+         normal flow so it sits directly under the paragraph, inside. */
+      .left-section .cube-container .cube .face .glow-wrap-audit {
+        position: relative !important;
+        top: auto !important;
+        left: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        margin-top: 0.05rem !important;
+      }
+      /* Trim the gaps latest.css puts after the heading/paragraph so the
+         3-line heading + paragraph + button actually fit inside the card's
+         height on the smallest phones instead of pushing the button out. */
+      .left-section .cube-container .cube .face .text-overlay-audit h1 {
+        margin-bottom: 0.08rem !important;
+      }
+      .left-section .cube-container .cube .face .text-overlay-audit p {
+        margin-bottom: 0.08rem !important;
+      }
+
+      /* Slide 6 - "Warranty Support": ASK US button lowered clear of the
+         baked-in paragraph text, and smaller. Pin the ancestor
+         (.text-overlay-warranty) to a fixed bottom position too -
+         latest.css flips it to top:~40% only between 769-1024px,
+         which otherwise pushes the button up into the heading art. */
+      .left-section .cube-container .cube .face .text-overlay-warranty {
+        position: absolute !important;
+        top: auto !important;
+        bottom: 6% !important;
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        right: auto !important;
+        width: auto !important;
+        max-width: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .left-section .cube-container .cube .face .glow-wrap-warranty {
+        position: relative !important;
+        overflow: hidden !important;
+        transform: none !important;
+        width: clamp(52px, 14vw, 60px) !important;
+        height: clamp(20px, 5.5vw, 22px) !important;
+        margin: 0 !important;
+      }
+      .left-section .cube-container .cube .face .warranty-buy-btn {
+        font-size: 0.48rem !important;
+        padding: 0 !important;
+        letter-spacing: 0.4px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
       }
     }
   </style>

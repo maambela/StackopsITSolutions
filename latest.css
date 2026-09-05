@@ -1901,8 +1901,8 @@ box-shadow:
   }
   
   .menu-icon {
-    width: clamp(22px, 9vw, 32px);
-    height: clamp(22px, 9vw, 32px);
+    width: clamp(19px, 7vw, 27px);
+    height: clamp(19px, 7vw, 27px);
   }
 
   .logo-container {
@@ -8974,4 +8974,17 @@ footer a:hover {
 
 .solutions-story-card a.solutions-story-meta:hover span {
   color: #008cff;
+}
+/* Keep the warranty call-to-action fully contained inside its glow wrapper. */
+.text-overlay-warranty .warranty-buy-btn {
+    position: absolute !important;
+    inset: 2px !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
 }
