@@ -1512,7 +1512,28 @@
             max-width: 480px;
         }
 
-        .btn-link { 
+        /* Phones: stack the capability cards one per row and let each fill
+           the full container width, instead of squeezing 2-up into a fixed
+           1.7:1 box that crops the image and crams the copy. */
+        @media (max-width: 620px) {
+            .promo-container {
+                grid-template-columns: 1fr;
+                gap: 0.9rem;
+            }
+
+            .promo-box {
+                width: 100%;
+                aspect-ratio: auto;
+                min-height: 200px;
+                padding: 22px;
+            }
+
+            .promo-text p {
+                max-width: none;
+            }
+        }
+
+        .btn-link {
             color: #ffffff; 
             text-decoration: none; 
             font-weight: 200 !important; 
@@ -2061,8 +2082,8 @@
             <div class="container">
                 <div class="stats-grid">
                     <div class="stat-box">
-                        <div class="stat-number">10+</div>
-                        <div class="stat-label">*?</div>
+                        <div class="stat-number">1M+</div>
+                        <div class="stat-label">Security Events Monitored</div>
                     </div>
 
                     <div class="stat-box">
