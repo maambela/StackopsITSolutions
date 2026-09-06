@@ -13121,6 +13121,8 @@ async function initializeBillingCard() {
         const totalAmount = parseFloat(invoice.TotalAmount || 0);
         const items = invoice.items || [];
         const status = invoice.Status || 'Pending';
+        const maskMockBillingValues = typeof window.isStackOpsMockUser === 'function' && window.isStackOpsMockUser();
+        const maskedBillingValue = '####';
         
         // Format due date
         const dueDate = invoice.DueDate ? new Date(invoice.DueDate) : null;
@@ -13141,7 +13143,7 @@ async function initializeBillingCard() {
             return `
                 <div class="billing-item">
                     <span class="billing-item-name">${serviceCategory}</span>
-                    <span class="billing-item-cost">${currency}${parseFloat(itemTotal).toLocaleString()}</span>
+                    <span class="billing-item-cost">${maskMockBillingValues ? maskedBillingValue : `${currency}${parseFloat(itemTotal).toLocaleString()}`}</span>
                 </div>
             `;
         }).join('');
@@ -13153,16 +13155,16 @@ async function initializeBillingCard() {
                 <h3>Billing Statement</h3>
             </div>
             <div class="billing-amount">
-                <span class="billing-currency">${currency}</span>${totalAmount.toLocaleString()}
+                ${maskMockBillingValues ? maskedBillingValue : `<span class="billing-currency">${currency}</span>${totalAmount.toLocaleString()}`}
             </div>
             <div class="billing-summary">
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Monthly Subscription</span>
-                    <span class="billing-summary-value">${currency}${totalAmount.toLocaleString()}</span>
+                    <span class="billing-summary-value">${maskMockBillingValues ? maskedBillingValue : `${currency}${totalAmount.toLocaleString()}`}</span>
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Total Services</span>
-                    <span class="billing-summary-value">${items.length}</span>
+                    <span class="billing-summary-value">${maskMockBillingValues ? maskedBillingValue : items.length}</span>
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Payment Status</span>
@@ -13170,7 +13172,7 @@ async function initializeBillingCard() {
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Due Date</span>
-                    <span class="billing-summary-value" style="color: var(--primary);">${dueDateString}</span>
+                    <span class="billing-summary-value" style="color: var(--primary);">${maskMockBillingValues ? maskedBillingValue : dueDateString}</span>
                 </div>
             </div>
             <div class="billing-items">
