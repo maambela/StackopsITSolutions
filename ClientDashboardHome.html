@@ -18,10 +18,10 @@
         }
 
         body {
-            background: linear-gradient(rgba(0, 0, 0, 0.219), rgb(0, 0, 0)),
-                url('Images/Website.png') no-repeat center center;
-            background-size: cover;
-            background-attachment: fixed;
+            margin: 0;
+            overflow-x: hidden;
+            background: #090b0d;
+            position: relative;
         }
 
         .background {
@@ -30,22 +30,36 @@
 
         /* ===== MAIN CONTENT ===== */
         main {
-            margin-top: 2rem;
+            margin-top: 0;
+            width: 100%;
+            position: relative;
+            z-index: 1;
         }
 
         /* ===== HERO SECTION ===== */
         .hero-section {
             max-width: 1200px;
-            margin: 0 auto;
-            padding: clamp(2rem, 5vw, 4rem) clamp(1.5rem, 3vw, 3rem);
+            margin: clamp(3rem, 6vw, 5rem) auto clamp(1.5rem, 3vw, 3rem);
+            padding: clamp(2rem, 3.5vw, 3rem) clamp(1.5rem, 3vw, 3rem) clamp(2rem, 3.5vw, 3rem);
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: clamp(1.5rem, 3vw, 3rem);
             align-items: center;
         }
 
+        @media (min-width: 1025px) {
+            .hero-section {
+                position: relative;
+                left: clamp(-8rem, -8vw, -4rem);
+            }
+        }
+
+        .hero-section > div:first-child {
+            padding-top: clamp(1.8rem, 3vw, 2.8rem);
+        }
+
         .hero-section h1 {
-            font-size: clamp(1.1rem, 4vw, 2.0rem);
+            font-size: clamp(3.6rem, 4vw, 2.0rem);
             line-height: 1.3;
             margin-bottom: clamp(1rem, 2vw, 1.5rem);
             color: white;
@@ -102,6 +116,72 @@
             gap: clamp(0.5rem, 1vw, 1rem);
             flex-wrap: wrap;
             margin-top: clamp(1rem, 2vw, 2rem);
+        }
+
+        .glow-wrap {
+            position: relative;
+            width: fit-content;
+            height: auto;
+            border-radius: 40px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(255, 120, 2, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glow-wrap:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(255, 120, 2, 0.6), 0 8px 20px rgba(255, 120, 2, 0.3);
+        }
+
+        .glowing-border-layer {
+            position: absolute;
+            top: -60px;
+            left: -60px;
+            width: 280px;
+            height: 180px;
+            z-index: 1;
+            background: conic-gradient(#ff7802 0%, hsla(29, 100%, 50%, 0) 25%, #ff880000 50%, #ff730000 75%, #ff7802 100%);
+            animation: spin 3s linear infinite;
+        }
+
+        .link-content {
+            position: relative;
+            z-index: 10;
+            font-weight: 200;
+            font-size: clamp(0.7rem, 0.95vw, 0.85rem);
+            padding: clamp(0.4rem, 0.8vw, 0.6rem) clamp(1rem, 1.8vw, 1.5rem);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            color: white;
+            background: black;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            margin: 2px;
+        }
+
+        .link-content:hover {
+            color: #ff7802;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hero-image img {
+            width: 100%;
+            max-height: 520px;
+            object-fit: contain;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(255, 136, 51, 0.411);
+            border: 1px solid rgba(255, 255, 255, 0);
         }
 
         /* ===== GLOWING BUTTON STYLES ===== */
@@ -187,10 +267,27 @@
             }
         }
 
-        .hero-image img {
-            width: 100%;
+        .hero-image {
+            align-self: start;
+            min-width: 0;
+            /* Top-aligned with the "Welcome" heading (matches the left column's
+               padding-top). Bleeds up to ~309px past the grid cell but always
+               keeps ~60px clear of the viewport edge; natural aspect ratio keeps
+               its bottom near the credential-box span. */
+            margin-top: clamp(1.8rem, 3vw, 2.8rem);
+            width: calc(100% + max(0px, min(309px, 50vw - 612px)));
+            overflow: hidden;
             border-radius: 15px;
             box-shadow: 0 0 20px rgba(255, 136, 51, 0.411);
+        }
+
+        .hero-image img {
+            width: 100%;
+            height: auto;
+            max-height: none;
+            object-fit: contain;
+            display: block;
+            border-radius: inherit;
             border: 1px solid rgba(255, 255, 255, 0);
         }
 
@@ -268,58 +365,217 @@
 
         /* ===== PROJECTS SHOWCASE ===== */
         .projects-showcase {
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
-            backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 15px;
+            position: relative;
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.018)),
+                rgba(10, 12, 15, 0.36);
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 32px;
             padding: clamp(1.5rem, 3vw, 2.5rem);
             margin-top: clamp(2rem, 4vw, 3rem);
             margin-bottom: clamp(2rem, 4vw, 3rem);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+            box-shadow:
+                0 24px 60px rgba(0,0,0,0.3),
+                inset 0 1px 1px rgba(255,255,255,0.18),
+                inset 0 -1px 1px rgba(255,255,255,0.06);
+            overflow: hidden;
+            backdrop-filter: blur(18px) saturate(130%);
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+        }
+
+        .projects-showcase::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 18% 18%, rgba(255, 118, 44, 0.15), transparent 26%),
+                radial-gradient(circle at 82% 68%, rgba(255, 132, 76, 0.10), transparent 28%),
+                linear-gradient(135deg, rgba(255,255,255,0.02), transparent 45%, rgba(255,120,2,0.05));
+            pointer-events: none;
         }
 
         .projects-grid {
+            position: relative;
+            z-index: 1;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: clamp(1rem, 2vw, 1.5rem);
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: clamp(1rem, 2vw, 1.3rem);
             margin-top: clamp(1.5rem, 3vw, 2rem);
         }
 
+        /* carousel count indicator — only shown in the mobile carousel */
+        .projects-progress {
+            display: none;
+        }
+
         .project-item {
-            background: rgba(255, 255, 255, 0.06);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            padding: clamp(1rem, 2vw, 1.5rem);
-            text-align: center;
-            transition: all 0.35s ease;
+            position: relative;
+            background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(7,10,12,0.48));
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 22px;
+            overflow: hidden;
+            transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease, background 0.35s ease;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.16), 0 16px 28px rgba(0,0,0,0.2);
+            backdrop-filter: blur(16px) saturate(135%);
+            -webkit-backdrop-filter: blur(16px) saturate(135%);
+        }
+
+        .project-item::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0) 32%, transparent 100%);
+            pointer-events: none;
+            z-index: 1;
         }
 
         .project-item:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 0 15px rgba(255, 120, 2, 0.3);
-            border-color: rgba(255, 120, 2, 0.4);
+            transform: translateY(-7px);
+            border-color: rgba(255, 154, 86, 0.9);
+            box-shadow: 0 22px 48px rgba(255, 120, 2, 0.12), inset 0 1px 1px rgba(255,255,255,0.2);
+            background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(10,13,16,0.52));
+        }
+
+        .project-media {
+            position: relative;
+            height: 150px;
+            overflow: hidden;
+            background: radial-gradient(circle at 30% 20%, rgba(94, 223, 255, 0.18), transparent 24%), linear-gradient(135deg, #081015 0%, #121b1f 48%, #0b0d12 100%);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .project-media img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: saturate(0.82) contrast(1.08) brightness(0.9);
+            transition: transform 0.45s ease, filter 0.3s ease;
+        }
+
+        .project-item:hover .project-media img {
+            transform: scale(1.08);
+            filter: saturate(1) contrast(1.1) brightness(1);
+        }
+
+        .project-media::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.6));
+        }
+
+
+        .project-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 2;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.38rem;
+            padding: 0.34rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(12, 15, 18, 0.62);
+            border: 1px solid rgba(255,255,255,0.14);
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.18), 0 8px 18px rgba(0,0,0,0.25);
+            color: rgba(255,255,255,0.92);
+            font-size: 0.54rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        .project-badge::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ff993d;
+            box-shadow: 0 0 10px rgba(255, 153, 61, 0.9);
+        }
+
+        .project-body {
+            position: relative;
+            z-index: 2;
+            padding: 1rem 1rem 1.1rem;
+        }
+
+        .project-head {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            margin-bottom: 0.75rem;
         }
 
         .project-icon {
-            font-size: clamp(1.5rem, 2.5vw, 2rem);
-            color: white;
-            margin-bottom: clamp(0.5rem, 1vw, 0.8rem);
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.14);
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.16);
+            color: #fff;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .project-icon img {
+            width: 22px;
+            height: auto;
+            display: block;
+            filter: brightness(1.2);
         }
 
         .project-item h4 {
-            font-size: clamp(0.8rem, 1.3vw, 0.95rem);
-            margin-bottom: 0.3rem;
-            color: white;
+            margin: 0;
+            color: rgba(255,255,255,0.96);
+            font-size: clamp(0.92rem, 1.35vw, 1.08rem);
+            line-height: 1.35;
             font-weight: 200;
         }
 
         .project-item p {
-            font-size: clamp(0.7rem, 1vw, 0.8rem);
-            color: rgba(255, 255, 255, 0.7);
             margin: 0;
+            color: rgba(255,255,255,0.72);
+            font-size: clamp(0.72rem, 0.95vw, 0.82rem);
+            line-height: 1.52;
             font-weight: 100;
         }
+
+        .project-automation {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-top: 0.9rem;
+            padding-top: 0.7rem;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .automation-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.38rem;
+            color: rgba(255,255,255,0.72);
+            font-size: 0.54rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .automation-label::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #74f1b7;
+            box-shadow: 0 0 10px rgba(116, 241, 183, 0.9);
+        }
+
 
         /* ===== DASHBOARD PREVIEW ===== */
         .preview-video {
@@ -535,16 +791,34 @@
         }
 
         /* ===== HEADER OVERRIDES - LIQUID GLASS DESIGN ===== */
+        /* This selector deliberately outranks the shared header styles: the banner must begin at page coordinate 0. */
+        body > .site-header,
         .site-header {
+            position: relative !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: calc(100% - 20px) !important;
+            margin: 0 auto !important;
+            margin-top: 10px !important;
+            margin-bottom: -140px !important;
+            transform: none !important;
+            z-index: 20;
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
             backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
             -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.15) !important;
             border: 1px solid rgba(255, 255, 255, 0) !important;
             box-shadow: 0 12px 40px rgba(255, 115, 0, 0.158), inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 0 20px rgba(255, 120, 2, 0.2) !important;
-            border-radius: 25px;
-            margin: 5px auto;
+            border-radius: 50px !important;
             align-items: center;
-            width: 98.5%;
+        }
+
+        body > main {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
+
+        body > main > .page-hero-banner {
+            margin-top: 0 !important;
         }
 
         /* Override all nav-links blue styling */
@@ -609,6 +883,7 @@
         footer {
             margin-top: clamp(3rem, 6vw, 4rem);
         }
+
 
         /* ===== SCROLL ANIMATIONS ===== */
         .fade-in-left {
@@ -704,9 +979,86 @@
         .benefit-item:nth-child(4) { animation-delay: 0.35s; }
 
 
+        @media (max-width: 1200px) {
+            .hero-overlay-copy {
+                width: min(54%, 640px);
+                margin-left: clamp(1.5rem, 4vw, 4rem);
+            }
+        }
+
         @media (max-width: 1024px) {
+            .hero-overlay-section {
+                padding-left: clamp(1.25rem, 3vw, 2rem);
+                padding-right: clamp(1.25rem, 3vw, 2rem);
+            }
+
+            .hero-overlay-copy {
+                width: min(62%, 620px);
+                margin-left: clamp(1rem, 2vw, 2rem);
+            }
+
+            /* ===== STACKED HERO (tablet + phone) ===== */
             .hero-section {
                 grid-template-columns: 1fr;
+                gap: clamp(1.5rem, 4vw, 2.25rem);
+                padding: clamp(6.75rem, 18vw, 7.5rem) clamp(1.25rem, 4vw, 2.5rem) clamp(2.25rem, 5vw, 3rem);
+                text-align: left;
+            }
+
+            /* Reset the desktop heading offset; spacing is driven by the section now. */
+            .hero-section > div:first-child {
+                padding-top: 0;
+                max-width: 620px;
+            }
+
+            .hero-section h1 {
+                font-size: clamp(1.55rem, 7.2vw, 2.6rem);
+                line-height: 1.12;
+                letter-spacing: -0.01em;
+                margin-bottom: clamp(0.7rem, 2.4vw, 1rem);
+                text-wrap: balance;
+            }
+
+            .hero-section p {
+                font-size: clamp(0.9rem, 2.5vw, 1rem);
+                line-height: 1.6;
+                margin-bottom: clamp(1.25rem, 4vw, 1.75rem);
+                max-width: 60ch;
+            }
+
+            .credential-box {
+                gap: 0.85rem;
+                padding: clamp(0.9rem, 3vw, 1.15rem);
+                margin-bottom: clamp(0.8rem, 2.5vw, 1rem);
+                border-radius: 14px;
+            }
+
+            .credential-icon {
+                font-size: clamp(1rem, 3.4vw, 1.3rem);
+            }
+
+            .credential-text h4 {
+                font-size: clamp(0.78rem, 2.6vw, 0.9rem);
+                line-height: 1.35;
+                margin-bottom: 0.25rem;
+            }
+
+            .credential-text p {
+                font-size: clamp(0.74rem, 2.4vw, 0.84rem);
+                line-height: 1.5;
+                margin-bottom: 0;
+            }
+
+            .hero-buttons {
+                margin-top: clamp(1.1rem, 3.5vw, 1.6rem);
+                gap: 0.75rem;
+            }
+
+            /* Stacked layout: image sits below the copy, so drop the
+               heading-alignment offset and the desktop bleed. */
+            .hero-image {
+                margin-top: clamp(0.5rem, 2vw, 1rem);
+                width: 100%;
             }
 
             .benefits-grid {
@@ -714,9 +1066,99 @@
             }
         }
 
+        @media (max-width: 768px) {
+            .page-hero-banner {
+                min-height: 520px;
+                height: auto;
+            }
+
+            .hero-overlay-section {
+                align-items: center;
+                padding-top: 5.5rem;
+                padding-bottom: 2rem;
+            }
+
+            .hero-overlay-copy {
+                width: min(100%, 560px);
+                margin-left: 0;
+            }
+
+            .hero-overlay-copy h1 {
+                font-size: clamp(2.2rem, 8vw, 4rem);
+                line-height: 0.95;
+            }
+
+            .hero-overlay-copy p {
+                font-size: clamp(0.78rem, 2.8vw, 1rem);
+            }
+
+            .hero-overlay-box {
+                padding: 0.72rem 0.8rem;
+            }
+
+            .hero-overlay-actions {
+                gap: 0.7rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .page-hero-banner {
+                min-height: 440px;
+            }
+
+            .hero-overlay-section {
+                padding-top: 4.5rem;
+            }
+
+            .hero-overlay-copy .live-status-tag {
+                font-size: 0.56rem;
+                padding: 0.42rem 0.7rem 0.46rem 0.6rem;
+            }
+
+            .hero-overlay-copy h1 {
+                font-size: clamp(2rem, 11vw, 2.8rem);
+                letter-spacing: -0.045em;
+            }
+
+            .hero-overlay-copy p {
+                font-size: 0.72rem;
+                line-height: 1.45;
+            }
+
+            .hero-overlay-boxes {
+                gap: 0.55rem;
+            }
+
+            .hero-overlay-box {
+                gap: 0.6rem;
+                padding: 0.62rem 0.7rem;
+            }
+
+            .hero-overlay-box .credential-icon {
+                width: 26px;
+                height: 26px;
+                flex-basis: 26px;
+                font-size: 0.7rem;
+            }
+
+            .hero-overlay-box h4 {
+                font-size: 0.7rem;
+            }
+
+            .hero-overlay-box p {
+                font-size: 0.62rem;
+            }
+
+            .hero-overlay-actions a {
+                min-height: 34px;
+                padding: 0.65rem 0.9rem;
+                font-size: 0.66rem;
+            }
+        }
+
         @media (min-width: 1025px) and (max-width: 1600px) {
             main {
-                margin-top: 1rem;
+                margin-top: 0;
             }
 
             .site-header {
@@ -802,13 +1244,26 @@
             }
 
             .hero-image {
-                align-self: center;
+                align-self: start;
+                min-height: 0;
+                min-width: 0;
+                /* Top-aligned with the heading; natural aspect ratio, kept
+                   within the grid cell at this size. */
+                width: 100%;
+                overflow: hidden;
+                border-radius: 15px;
+                box-shadow: 0 0 20px rgba(255, 136, 51, 0.411);
             }
 
             .hero-image img {
-                max-width: 500px;
-                margin: 0 auto;
+                width: 100%;
+                height: auto;
+                max-width: none;
+                max-height: none;
+                margin: 0;
                 display: block;
+                object-fit: contain;
+                border-radius: inherit;
             }
 
             section {
@@ -822,8 +1277,80 @@
 
         @media (max-width: 768px) {
 
+            /* ===== "Everything you need in one platform" → centered auto carousel ===== */
+            .projects-showcase {
+                --pc-card: 78vw;
+                padding-left: 0;
+                padding-right: 0;
+                border-left: 0;
+                border-right: 0;
+                border-radius: 0;
+            }
+
+            .projects-showcase > .container {
+                max-width: none;
+                padding-left: 0;
+                padding-right: 0;
+            }
+
+            .projects-showcase .section-title {
+                padding: 0 clamp(1.1rem, 5vw, 1.6rem);
+            }
+
             .projects-grid {
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                display: flex;
+                flex-wrap: nowrap;
+                gap: clamp(0.8rem, 3.5vw, 1.1rem);
+                margin-top: clamp(1.4rem, 5vw, 1.8rem);
+                padding: 0.75rem 0 1rem;
+                overflow-x: auto;
+                overflow-y: visible;
+                overscroll-behavior-x: contain;
+                -webkit-overflow-scrolling: touch;
+                scroll-snap-type: x mandatory;
+                scroll-behavior: smooth;
+                scrollbar-width: none;
+            }
+
+            .projects-grid::-webkit-scrollbar {
+                display: none;
+            }
+
+            /* leading / trailing spacers so the first and last card can sit dead centre */
+            .projects-grid::before,
+            .projects-grid::after {
+                content: "";
+                flex: 0 0 calc((100vw - var(--pc-card)) / 2);
+            }
+
+            .projects-grid > .project-item {
+                flex: 0 0 var(--pc-card);
+                scroll-snap-align: center;
+            }
+
+            /* count indicator — one bar per card, current one highlighted, centred */
+            .projects-progress {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 7px;
+                width: min(220px, 62vw);
+                margin: 0.4rem auto 0;
+            }
+
+            .projects-progress span {
+                display: block;
+                flex: 1 1 0;
+                max-width: 34px;
+                height: 2px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.22);
+                transition: background-color 0.25s ease, transform 0.25s ease;
+            }
+
+            .projects-progress span.is-active {
+                background: #ff7802;
+                transform: scaleY(2.6);
             }
 
             .stats-grid {
@@ -848,13 +1375,16 @@
 
         @media (max-width: 480px) {
             .hero-section {
-                padding: 1.5rem 1rem;
+                padding: clamp(6.75rem, 28vw, 7.25rem) 1.1rem 2rem;
+                gap: 1.4rem;
             }
 
             .hero-buttons {
-                flex-direction: column;
-                gap: 0.8rem;
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 0.6rem;
                 align-items: center;
+                justify-content: flex-start;
             }
 
             .hero-buttons .glow-wrap {
@@ -862,10 +1392,6 @@
             }
 
             .features-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .projects-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -909,6 +1435,96 @@
             }
         }
 
+        .promo-grid-section { padding: 56px 6%; }
+
+        /* Scoped to this section only - the global .section-title h2/p rules
+           feed every section on the page, so sizing is overridden here
+           rather than edited at the source. */
+        .promo-grid-section .section-title h2 {
+            font-size: clamp(1.25rem, 3vw, 1.75rem);
+            margin-bottom: clamp(0.4rem, 0.8vw, 0.7rem);
+        }
+        .promo-grid-section .section-title p {
+            font-size: clamp(0.68rem, 1.2vw, 0.82rem);
+        }
+
+        .promo-container {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: clamp(1rem, 1.6vw, 1.5rem);
+            max-width: 1150px;
+            margin: 0 auto;
+        }
+
+        .promo-box {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1.7 / 1;
+            background-size: cover;
+            background-position: center;
+            border-radius: 18px;
+            display: flex;
+            align-items: flex-end;
+            padding: 28px;
+            transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+            color: white;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.38);
+            background-color: rgba(17, 18, 21, 0.8);
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 18px 45px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+        }
+
+        .promo-box::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.58));
+            pointer-events: none;
+        }
+
+        .promo-box:hover {
+            transform: translateY(-6px);
+            border-color: rgba(255, 255, 255, 0.62);
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4), 0 24px 52px rgba(0, 0, 0, 0.36), 0 0 20px rgba(255, 120, 2, 0.08);
+        }
+
+        .promo-text {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+        }
+
+        .promo-text h3 {
+            font-size: clamp(1.3rem, 1.6vw, 1.9rem);
+            margin: 0 0 8px;
+            line-height: 1.1;
+            letter-spacing: -0.04em;
+            font-weight: 300;
+        }
+
+        .promo-text p {
+            margin: 0 0 12px;
+            color: rgba(255,255,255,0.88);
+            line-height: 1.5;
+            font-size: clamp(0.72rem, 0.85vw, 0.85rem);
+            max-width: 480px;
+        }
+
+        .btn-link { 
+            color: #ffffff; 
+            text-decoration: none; 
+            font-weight: 200 !important; 
+            transition: all 0.3s ease;
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
+        }
+
+        .btn-link:hover {
+            color: var(--accent-teal);
+            text-shadow: 0 0 15px rgba(0, 210, 190, 0.8), 0 0 30px rgba(0, 210, 190, 0.4);
+        }
+
                 /* Override background for ClientPortal only */
         .backgrounds {
             position: fixed;
@@ -921,15 +1537,69 @@
                 url('Images/Orangebackground.jpg') no-repeat center center;
             background-size: cover;
         }
-
-        /* ========================================================= */
-
     </style>
+<style>
+  /* Mobile CTA transparent bottom fade */
+  @media (max-width: 768px) {
+    .cta-section {
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      border-bottom: 0 !important;
+      border-radius: 28px 28px 0 0 !important;
+      padding: 34px 16px 78px !important;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 32%),
+        radial-gradient(circle at 82% 0%, rgba(255, 120, 2, 0.15), rgba(255, 120, 2, 0) 34%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.032) 45%, rgba(255, 255, 255, 0) 100%),
+        linear-gradient(180deg, rgba(22, 24, 27, 0.78) 0%, rgba(20, 22, 25, 0.54) 52%, rgba(20, 22, 25, 0) 100%) !important;
+      -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, rgba(0, 0, 0, 0.82) 88%, transparent 100%);
+      mask-image: linear-gradient(to bottom, #000 0%, #000 70%, rgba(0, 0, 0, 0.82) 88%, transparent 100%);
+    }
+  }
+        /* Portal benefit story: feature images travel with the left narrative; the portal view stays fixed. */
+        .portal-benefits-section { overflow: clip; }
+        .portal-benefits-section .container { max-width: min(1640px, calc(100% - clamp(2rem, 5vw, 7rem))); }
+        .portal-benefits-section .benefits-grid { grid-template-columns: minmax(0, .86fr) minmax(520px, 1.34fr); gap: clamp(2.5rem, 6vw, 8rem); align-items: start; margin-top: clamp(2.5rem, 5vw, 5rem); }
+        .benefits-list { display:grid; gap:clamp(2.5rem,6vw,6.5rem); padding-bottom:clamp(2rem,7vw,6rem); }
+        .portal-benefit { display:grid; grid-template-columns:clamp(34px,3vw,44px) minmax(0,1fr); column-gap:clamp(.9rem,1.5vw,1.35rem); padding:1.25rem 0 0; border-top:1px solid rgba(255,255,255,.16); opacity:.48; transition:opacity .35s ease,transform .35s ease,border-color .35s ease; }
+        .portal-benefit.is-active { opacity:1; transform:translateX(.55rem); border-color:rgba(255,120,2,.78); }
+        /* Portal benefit indicators: transparent liquid glass, with orange reserved for the active edge light. */
+        .portal-benefit .benefit-check { position:relative; isolation:isolate; overflow:hidden; background:linear-gradient(145deg,rgba(255,255,255,.17),rgba(255,255,255,.045) 48%,rgba(10,12,15,.22)); border:1px solid rgba(255,255,255,.46); color:rgba(255,255,255,.98); box-shadow:inset 0 1px 1px rgba(255,255,255,.42),inset 0 -1px 1px rgba(0,0,0,.3),0 5px 18px rgba(0,0,0,.24); -webkit-backdrop-filter:blur(12px) saturate(135%); backdrop-filter:blur(12px) saturate(135%); text-shadow:0 1px 3px rgba(0,0,0,.6); transition:background .35s ease,border-color .35s ease,box-shadow .35s ease,color .35s ease; }
+        .portal-benefit .benefit-check::before { content:''; position:absolute; z-index:-1; inset:1px 5px auto; height:42%; border-radius:50%; background:linear-gradient(180deg,rgba(255,255,255,.32),rgba(255,255,255,0)); pointer-events:none; }
+        .portal-benefit.is-active .benefit-check { background:linear-gradient(145deg,rgba(255,255,255,.22),rgba(255,255,255,.06) 48%,rgba(255,120,2,.09)); border-color:rgba(255,174,97,.8); box-shadow:inset 0 1px 1px rgba(255,255,255,.5),inset 0 -1px 1px rgba(88,37,0,.28),0 0 0 1px rgba(255,120,2,.13),0 5px 20px rgba(255,120,2,.24); }
+        .portal-benefit .benefit-check i { position:relative; z-index:1; }
+        .portal-benefit .benefit-check { grid-column:1; grid-row:1; } .portal-benefit .benefit-text { grid-column:2; min-width:0; }
+        .portal-feature-image { display:block; width:100%; height:clamp(140px,15vw,215px); margin-top:1.1rem; object-fit:cover; border:1px solid rgba(255,255,255,.2); border-radius:13px; box-shadow:0 16px 34px rgba(0,0,0,.32); }
+        .benefits-image { position:sticky; top:clamp(5.75rem,11vh,7.5rem); height:min(72vh,700px); min-height:470px; overflow:hidden; isolation:isolate; border:1px solid rgba(255,255,255,.26); border-radius:20px; background:#101112; box-shadow:0 26px 75px rgba(0,0,0,.52),0 0 0 1px rgba(255,120,2,.11) inset; }
+        .benefits-image::after { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(145deg,rgba(255,120,2,.13),transparent 34%,rgba(0,0,0,.24) 100%); }
+        .portal-static-visual { display:block; width:100%; height:100%; object-fit:cover; } .benefit-visual-label { position:absolute; z-index:2; right:1.35rem; bottom:1.25rem; margin:0; color:rgba(255,255,255,.88); font-size:.68rem; letter-spacing:.13em; text-transform:uppercase; }
+        @media (min-width:769px) and (max-width:1100px) { .portal-benefits-section .container { max-width:calc(100% - 3rem); } .portal-benefits-section .benefits-grid { grid-template-columns:minmax(0,.9fr) minmax(400px,1.1fr); gap:2.5rem; } .benefits-image { min-height:420px; } }
+        @media (max-width:768px) { .portal-benefits-section .container { max-width:none; width:auto; margin-inline:1.25rem; } .portal-benefits-section .benefits-grid { display:block; margin-top:2rem; } .benefits-list { gap:1.5rem; padding-bottom:0; } .portal-benefit { grid-template-columns:34px minmax(0,1fr); column-gap:.8rem; padding-top:1.1rem; opacity:1; transform:none; } .portal-feature-image { height:clamp(145px,57vw,240px); margin-top:.9rem; } .benefits-image { display:none; } }
+        @media (max-width:360px) { .portal-benefits-section .container { margin-inline:1rem; } .portal-benefit { grid-template-columns:30px minmax(0,1fr); gap:.65rem; } .portal-feature-image { height:145px; } }
+        @media (prefers-reduced-motion:reduce) { .portal-benefit { transition:none; } }
+
+    /* Powerful features: scoped image-led portal cards. */
+.portal-features-section{position:relative;padding:clamp(3.6rem,7vw,7rem) 0;overflow:hidden}.portal-features-section::before{content:'';position:absolute;z-index:-1;width:min(72vw,900px);height:520px;left:50%;top:7%;transform:translateX(-50%);background:radial-gradient(ellipse,rgba(255,120,2,.11),transparent 68%);filter:blur(20px)}.portal-features-section .container{max-width:min(1600px,calc(100% - clamp(2rem,7vw,10rem)))}.portal-features-section .section-title{max-width:780px;margin-inline:auto}.portal-features-section .features-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(1.1rem,2vw,1.85rem);margin-top:clamp(2.4rem,4vw,4rem)}.portal-features-section .feature-card{display:flex;flex-direction:column;min-width:0;padding:0;overflow:hidden;border:1px solid rgba(255,255,255,.72);border-radius:20px;background:linear-gradient(135deg,rgba(255,255,255,.12),rgba(255,255,255,.04));box-shadow:0 12px 40px rgba(0,0,0,.25),inset 0 1px 2px rgba(255,255,255,.6),0 0 0 1px rgba(255,255,255,.18);backdrop-filter:blur(28px) saturate(200%) brightness(1.15);-webkit-backdrop-filter:blur(28px) saturate(200%) brightness(1.15);transition:transform .35s ease,border-color .35s ease,box-shadow .35s ease}.portal-features-section .feature-card:hover{transform:translateY(-8px);border-color:rgba(255,159,76,.7);box-shadow:0 26px 60px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.75) inset,0 0 28px rgba(255,120,2,.12)}.portal-features-section .feature-media{display:block;aspect-ratio:1.82/1;margin:0;overflow:hidden;background:#111;border:1px solid rgba(255,255,255,.68);border-bottom:1px solid rgba(255,255,255,.14);box-shadow:inset 0 1px 1px rgba(255,255,255,.36),0 8px 18px rgba(0,0,0,.24)}.portal-features-section .feature-media img{width:100%;height:100%;display:block;object-fit:cover;filter:saturate(.85) contrast(1.06) brightness(.85);transition:transform .6s ease,filter .35s ease}.portal-features-section .feature-card:hover .feature-media img{transform:scale(1.055);filter:saturate(1) brightness(.96)}.portal-features-section .feature-content{display:flex;flex:1;flex-direction:column;padding:clamp(1.25rem,2vw,1.8rem)}.portal-features-section .feature-icon{display:grid;place-items:center;width:2.5rem;height:2.5rem;margin:0 0 1rem;border:1px solid rgba(255,255,255,.28);border-radius:50%;color:#fff;font-size:1rem;background:linear-gradient(145deg,rgba(255,255,255,.16),rgba(255,255,255,.035));box-shadow:inset 0 1px 1px rgba(255,255,255,.28),0 6px 16px rgba(0,0,0,.2)}.portal-features-section .feature-card h3{margin:0 0 .72rem;color:#fff;font-size:clamp(1rem,1.25vw,1.2rem);line-height:1.25;font-weight:500}.portal-features-section .feature-card p{margin:0;color:rgba(255,255,255,.68);font-size:clamp(.78rem,1vw,.92rem);line-height:1.65;font-weight:300}@media(max-width:980px){.portal-features-section .container{max-width:min(1100px,calc(100% - 3rem))}.portal-features-section .features-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.portal-features-section{padding:3.3rem 0}.portal-features-section .container{max-width:none;width:auto;margin-inline:1.1rem}.portal-features-section .features-grid{grid-template-columns:1fr;gap:1rem;margin-top:2rem}.portal-features-section .feature-card{border-radius:17px}.portal-features-section .feature-content{padding:1.2rem}}@media(prefers-reduced-motion:reduce){.portal-features-section .feature-card,.portal-features-section .feature-media img{transition:none}}
+        /* Compact liquid-glass feature cards with inset media. */
+        .portal-features-section .container { max-width: 1200px !important; }
+        .portal-features-section .features-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 14px !important; margin-top: 2rem !important; }
+        .portal-features-section .feature-card { padding: 8px !important; border-radius: 18px !important; background: linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,.04)) !important; border: 1px solid rgba(255,255,255,.72) !important; box-shadow: 0 12px 40px rgba(0,0,0,.25), inset 0 1px 2px rgba(255,255,255,.6), 0 0 0 1px rgba(255,255,255,.18) !important; -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.15) !important; backdrop-filter: blur(28px) saturate(200%) brightness(1.15) !important; transform: none !important; }
+        .portal-features-section .feature-card:hover { transform: translateY(-4px) !important; border-color: rgba(255,255,255,.9) !important; box-shadow: 0 12px 40px rgba(0,0,0,.25), inset 0 1px 2px rgba(255,255,255,.6), 0 0 0 1px rgba(255,255,255,.75) inset, 0 0 24px rgba(255,120,2,.12) !important; }
+        .portal-features-section .feature-media { aspect-ratio: 1.82 / 1 !important; margin: 0 !important; border: 1px solid rgba(255,255,255,.68) !important; border-radius: 14px !important; box-shadow: inset 0 1px 1px rgba(255,255,255,.36), 0 8px 18px rgba(0,0,0,.24) !important; }
+        .portal-features-section .feature-content { padding: 1rem .75rem .8rem !important; }
+        .portal-features-section .feature-icon { display: none !important; }
+        .portal-features-section .feature-card h3 { margin-bottom: .65rem !important; color: rgba(255,255,255,.94) !important; font-size: 1rem !important; font-weight: 500 !important; text-shadow: 0 1px 3px rgba(0,0,0,.42); }
+        .portal-features-section .feature-card p { color: rgba(255,255,255,.72) !important; font-size: .82rem !important; line-height: 1.55 !important; }
+        @media (max-width: 768px) { .portal-features-section .features-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+        @media (max-width: 520px) { .portal-features-section .features-grid { grid-template-columns: 1fr !important; gap: 16px !important; } }
+    </style>
+
     <style id="stackops-footer-design">
     .stackops-site-footer {
       position: relative;
       width: 96%;
-      margin: 0 auto 26px;
+      margin: 26px auto;
       padding: 44px clamp(24px, 4vw, 64px) 76px;
       border-radius: 42px;
       background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.032));
@@ -998,7 +1668,7 @@
     .stackops-footer-logo p {
       position: absolute;
       top: 98px;
-      left: 15px;
+      left: 30px;
       width: min(250px, calc(100% - 60px));
       max-width: 250px;
       margin: 0;
@@ -1032,8 +1702,8 @@
     .stackops-footer-socials svg { width: 17px; height: 17px; fill: currentColor; }
     .stackops-footer-copyright {
       position: absolute;
-      left: 15px;
-      right: 50px;
+      left: 30px;
+      right: 40px;
       bottom: 34px;
       color: rgba(255,255,255,.42);
       font-size: .86rem;
@@ -1249,27 +1919,25 @@
         height: 10px;
       }
     }
-  </style>
-<style>
-  /* Mobile CTA transparent bottom fade */
-  @media (max-width: 768px) {
-    .cta-section {
-      position: relative;
-      isolation: isolate;
-      overflow: hidden;
-      border-bottom: 0 !important;
-      border-radius: 28px 28px 0 0 !important;
-      padding: 34px 16px 78px !important;
-      background:
-        radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 32%),
-        radial-gradient(circle at 82% 0%, rgba(255, 120, 2, 0.15), rgba(255, 120, 2, 0) 34%),
-        linear-gradient(135deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.032) 45%, rgba(255, 255, 255, 0) 100%),
-        linear-gradient(180deg, rgba(22, 24, 27, 0.78) 0%, rgba(20, 22, 25, 0.54) 52%, rgba(20, 22, 25, 0) 100%) !important;
-      -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, rgba(0, 0, 0, 0.82) 88%, transparent 100%);
-      mask-image: linear-gradient(to bottom, #000 0%, #000 70%, rgba(0, 0, 0, 0.82) 88%, transparent 100%);
+    /* Visual logo artwork has internal left padding, offset image only */
+    @media (max-width: 980px) {
+      .stackops-footer-logo img {
+        left: calc(clamp(18px, 3vw, 34px) - 10px);
+      }
     }
-  }
-</style>
+
+    @media (max-width: 620px) {
+      .stackops-footer-logo img {
+        left: 6px;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .stackops-footer-logo img {
+        left: 4px;
+      }
+    }
+  </style>
 </head>
 <body>
     <div class="backgrounds"></div>
@@ -1319,23 +1987,19 @@
 
     <main>
 
-
-        <!-- ===== HERO SECTION ===== -->
         <section class="hero-section">
             <div>
-                <div class="live-status-tag">
-                    <i class="fas fa-circle"></i> SOC Operational: 24/7 Monitoring Active
-                </div>
-                <h1>One Platform to Run your entire IT Environment</h1>
-                <p>Experience the power of a fully managed Security Operations Center. Our dashboard transforms complex IT infrastructure into a single, intuitive interface—giving you total visibility and peace of mind without the enterprise overhead.</p>
+
+                <h1>Welcome to Stack CTRL.</h1>
+                <p>Experience the power of a fully managed Security Operations Center. Stack CTRL. transforms complex IT infrastructure into a simple, intuitive interface giving you total visibility and peace of mind without the enterprise overhead.</p>
 
                 <div class="credential-box">
                     <div class="credential-icon">
                         <i class="fas fa-envelope-open"></i>
                     </div>
                     <div class="credential-text">
-                        <h4>Access your secure dashboard</h4>
-                        <p>Sign in using your secure credentials or set your password via the activation email.</p>
+                        <h4>ENTERPRISE IT OPERATIONS. SECURITY. GOVERNANCE.</h4>
+                        <p>Sign in using your secure microsoft credentials or set your password via the activation email.</p>
                     </div>
                 </div>
 
@@ -1344,7 +2008,7 @@
                         <i class="fas fa-users"></i>
                     </div>
                     <div class="credential-text">
-                        <h4>Experience Enterprise-Grade IT Solutions</h4>
+                        <h4>ONE PLATFORM. TOTAL VISIBILITY.</h4>
                         <p>Partner with StackOps IT to secure, manage, and scale your entire IT environment.</p>
                     </div>
                 </div>
@@ -1359,7 +2023,7 @@
                     <div class="glow-wrap">
                         <div class="glowing-border-layer"></div>
                         <a href="contact.html" class="link-content">
-                            <i class="fas fa-handshake"></i> Book a demo
+                            <i class="fas fa-handshake"></i> Contact us 
                         </a>
                     </div>
                 </div>
@@ -1369,61 +2033,210 @@
             </div>
         </section>
 
-                <!-- ===== BENEFITS SECTION ===== -->
-        <section>
+        <!-- ===== BENEFITS SECTION ===== -->
+        <section class="portal-benefits-section" aria-labelledby="portal-benefits-title">
             <div class="container">
                 <div class="section-title">
-                    <h2>Why Choose Our Client Portal?</h2>
+                    <h2 id="portal-benefits-title">Why Choose Stack CTRL?</h2>
                     <p>Enterprise-grade features designed for your success</p>
                 </div>
-
                 <div class="benefits-grid">
-                    <div>
-                        <div class="benefit-item">
-                            <div class="benefit-check">
-                                <i class="fas fa-check"></i>
-                            </div>
-                            <div class="benefit-text">
-                                <h4>Unified Command Center</h4>
-                                <p>Consolidate your entire IT footprint—from Microsoft 365 to Backup & Recovery—into one simplified, high-performance portal.</p>
-                            </div>
-                        </div>
+                    <div class="benefits-list">
+                        <article class="portal-benefit is-active" data-benefit="0"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Unified Command Center</h4><p>Consolidate your entire IT footprint—from Microsoft 365 to Backup &amp; Recovery—into one simplified, high-performance portal.</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Business analytics dashboard with charts and metrics" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
+                        <article class="portal-benefit" data-benefit="1"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Zero-Trust Peace of Mind</h4><p>Direct access to our support team, service desk tracking, and real-time ticket management for immediate assistance</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Secure digital access and identity protection" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
+                        <article class="portal-benefit" data-benefit="2"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Executive Decision Intelligence</h4><p>Stop guessing. Our dashboard provides actionable, real-time insights that allow you to make data-driven decisions in seconds.</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Business leaders reviewing performance intelligence" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
+                        <article class="portal-benefit" data-benefit="3"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Live Defense Map <span>PRO</span></h4><p>Visualize every login, threat, and system health metric on a real-time map. Know exactly what's happening across your environment, the moment it happens.</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Mobile phone displaying a responsive business dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
+                        <article class="portal-benefit" data-benefit="4"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Project Transparency</h4><p>Follow your IT roadmap with total clarity. Track milestones, technical debt, and infrastructure upgrades through a transparent, live project tracker.</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Mobile phone displaying a responsive business dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
+                    </div>
+                    <aside class="benefits-image" aria-label="Client portal live view">
+                        <img class="portal-static-visual" src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&amp;fit=crop&amp;w=1800&amp;q=90" alt="Client portal analytics dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        <p class="benefit-visual-label">StackCTRL portal / live view</p>
+                    </aside>
+                </div>
+            </div>
+        </section>
 
-                        <div class="benefit-item">
-                            <div class="benefit-check">
-                                <i class="fas fa-check"></i>
-                            </div>
-                            <div class="benefit-text">
-                                <h4>Zero-Trust Peace of Mind</h4>
-                                <p>Live identity monitoring and encrypted governance ensure your business data is shielded by enterprise-grade protocols 24/7.</p>
-                            </div>
-                        </div>
-
-                        <div class="benefit-item">
-                            <div class="benefit-check">
-                                <i class="fas fa-check"></i>
-                            </div>
-                            <div class="benefit-text">
-                                <h4>Executive Decision Intelligence</h4>
-                                <p>Stop guessing. Our dashboard provides actionable, real-time insights that allow you to make data-driven decisions in seconds.</p>
-                            </div>
-                        </div>
-
-                        <div class="benefit-item">
-                            <div class="benefit-check">
-                                <i class="fas fa-check"></i>
-                            </div>
-                            <div class="benefit-text">
-                                <h4>Mobile Responsive</h4>
-                                <p>Access your dashboard from any device - desktop, tablet, or mobile phone.</p>
-                            </div>
-                        </div>
+                <!-- ===== STATS SECTION ===== -->
+        <section>
+            <div class="container">
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-number">10+</div>
+                        <div class="stat-label">*?</div>
                     </div>
 
-                    <div class="benefits-image">
-                        <img src="Images/Screnshot2.png" alt="Benefits">
+                    <div class="stat-box">
+                        <div class="stat-number">99.9%</div>
+                        <div class="stat-label">Uptime Guarantee</div>
+                    </div>
+
+                    <div class="stat-box">
+                        <div class="stat-number">24/7</div>
+                        <div class="stat-label">Support Available</div>
+                    </div>
+
+                    <div class="stat-box">
+                        <div class="stat-number">50+</div>
+                        <div class="stat-label">Integrations</div>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <section class="projects-showcase">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Everything you need in one platform.
+                    </h2>
+                    <p>Track and monitor various IT services and solutions from your dashboard</p>
+                </div>
+
+                <div class="projects-grid">
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80" alt="Cisco Duo security dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">Live</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" aria-label="Cisco Duo icon" style="width: 22px; height: 22px; display: block;">
+                                    <path d="M58 19c-14 0-26 10-29 24h14c2-8 9-13 15-13s12 5 15 13h14c-3-14-15-24-29-24Z" fill="#f2fbff" opacity="0.9"/>
+                                    <path d="M42 98c-6-9-10-20-10-32 0-18 12-32 28-37v15c-9 5-16 15-18 29h17v14H42Zm44 0V84h17c-2-14-9-24-18-29V40c16 5 28 19 28 37 0 12-4 23-10 32H86Z" fill="#f2fbff" opacity="0.95"/>
+                                    <circle cx="64" cy="64" r="10" fill="#dfeef8"/>
+                                    <circle cx="64" cy="64" r="18" fill="none" stroke="#f2fbff" stroke-width="5" opacity="0.7"/>
+                                </svg></div>
+                                <h4>Cisco DUO Licenses</h4>
+                            </div>
+                            <p>Enterprise Identity &amp; Access Management - Monitor active usage and license allocation.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Automation</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80" alt="Microsoft 365 security dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">Auto</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><img src="Images/Microsoft-Solutions-Partner.png" alt="Microsoft"></div>
+                                <h4>Microsoft 365</h4>
+                            </div>
+                            <p>Proactive tenant security insights - Real-time security and health monitoring.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Auto-scan</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80" alt="Support and service desk operations" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">24/7</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><i class="fas fa-headset"></i></div>
+                                <h4>Support &amp; Service Desk</h4>
+                            </div>
+                            <p>Real-time support visibility - Track tickets and response times instantly.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Ticket flow</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80" alt="Backup and recovery system" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">Guarded</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><i class="fas fa-database"></i></div>
+                                <h4>Backup &amp; Recovery</h4>
+                            </div>
+                            <p>Automated protection - Ensure data safety with instant recovery capabilities.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Recovery</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=900&q=80" alt="Cloud data services" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">Sync</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><i class="fas fa-cloud"></i></div>
+                                <h4>Cloud Data Services</h4>
+                            </div>
+                            <p>Optimized cloud storage - Monitor performance and redundancy levels.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Sync</span>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="project-item">
+                        <div class="project-media">
+                            <img src="https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=900&q=80" alt="Governance and compliance management" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                            <span class="project-badge">Audit</span>
+                        </div>
+                        <div class="project-body">
+                            <div class="project-head">
+                                <div class="project-icon"><i class="fas fa-shield-alt"></i></div>
+                                <h4>Governance &amp; Compliance</h4>
+                            </div>
+                            <p>Risk management - Maintain compliance standards and security protocols.</p>
+                            <div class="project-automation">
+                                <span class="automation-label">Verified</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+                <div class="projects-progress" aria-hidden="true"></div>
+            </div>
+        </section>
+
+                <section class="promo-grid-section animate-on-scroll">
+            <div class="section-title">
+                <h2>Smarter capability layers</h2>
+                <p>Built around the workflows, intelligence, and service visibility that keep operations running smoothly across every team.</p>
+            </div>
+            <div class="promo-container">
+                <a href="contact.html" class="promo-box animate-on-scroll slide-in-left" style="background-image: linear-gradient(rgba(0,0,0,0.42), rgba(0,0,0,0.58)), url('https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&w=1200&q=85')">
+                    <div class="promo-text">
+                        <h3>AI-Powered Chatbot</h3>
+                        <p>Ask for account updates, support guidance, and operational answers instantly with an AI assistant available around the clock.</p>
+                        <span class="btn-link">Open AI Assistant →</span>
+                    </div>
+                </a>
+                <a href="contact.html" class="promo-box animate-on-scroll slide-in-top" style="background-image: linear-gradient(rgba(0,0,0,0.42), rgba(0,0,0,0.58)), url('https://images.unsplash.com/photo-1544197150-b99a580bb7a8?auto=format&fit=crop&w=1200&q=85')">
+                    <div class="promo-text">
+                        <h3>Network Performance Insights</h3>
+                        <p>Monitor bandwidth, latency, and connectivity health across every site and endpoint, so slowdowns get caught before they cost you.</p>
+                        <span class="btn-link">View network health →</span>
+                    </div>
+                </a>
+                <a href="contact.html" class="promo-box animate-on-scroll slide-in-bottom" style="background-image: linear-gradient(rgba(0,0,0,0.42), rgba(0,0,0,0.58)), url('https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1200&q=85')">
+                    <div class="promo-text">
+                        <h3>Billing &amp; Invoices</h3>
+                        <p>Review charges, payment status, renewal dates, and invoice history from one secure, simplified billing dashboard.</p>
+                        <span class="btn-link">Open billing centre →</span>
+                    </div>
+                </a>
+                <a href="contact.html" class="promo-box animate-on-scroll slide-in-right" style="background-image: linear-gradient(rgba(0,0,0,0.42), rgba(0,0,0,0.58)), url('https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=1200&q=85')">
+                    <div class="promo-text">
+                        <h3>Asset &amp; Device Inventory</h3>
+                        <p>Keep a live, accurate record of every device, license, and endpoint across your business, so nothing falls through the cracks.</p>
+                        <span class="btn-link">View asset inventory →</span>
+                    </div>
+                </a>
             </div>
         </section>
 
@@ -1448,154 +2261,88 @@
             </div>
         </section>
 
-        <!-- ===== FEATURES SECTION ===== -->
-        <section>
+        <!-- ===== FEATURES SECTION ===== 
+        <section class="portal-features-section" aria-labelledby="portal-features-title">
             <div class="container">
                 <div class="section-title">
-                    <h2>Powerful Features at Your Fingertips</h2>
-                    <p>Everything you need to manage, monitor, and optimize your IT infrastructure in real-time</p>
+                    <h2 id="portal-features-title">Powerful Features at Your Fingertips</h2>
+                    <p>Everything you need to manage, monitor, and optimize your IT infrastructure in real time.</p>
                 </div>
 
                 <div class="features-grid">
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-chart-line"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Live defense monitoring dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+                            <h3>Live Defense Map <span>PRO</span></h3>
+                            <p>Monitor access events, security incidents, and system health across every device, user, and endpoint in one place.</p>
                         </div>
-                        <h3>Live Defense Map <span class="value-badge">PRO</span></h3>
-                        <p>Visualize every login, threat, and system health metric on a real-time map. Know exactly what's happening across your environment, the moment it happens.</p>
                     </div>
 
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-lock"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Compliance and secure access overview" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-lock"></i></div>
+                            <h3>Compliance Automation</h3>
+                            <p>Validate MFA, privileged access, and policy adherence automatically so your business stays audit-ready without the manual overhead.</p>
                         </div>
-                        <h3>Compliance Automation </h3>
-                        <p>Our intelligent system automatically validates MFA enforcement and admin privileges, ensuring you stay audit-ready without the manual effort.</p>
                     </div>
 
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-folder-open"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Project tracking and roadmap overview" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-folder-open"></i></div>
+                            <h3>Project Transparency</h3>
+                            <p>Track milestones, risks, infrastructure upgrades, and delivery status through a single operational roadmap built for leadership.</p>
                         </div>
-                        <h3>Project Transparency</h3>
-                        <p>Follow your IT roadmap with total clarity. Track milestones, technical debt, and infrastructure upgrades through a transparent, live project tracker.</p>
                     </div>
 
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-robot"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="AI-powered chatbot assistant" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-robot"></i></div>
+                            <h3>AI-Powered Chatbot</h3>
+                            <p>Ask for account updates, support guidance, and operational answers instantly with an AI assistant available around the clock.</p>
                         </div>
-                        <h3>AI-Powered Chatbot</h3>
-                        <p>Get instant answers to your questions with our intelligent chatbot, available 24/7 to support your needs.</p>
                     </div>
 
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-file-invoice"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Billing and invoice overview" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-file-invoice"></i></div>
+                            <h3>Billing &amp; Invoices</h3>
+                            <p>Review charges, payment status, renewal dates, and invoice history from one secure, simplified billing dashboard.</p>
                         </div>
-                        <h3>Billing & Invoices</h3>
-                        <p>Manage your billing information, view invoices, and track payments all in one convenient location.</p>
                     </div>
 
                     <div class="feature-card">
-                        <div class="feature-icon">
-                            <i class="fas fa-headset"></i>
+                        <figure class="feature-media">
+                            <img src="https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Support team collaborating on service requests" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
+                        </figure>
+                        <div class="feature-content">
+                            <div class="feature-icon"><i class="fas fa-headset"></i></div>
+                            <h3>24/7 Support Access</h3>
+                            <p>Reach your support team instantly, track tickets, and resolve issues faster with a guided service desk workflow.</p>
                         </div>
-                        <h3>24/7 Support Access</h3>
-                        <p>Direct access to our support team, service desk tracking, and real-time ticket management for immediate assistance.</p>
                     </div>
                 </div>
             </div>
-        </section>
-
-
+        </section> -->
 
         <!-- ===== PROJECTS SHOWCASE ===== -->
-        <section class="projects-showcase">
-            <div class="container">
-                <div class="section-title">
-                    <h2>Manage All Your IT Projects</h2>
-                    <p>Track and monitor various IT services and solutions from your dashboard</p>
-                </div>
 
-                <div class="projects-grid">
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <i class="fas fa-id-card"></i>
-                        </div>
-                        <h4>Cisco DUO Licenses</h4>
-                        <p>Enterprise Identity & Access Management - Monitor active usage and license allocation</p>
-                    </div>
 
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <img src="Images/Microsoft-Solutions-Partner.png" alt="Microsoft" style="max-width: 50px; height: auto;">
-                        </div>
-                        <h4>Microsoft 365</h4>
-                        <p>Proactive tenant security insights - Real-time security and health monitoring</p>
-                    </div>
 
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <i class="fas fa-headset"></i>
-                        </div>
-                        <h4>Support & Service Desk</h4>
-                        <p>Real-time support visibility - Track tickets and response times instantly</p>
-                    </div>
-
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        <h4>Backup & Recovery</h4>
-                        <p>Automated protection - Ensure data safety with instant recovery capabilities</p>
-                    </div>
-
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <i class="fas fa-cloud"></i>
-                        </div>
-                        <h4>Cloud Data Services</h4>
-                        <p>Optimized cloud storage - Monitor performance and redundancy levels</p>
-                    </div>
-
-                    <div class="project-item">
-                        <div class="project-icon">
-                            <i class="fas fa-shield-alt"></i>
-                        </div>
-                        <h4>Governance & Compliance</h4>
-                        <p>Risk management - Maintain compliance standards and security protocols</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ===== STATS SECTION ===== -->
-        <section>
-            <div class="container">
-                <div class="stats-grid">
-                    <div class="stat-box">
-                        <div class="stat-number">10+</div>
-                        <div class="stat-label">Active Clients</div>
-                    </div>
-
-                    <div class="stat-box">
-                        <div class="stat-number">99.9%</div>
-                        <div class="stat-label">Uptime Guarantee</div>
-                    </div>
-
-                    <div class="stat-box">
-                        <div class="stat-number">24/7</div>
-                        <div class="stat-label">Support Available</div>
-                    </div>
-
-                    <div class="stat-box">
-                        <div class="stat-number">50+</div>
-                        <div class="stat-label">Integrations</div>
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <!-- ===== CALL TO ACTION ===== -->
         <div class="container">
@@ -1789,12 +2536,131 @@
             observer.observe(el);
         });
 
+        // Progress the pinned portal visual as the feature story scrolls.
+        (() => {
+            const steps = [...document.querySelectorAll('.portal-benefit')];
+            if (!steps.length) return;
+            const update = () => {
+                if (matchMedia('(max-width: 768px)').matches) return;
+                const anchor = innerHeight * .48;
+                let active = 0, distance = Infinity;
+                steps.forEach((step, index) => { const box = step.getBoundingClientRect(); const next = Math.abs(box.top + box.height / 2 - anchor); if (next < distance) { distance = next; active = index; } });
+                steps.forEach((step, index) => step.classList.toggle('is-active', index === active));
+            };
+            let queued = false;
+            const requestUpdate = () => { if (!queued) { queued = true; requestAnimationFrame(() => { update(); queued = false; }); } };
+            addEventListener('scroll', requestUpdate, { passive:true }); addEventListener('resize', requestUpdate); requestUpdate();
+        })();
         document.querySelectorAll('#copyright-year, .copyright-year').forEach(yearSpan => {
             yearSpan.textContent = new Date().getFullYear();
         });
+
+        /* "Everything you need in one platform" — centred auto carousel on mobile */
+        (() => {
+            const showcase = document.querySelector('.projects-showcase');
+            const rail = showcase && showcase.querySelector('.projects-grid');
+            const dotsWrap = showcase && showcase.querySelector('.projects-progress');
+            if (!rail || !dotsWrap) return;
+            const cards = [...rail.querySelectorAll('.project-item')];
+            if (cards.length < 2) return;
+
+            const mq = matchMedia('(max-width: 768px)');
+            const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+            const AUTO_MS = 4500;
+            const RESUME_MS = 7000;
+
+            let dots = [];
+            let active = 0;
+            let onScreen = false;
+            let autoTimer = null;
+            let resumeTimer = null;
+            let settleTimer = null;
+
+            const paint = (i) => {
+                active = i;
+                dots.forEach((d, di) => d.classList.toggle('is-active', di === i));
+            };
+
+            const goTo = (i, behavior) => {
+                i = (i % cards.length + cards.length) % cards.length;
+                const card = cards[i];
+                const left = card.offsetLeft - (rail.clientWidth - card.offsetWidth) / 2;
+                rail.scrollTo({ left: Math.max(0, left), behavior: behavior || 'smooth' });
+                paint(i);
+            };
+
+            const stopAuto = () => { clearInterval(autoTimer); autoTimer = null; };
+            const startAuto = () => {
+                stopAuto();
+                if (!mq.matches || reduceMotion.matches || !onScreen) return;
+                autoTimer = setInterval(() => goTo(active + 1), AUTO_MS);
+            };
+            const pauseAuto = () => {
+                stopAuto();
+                clearTimeout(resumeTimer);
+                resumeTimer = setTimeout(startAuto, RESUME_MS);
+            };
+
+            dots = cards.map((_, i) => {
+                const s = document.createElement('span');
+                s.addEventListener('click', () => { goTo(i); pauseAuto(); });
+                dotsWrap.appendChild(s);
+                return s;
+            });
+
+            rail.addEventListener('scroll', () => {
+                clearTimeout(settleTimer);
+                settleTimer = setTimeout(() => {
+                    const mid = rail.scrollLeft + rail.clientWidth / 2;
+                    let best = 0, bestD = Infinity;
+                    cards.forEach((c, i) => {
+                        const d = Math.abs(c.offsetLeft + c.offsetWidth / 2 - mid);
+                        if (d < bestD) { bestD = d; best = i; }
+                    });
+                    paint(best);
+                }, 80);
+            }, { passive: true });
+
+            ['pointerdown', 'touchstart', 'wheel'].forEach((ev) =>
+                rail.addEventListener(ev, pauseAuto, { passive: true }));
+
+            new IntersectionObserver((entries) => {
+                onScreen = entries[0].isIntersecting;
+                onScreen ? startAuto() : stopAuto();
+            }, { threshold: 0.25 }).observe(showcase);
+
+            const apply = () => {
+                if (mq.matches) {
+                    cards.forEach((c) => c.classList.add('animate'));
+                    goTo(active, 'auto');
+                    startAuto();
+                } else {
+                    stopAuto();
+                    clearTimeout(resumeTimer);
+                    rail.scrollTo({ left: 0 });
+                    paint(0);
+                }
+            };
+
+            paint(0);
+            apply();
+            mq.addEventListener('change', apply);
+            addEventListener('resize', () => { if (mq.matches) goTo(active, 'auto'); }, { passive: true });
+        })();
     </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
 
 
 
