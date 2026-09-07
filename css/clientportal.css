@@ -5822,6 +5822,15 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     overflow-x: clip;
   }
 
+  body.sunbird-client-portal .projects-grid {
+    grid-auto-rows: minmax(0, 1fr);
+  }
+
+  body.sunbird-client-portal .projects-grid .project-card {
+    min-height: 0;
+    aspect-ratio: 1.6 / 1;
+  }
+
   body.sunbird-client-portal .projects-view > .container {
     transform: scale(var(--sunbird-dashboard-scale));
     transform-origin: top center;
