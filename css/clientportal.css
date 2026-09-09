@@ -4081,77 +4081,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   object-fit: contain;
 }
 
-/* ===========================================================================
-   Provider attribution badge — small black chip (same treatment as the
-   Cloudflare One badge on the Network Security card). Sits bottom-right of a
-   project card or a billing-card panel to mark the upstream data source
-   (Microsoft Graph, 1Password, ...).
-   =========================================================================== */
-.card-provider-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 42px;
-  min-height: 36px;
-  padding: 5px;
-  border: 1px solid rgba(0, 0, 0, 0.9);
-  border-radius: 8px;
-  background: #000000;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-}
-
-/* Billing-card panel usage floats in the panel's bottom-right corner (no
-   risk-indicator to sit beside there), so it stays absolutely positioned at
-   its original, smaller size. Two classes so this out-ranks
-   `.billing-card > *` (which forces position:relative). */
-.card-provider-badge.card-provider-badge--panel {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  z-index: 6;
-  width: 34px;
-  min-height: 26px;
-  padding: 4px;
-}
-
-.card-provider-badge .sunbird-id-ms-logo {
-  position: static;
-  display: grid;
-  grid-template-columns: repeat(2, 9px);
-  grid-template-rows: repeat(2, 9px);
-  gap: 2px;
-}
-
-.card-provider-badge--panel .sunbird-id-ms-logo {
-  grid-template-columns: repeat(2, 6px);
-  grid-template-rows: repeat(2, 6px);
-  gap: 2px;
-}
-
-.card-provider-badge .sunbird-id-ms-logo i {
-  width: 9px;
-  height: 9px;
-}
-
-.card-provider-badge--panel .sunbird-id-ms-logo i {
-  width: 6px;
-  height: 6px;
-}
-
-.card-provider-badge img {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-  display: block;
-}
-
-.card-provider-badge--panel img {
-  width: 18px;
-  height: 18px;
-}
-
 .network-security-compact-panel {
   display: flex;
   flex: 1 1 auto;
@@ -5820,15 +5749,6 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     width: 100%;
     zoom: 1;
     overflow-x: clip;
-  }
-
-  body.sunbird-client-portal .projects-grid {
-    grid-auto-rows: minmax(0, 1fr);
-  }
-
-  body.sunbird-client-portal .projects-grid .project-card {
-    min-height: 0;
-    aspect-ratio: 1.6 / 1;
   }
 
   body.sunbird-client-portal .projects-view > .container {

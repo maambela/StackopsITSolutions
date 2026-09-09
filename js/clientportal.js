@@ -620,10 +620,6 @@ function goBackToProjects() {
 
 // Check if current user is a Sunbird client
 function isSunbirdUser() {
-    // StackOps demo tenant (user 36 / company 5) mirrors the Sunbird dashboard
-    // design but is fed entirely by local mock data (js/clientportal-stackops-mock.js).
-    // This clause only widens the "true" set — real Sunbird/Sedfa detection below is unchanged.
-    if (typeof isStackOpsMockUser === 'function' && isStackOpsMockUser()) return true;
     try {
         const rawUser = localStorage.getItem('user');
         if (!rawUser) return false;
@@ -695,19 +691,9 @@ function updateSunbirdLogoVisibility() {
     document.body?.classList.toggle('sunbird-client-portal', isSunbird);
     syncNonSunbirdBlurGatedPanels();
 
-    const isStackOpsMock = typeof isStackOpsMockUser === 'function' && isStackOpsMockUser();
-
     const logoImg = document.querySelector('.sunbird-logo-img');
     if (logoImg) {
-        if (isStackOpsMock) {
-            // StackOps demo tenant: use the StackOps logo (same asset as the Home page header)
-            if (!logoImg.dataset.stackopsLogoApplied) {
-                logoImg.src = 'Images/Logos/RemovedStackOps.png';
-                logoImg.alt = 'StackOps';
-                logoImg.dataset.stackopsLogoApplied = 'true';
-            }
-            logoImg.style.display = 'block';
-        } else if (isSunbird) {
+        if (isSunbird) {
             logoImg.style.display = 'block';
         } else {
             logoImg.style.display = 'none';
@@ -12495,30 +12481,6 @@ function hideProjectPreview() {
     }
 }
 
-// Small black "data source" chip (same look as the Cloudflare One badge on the
-// Network Security card). Microsoft Graph for Graph-backed cards, 1Password for
-// the Credential Security card.
-function renderMicrosoftGraphBadgeMarkup() {
-    return `<span class="sunbird-id-ms-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
-}
-
-function renderProjectCardProviderBadge(project) {
-    if (!project) return '';
-    if (Number(project.id) === 9) {
-        return `<div class="card-provider-badge card-provider-badge--onepassword" aria-label="1Password"><img src="Images/1password.webp" alt="" aria-hidden="true"></div>`;
-    }
-    if (project.microsoftGraphEnabled === true) {
-        return `<div class="card-provider-badge card-provider-badge--ms" aria-label="Microsoft Graph">${renderMicrosoftGraphBadgeMarkup()}</div>`;
-    }
-    return '';
-}
-
-// Microsoft Graph chip for the billing-card panels that are Graph-backed
-// (Security Alerts, Backup & Recovery, Applications).
-function renderSunbirdPanelProviderBadge() {
-    return `<div class="card-provider-badge card-provider-badge--ms card-provider-badge--panel" aria-label="Microsoft Graph">${renderMicrosoftGraphBadgeMarkup()}</div>`;
-}
-
 function createProjectCard(project) {
     const card = document.createElement('div');
     card.className = 'project-card' + (project.noDashboard ? ' no-interaction' : '');
@@ -12538,9 +12500,7 @@ function createProjectCard(project) {
            </div>`
         : '';
     const networkSecurityPanelHTML = project.id === 10 ? renderNetworkSecurityCardPanel(project) : '';
-    const providerBadgeHTML = renderProjectCardProviderBadge(project);
-    if (providerBadgeHTML) card.classList.add('has-provider-badge');
-
+    
     const isSummaryCard = isSummaryProjectCard(project);
     const metrics = isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []);
     const statusMeta = getSummaryCardStatusMeta(project);
@@ -12602,7 +12562,6 @@ function createProjectCard(project) {
         <div class="project-risks">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
             <div class="risk-indicator">
-                ${providerBadgeHTML}
                 <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
             </div>
         </div>
@@ -13121,8 +13080,6 @@ async function initializeBillingCard() {
         const totalAmount = parseFloat(invoice.TotalAmount || 0);
         const items = invoice.items || [];
         const status = invoice.Status || 'Pending';
-        const maskMockBillingValues = typeof window.isStackOpsMockUser === 'function' && window.isStackOpsMockUser();
-        const maskedBillingValue = '####';
         
         // Format due date
         const dueDate = invoice.DueDate ? new Date(invoice.DueDate) : null;
@@ -13143,7 +13100,7 @@ async function initializeBillingCard() {
             return `
                 <div class="billing-item">
                     <span class="billing-item-name">${serviceCategory}</span>
-                    <span class="billing-item-cost">${maskMockBillingValues ? maskedBillingValue : `${currency}${parseFloat(itemTotal).toLocaleString()}`}</span>
+                    <span class="billing-item-cost">${currency}${parseFloat(itemTotal).toLocaleString()}</span>
                 </div>
             `;
         }).join('');
@@ -13155,16 +13112,16 @@ async function initializeBillingCard() {
                 <h3>Billing Statement</h3>
             </div>
             <div class="billing-amount">
-                ${maskMockBillingValues ? maskedBillingValue : `<span class="billing-currency">${currency}</span>${totalAmount.toLocaleString()}`}
+                <span class="billing-currency">${currency}</span>${totalAmount.toLocaleString()}
             </div>
             <div class="billing-summary">
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Monthly Subscription</span>
-                    <span class="billing-summary-value">${maskMockBillingValues ? maskedBillingValue : `${currency}${totalAmount.toLocaleString()}`}</span>
+                    <span class="billing-summary-value">${currency}${totalAmount.toLocaleString()}</span>
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Total Services</span>
-                    <span class="billing-summary-value">${maskMockBillingValues ? maskedBillingValue : items.length}</span>
+                    <span class="billing-summary-value">${items.length}</span>
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Payment Status</span>
@@ -13172,7 +13129,7 @@ async function initializeBillingCard() {
                 </div>
                 <div class="billing-summary-item">
                     <span class="billing-summary-label">Due Date</span>
-                    <span class="billing-summary-value" style="color: var(--primary);">${maskMockBillingValues ? maskedBillingValue : dueDateString}</span>
+                    <span class="billing-summary-value" style="color: var(--primary);">${dueDateString}</span>
                 </div>
             </div>
             <div class="billing-items">
@@ -15313,7 +15270,6 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                 
                 ${renderSunbirdFullDashboardButton('security')}
             </div>
-            ${renderSunbirdPanelProviderBadge()}
         `;
     } catch (error) {
         console.error('[Sunbird Security Alerts] Error:', error);
@@ -15383,7 +15339,6 @@ async function renderSunbirdBackupRecoveryView(forceRefresh = false) {
                 </div>
                 ${renderSunbirdFullDashboardButton('backup')}
             </div>
-            ${renderSunbirdPanelProviderBadge()}
         `;
     } catch (error) {
         console.error('[Sunbird Backup Recovery] Error:', error);
@@ -15486,7 +15441,6 @@ function renderSunbirdApplicationsBillingMarkup(model) {
 
             ${renderSunbirdFullDashboardButton('applications')}
         </div>
-        ${renderSunbirdPanelProviderBadge()}
     `;
 }
 
