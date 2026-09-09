@@ -618,6 +618,21 @@
             transform: scale(1.02);
         }
 
+        /* Keep the dashboard preview compact on laptop-sized viewports. */
+        @media (min-width: 769px) and (max-width: 1470px) {
+            .dashboard-preview-section > .container {
+                max-width: 1040px;
+            }
+
+            .dashboard-preview-section .section-title h2 {
+                font-size: clamp(1.35rem, 3.2vw, 1.85rem);
+            }
+
+            .dashboard-preview-section .section-title p {
+                font-size: 0.82rem;
+            }
+        }
+
         /* ===== STATS SECTION ===== */
         .stats-grid {
             display: grid;
@@ -2013,6 +2028,57 @@
         left: 4px;
       }
     }
+
+        /* Compact CTA and footer composition for laptop-sized viewports. */
+        @media (min-width: 769px) and (max-width: 1470px) {
+            .cta-section {
+                max-width: 760px;
+                padding: 2.35rem 2.75rem;
+                margin-block: 2.25rem;
+            }
+
+            .cta-section h2 {
+                font-size: 1.8rem;
+            }
+
+            .cta-section p {
+                font-size: 0.84rem;
+            }
+
+            .stackops-site-footer {
+                width: 92%;
+                padding: 34px 38px 62px;
+                border-radius: 34px;
+            }
+
+            .stackops-footer-grid {
+                gap: 22px;
+            }
+
+            .stackops-footer-logo {
+                max-width: 210px;
+                padding-top: 54px;
+                min-height: 132px;
+            }
+
+            .stackops-footer-logo img {
+                width: 108px;
+                height: 40px;
+            }
+
+            .stackops-footer-logo p,
+            .stackops-site-footer p,
+            .stackops-site-footer a,
+            .stackops-site-footer li {
+                font-size: 0.82rem;
+                line-height: 1.52;
+            }
+
+            .stackops-site-footer h3 {
+                font-size: 0.9rem;
+                margin-bottom: 11px;
+            }
+        }
   </style>
 </head>
 <body>
@@ -2133,7 +2199,7 @@
         </section>
 
                 <!-- ===== STATS SECTION ===== -->
-        <section>
+            <section>
             <div class="container">
                 <div class="stats-grid">
                     <div class="stat-box">
@@ -2311,7 +2377,7 @@
         </section>
 
         <!-- ===== DASHBOARD PREVIEW ===== -->
-        <section>
+        <section class="dashboard-preview-section">
             <div class="container">
                 <div class="section-title">
                     <h2>See Your Dashboard in Action</h2>

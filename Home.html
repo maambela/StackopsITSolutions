@@ -447,7 +447,7 @@
         height: 100% !important;
         max-width: none !important;
         max-height: none !important;
-        object-fit: cover !important;
+        object-fit: contain !important;
         object-position: center !important;
         border-radius: inherit !important;
         -webkit-mask-image: none !important;
@@ -789,6 +789,67 @@
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+      }
+    }
+  </style>
+  <style id="home-laptop-scale">
+    /* Keep the Home cube and menu panel unzoomed on laptop-sized viewports. */
+    @media (min-width: 769px) and (max-width: 1470px) {
+      .content {
+        gap: 2vw;
+        padding: 3vw 2vw;
+      }
+
+      .left-section {
+        flex: 0 0 auto;
+        width: clamp(300px, 45vw, 900px);
+        max-width: none;
+        min-height: 0;
+        padding-right: 1rem;
+      }
+
+      .right-section {
+        flex: 1;
+        max-width: none;
+        min-height: 0;
+        padding: 1.2rem 1.4rem;
+      }
+
+      .cube-container {
+        padding-left: 0;
+      }
+
+      .cube {
+        width: 100% !important;
+        height: clamp(420px, calc(100vh - 150px), 620px) !important;
+        max-width: 100% !important;
+        overflow: hidden;
+      }
+
+      .face {
+        width: 100% !important;
+        height: 100% !important;
+        overflow: hidden;
+      }
+
+      .face img,
+      .face video {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: fill !important;
+        object-position: center center !important;
+      }
+
+      .menu-grid {
+        max-width: 86%;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .menu-item {
+        min-width: 0;
+        min-height: 0;
       }
     }
   </style>

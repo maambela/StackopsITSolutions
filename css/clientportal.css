@@ -13893,7 +13893,8 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .login-box.liquid-glass-card .microsoft-signin-button {
   grid-template-columns: 26px auto;
   column-gap: 13px;
-  padding: 13px 20px;
+  padding: 11px 18px;
+  min-height: 52px;
   color: #ffffff;
   margin-inline: auto;
 }
@@ -13966,7 +13967,8 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   grid-template-columns: 20px auto 16px;
   gap: 11px;
   margin-top: 18px;
-  padding: 13px 21px;
+  min-height: 52px;
+  padding: 11px 18px;
   color: rgba(250, 248, 246, 0.91);
   margin-inline: auto;
   font-weight: 400;
@@ -14568,6 +14570,66 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   .login-section {
     overflow-y: hidden;
     overflow-x: hidden;
+  }
+}
+
+/* Compact laptop composition; larger monitors retain the full desktop card. */
+@media (min-width: 521px) and (max-width: 1470px) {
+  .login-choice-card.liquid-glass-card {
+    width: 354px;
+    height: 635px;
+    min-height: 635px;
+    overflow-y: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  .login-choice-card.liquid-glass-card .login-header p {
+    margin-top: 48px;
+    font-size: 0.76rem;
+  }
+
+  .login-choice-card.liquid-glass-card #signin-choices {
+    transform: translateY(44px) scale(0.92);
+    transform-origin: top center;
+  }
+
+  .login-choice-card.liquid-glass-card .microsoft-signin-button,
+  .login-choice-card.liquid-glass-card .email-signin-trigger {
+    min-height: 49px;
+    padding: 9px 16px;
+  }
+
+  .login-choice-card.liquid-glass-card .microsoft-signin-label,
+  .login-choice-card.liquid-glass-card .email-signin-trigger {
+    font-size: 0.86rem;
+  }
+
+  .login-choice-card.liquid-glass-card .microsoft-signin-trust {
+    margin-top: 9px;
+    font-size: 0.7rem;
+  }
+
+  .login-choice-card.liquid-glass-card .signin-option-divider {
+    margin-top: 19px;
+    font-size: 0.7rem;
+  }
+
+  .login-choice-card.liquid-glass-card #signin-choices .login-home-link {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    margin-top: 20px;
+  }
+}
+
+/* Restore the larger monitor composition independently from laptop sizing. */
+@media (min-width: 1471px) {
+  .login-choice-card.liquid-glass-card {
+    width: auto;
+    height: 820px;
+    min-height: 820px;
+    overflow-y: visible;
+    scrollbar-gutter: auto;
   }
 }
 
