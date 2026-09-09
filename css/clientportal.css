@@ -14214,6 +14214,34 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   margin: 92px auto 0;
 }
 
+/* Keep the choice card inside short laptop viewports instead of centering it
+   past the top edge when its desktop minimum height is larger than the screen. */
+@media (min-width: 700px) and (max-height: 820px) {
+  .login-section {
+    align-items: flex-start;
+    padding: 16px 20px 24px;
+  }
+
+  .login-choice-card.liquid-glass-card {
+    min-height: 0;
+    padding: 22px 30px 24px;
+  }
+
+  .login-choice-card.liquid-glass-card .login-logo {
+    width: 76px;
+    margin-bottom: 8px;
+  }
+
+  .login-choice-card.liquid-glass-card .login-header p {
+    margin-top: 28px;
+  }
+
+  .login-choice-card.liquid-glass-card .login-info {
+    margin-top: 20px;
+    padding-top: 14px;
+  }
+}
+
 .email-login-card .email-signin-content .back-to-microsoft-signin {
   margin-bottom: 36px;
 }
@@ -14623,7 +14651,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 /* Restore the larger monitor composition independently from laptop sizing. */
-@media (min-width: 1471px) {
+@media (min-width: 1471px) and (min-height: 901px) {
   .login-choice-card.liquid-glass-card {
     width: auto;
     height: 820px;
