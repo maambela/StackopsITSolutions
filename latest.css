@@ -9008,3 +9008,23 @@ footer a:hover {
     justify-content: center;
     text-decoration: none;
 }
+
+/* Shared Home-scale header/footer dimensions without browser zoom. */
+@media (min-width: 769px) {
+  .navbar {
+    min-height: 58px;
+    padding: 0.58rem 2rem;
+    border-radius: 34px;
+  }
+
+  .navbar .logo img {
+    width: 106px;
+  }
+
+  .stackops-site-footer {
+    width: 96%;
+    margin: 18px auto;
+    padding: 28px 40px 54px;
+    border-radius: 30px;
+  }
+}

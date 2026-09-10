@@ -14582,6 +14582,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     padding-bottom: 16px;
   }
 
+  .login-container {
+    max-width: 438px;
+  }
+
   .login-box.liquid-glass-card,
   .login-choice-card.liquid-glass-card,
   .email-login-card.liquid-glass-card {
@@ -14589,6 +14593,29 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     min-height: 0;
     overflow-y: auto;
     scrollbar-gutter: stable;
+  }
+
+  .login-choice-card.liquid-glass-card {
+    height: min(704px, calc(100dvh - 48px));
+    margin-top: 0;
+  }
+
+  .login-choice-card.liquid-glass-card .microsoft-signin-button,
+  .login-choice-card.liquid-glass-card .email-signin-trigger {
+    min-height: 48px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .login-choice-card.liquid-glass-card .microsoft-signin-label,
+  .login-choice-card.liquid-glass-card .email-signin-trigger {
+    font-size: 0.88rem;
+  }
+
+  .login-choice-card.liquid-glass-card #signin-choices .login-home-link {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
   }
 }
 

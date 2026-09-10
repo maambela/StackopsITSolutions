@@ -5377,6 +5377,83 @@ body:has(.our-story-header-image) .values.values-in-view .value-item.is-lit i {
     }
 }
 
+/* Shared native header and footer scale for public desktop and laptop pages. */
+@media (min-width: 769px) {
+    .site-header {
+        min-height: 58px !important;
+        padding: 0.58rem 2rem !important;
+        border-radius: 34px !important;
+    }
+
+    .site-header .logo img {
+        width: 106px !important;
+    }
+
+    .site-header .nav-links,
+    .site-header .center-nav {
+        gap: 0.75rem !important;
+    }
+
+    .site-header .nav-links a,
+    .site-header .center-nav a {
+        padding: 5px 9px !important;
+        font-size: 0.7rem !important;
+    }
+
+    .site-header .header-actions {
+        gap: 7px !important;
+    }
+
+    .site-header .glass-icon-btn {
+        width: 36px !important;
+        height: 36px !important;
+    }
+
+    .stackops-site-footer {
+        width: 96% !important;
+        margin: 18px auto !important;
+        padding: 28px 40px 54px !important;
+        border-radius: 30px !important;
+    }
+
+    .stackops-footer-grid {
+        gap: 18px !important;
+    }
+
+    .stackops-footer-logo {
+        padding-top: 48px !important;
+        min-height: 118px !important;
+    }
+
+    .stackops-footer-logo img {
+        width: 104px !important;
+        height: 38px !important;
+    }
+
+    .stackops-footer-logo p,
+    .stackops-site-footer p,
+    .stackops-site-footer a,
+    .stackops-site-footer li {
+        font-size: 0.76rem !important;
+        line-height: 1.42 !important;
+    }
+
+    .stackops-site-footer h3 {
+        font-size: 0.82rem !important;
+        line-height: 1.25 !important;
+        margin-bottom: 8px !important;
+    }
+
+    .stackops-site-footer ul {
+        gap: 5px !important;
+    }
+
+    .stackops-footer-copyright {
+        bottom: 20px !important;
+        font-size: 0.7rem !important;
+    }
+}
+
 @media (max-width: 760px) {
     body:has(.our-story-header-image) .values-grid {
         grid-template-columns: 1fr !important;

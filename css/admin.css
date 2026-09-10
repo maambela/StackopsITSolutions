@@ -1516,3 +1516,21 @@ header.sticky {
     overflow-y: hidden;
 }
 
+/* Keep admin headers on the same native desktop/laptop scale as public pages. */
+@media (min-width: 769px) {
+    .site-header {
+        min-height: 58px !important;
+        padding: 0.58rem 2rem !important;
+        border-radius: 34px !important;
+    }
+
+    .site-header .logo img {
+        width: 106px !important;
+    }
+
+    .site-header .nav-links a {
+        padding: 5px 9px !important;
+        font-size: 0.7rem !important;
+    }
+}
+
