@@ -14628,25 +14628,92 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   }
 }
 
-/* Compact 15-inch laptop composition. Tablets and phones retain their existing layout. */
-@media (min-width: 1024px) and (max-width: 1470px) {
-  .login-container:has(> .login-choice-card.liquid-glass-card:not([hidden])) {
-    max-width: 480px;
+/* =====================================================================
+   PORTAL SIGN-IN  —  INDEPENDENT LAPTOP SCALE BANDS
+   ---------------------------------------------------------------------
+   CSS can only read the browser viewport in pixels, never the panel's
+   physical inches, so "a scale per laptop" is done with three
+   NON-OVERLAPPING viewport-width bands. Editing one band's numbers can
+   never affect the other two.
+
+       14" laptops : 1024px – 1289px viewport   (--zoom below)
+       15" laptops : 1290px – 1470px viewport   (Dell Inspiron 15 lands here)
+       16" laptops : 1471px – 1720px viewport
+
+   Wider than 1720px keeps the untouched large-monitor composition.
+   Day to day you change ONE number: the `zoom:` value inside the one
+   band you care about. Lower = thinner/smaller card, higher = larger;
+   visible card width is 480 x zoom. The shared block below holds the
+   layout every band has in common (centring, tall 480x820 shape) so the
+   three bands stay a single line each.
+   ===================================================================== */
+
+/* ---- shared compact composition for all three laptop bands --------- */
+@media (min-width: 1024px) and (max-width: 1720px) {
+  /* Always optically centred, both axes, with calm breathing room. */
+  .login-section.active {
+    align-items: center;
+    padding-top: 24px;
+    padding-bottom: 24px;
+    overflow: hidden;
   }
 
-  .login-choice-card.liquid-glass-card {
-    /* Start from the 480px × 820px desktop composition; CSS zoom gives a true 80% visual result. */
+  /* Drop the 14px side padding that was shoving the fixed-width card
+     off-centre. The column is a touch wider than the widest zoomed card
+     so `margin-inline:auto` on the card can always truly centre it; the
+     column has no background, so its exact width is invisible. */
+  .login-section.active
+    .login-container:has(> .login-choice-card.liquid-glass-card:not([hidden])) {
+    max-width: 340px;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* The card keeps its full 480 x 820 design composition — tall, with its
+     existing interior rhythm untouched — and is shrunk purely with `zoom`,
+     so every element inside (logo, text, both buttons, padding, radius,
+     glow AND the tall proportion) scales down in exact proportion. */
+  .login-section.active .login-choice-card.liquid-glass-card {
     width: 480px;
+    max-width: 480px;
     height: 820px;
     min-height: 820px;
-    zoom: 0.8;
     margin-inline: auto;
     overflow: visible;
     scrollbar-gutter: auto;
   }
 }
+
+/* ---- 14" laptops -------------------------------------------------- */
+/*      one knob: `zoom`. 0.62 -> visible card width ~298px            */
+@media (min-width: 1024px) and (max-width: 1289px) {
+  .login-section.active .login-choice-card.liquid-glass-card {
+    zoom: 0.62;
+  }
+}
+
+/* ---- 15" laptops  (Dell Inspiron 15, ~1362px viewport) ----------- */
+/*      0.645 -> visible card width ~310px. Today's view was 0.8, so   */
+/*      this default 100% now reads like you'd zoomed the browser to   */
+/*      ~80%: thinner card, buttons + text shrunk in proportion.       */
+@media (min-width: 1290px) and (max-width: 1470px) {
+  .login-section.active .login-choice-card.liquid-glass-card {
+    zoom: 0.645;
+  }
+}
+
+/* ---- 16" laptops ------------------------------------------------- */
+/*      0.67 -> visible card width ~322px                             */
+@media (min-width: 1471px) and (max-width: 1720px) {
+  .login-section.active .login-choice-card.liquid-glass-card {
+    zoom: 0.67;
+  }
+}
+
 /* Restore the larger monitor composition independently from laptop sizing. */
-@media (min-width: 1471px) and (min-height: 901px) {
+@media (min-width: 1721px) and (min-height: 901px) {
   .login-choice-card.liquid-glass-card {
     width: auto;
     height: 820px;
