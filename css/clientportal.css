@@ -14684,6 +14684,31 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     overflow: visible;
     scrollbar-gutter: auto;
   }
+
+  /* Nudge only the logo and the text up a step (everything else still
+     rides the band `zoom` untouched). */
+  .login-section.active .login-choice-card.liquid-glass-card .login-logo {
+    width: 90px;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .login-header > p {
+    font-size: 0.9rem;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .microsoft-signin-label {
+    font-size: 0.98rem;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .email-signin-trigger,
+  .login-section.active .login-choice-card.liquid-glass-card .email-signin-trigger span {
+    font-size: 0.98rem;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .microsoft-signin-trust {
+    font-size: 0.84rem;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .signin-option-divider {
+    font-size: 0.82rem;
+  }
+  .login-section.active .login-choice-card.liquid-glass-card .login-info p {
+    font-size: 0.9rem;
+  }
 }
 
 /* ---- 14" laptops -------------------------------------------------- */
