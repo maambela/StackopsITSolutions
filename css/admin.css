@@ -58,6 +58,12 @@ header {
     backdrop-filter: blur(10px);
 }
 
+@media (min-width: 769px) {
+    header {
+        min-height: 82px;
+    }
+}
+
 header.sticky {
     padding: 10px 5%;
     background: var(--dark);

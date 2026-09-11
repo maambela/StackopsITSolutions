@@ -671,7 +671,7 @@
         left: auto !important;
         right: clamp(0.6rem, 4vw, 1rem) !important;
         top: auto !important;
-        bottom: 1% !important;
+        bottom: 4% !important;
       }
       .left-section .cube-container .cube .face .link-content-stackcon {
         background: #000 !important;
@@ -913,23 +913,27 @@
       /* The cube is intentionally denser on laptops, so keep every text slide
          inside the smaller native image frame instead of using desktop text sizes. */
       .left-section .cube .text-overlay {
-        right: 4% !important;
-        width: 54% !important;
-        max-width: 54% !important;
+        left: 2.75rem !important;
+        right: auto !important;
+        width: min(78%, 980px) !important;
+        max-width: 980px !important;
         padding: 0.5rem !important;
         gap: 0.45rem !important;
       }
 
       .left-section .cube .text-overlay h1 {
-        font-size: 1.85rem !important;
-        line-height: 1.08 !important;
+        font-size: clamp(3rem, 4vw, 5.3rem) !important;
+        line-height: 1.02 !important;
         margin: 0 0 0.5rem !important;
+        max-width: 980px !important;
+        white-space: nowrap !important;
       }
 
       .left-section .cube .text-overlay p {
-        font-size: 0.7rem !important;
-        line-height: 1.35 !important;
+        font-size: 1rem !important;
+        line-height: 1.45 !important;
         margin: 0 !important;
+        max-width: 760px !important;
       }
 
       .left-section .cube .text-overlay5 {
@@ -961,6 +965,47 @@
       .left-section .cube .text-overlay5 .link-content-face3 {
         font-size: 0.62rem !important;
         padding: 0.35rem 0.8rem !important;
+      }
+
+      .left-section .cube .face.bottom .glow-wrap-shop,
+      .left-section .cube .face.bottom .glow-wrap-shop .glowing-border-layer-shop {
+        top: -52px !important;
+        left: -52px !important;
+        width: 300px !important;
+        height: 160px !important;
+        opacity: 0.9 !important;
+        filter: blur(0.3px) saturate(1.15) !important;
+      }
+
+      .left-section .cube .face.bottom .glow-wrap-shop .shop-now-btn {
+        margin: 0 !important;
+        border-radius: 40px !important;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+      }
+
+      .text-overlay-stackcon {
+        left: 2.75rem !important;
+        bottom: 3.2rem !important;
+        width: min(82%, 1060px) !important;
+        max-width: 1060px !important;
+      }
+
+      .text-overlay-stackcon h1 {
+        font-size: clamp(4rem, 7vw, 8rem) !important;
+        white-space: nowrap !important;
+      }
+
+      .text-overlay-stackcon p {
+        max-width: 670px !important;
+        font-size: 1rem !important;
+      }
+
+      .glow-wrap-stackcon {
+        right: 2rem !important;
+        bottom: 1.2rem !important;
+        top: auto !important;
+        left: auto !important;
+        transform: none !important;
       }
 
       .left-section .cube .text-overlay-sap {
@@ -1389,15 +1434,65 @@
         min-width: 174px !important;
         height: 42px !important;
         min-height: 42px !important;
+        padding: 2px !important;
+        box-sizing: border-box !important;
+        background: #006eff !important;
+        overflow: hidden !important;
+        box-shadow: 0 0 10px rgba(0, 110, 255, 0.28) !important;
+      }
+
+      .left-section .cube .face.bottom .glowing-border-layer-shop {
+        display: block !important;
+        position: absolute !important;
+        inset: -115% !important;
+        width: auto !important;
+        height: auto !important;
+        background: conic-gradient(
+          from 0deg,
+          transparent 0deg,
+          transparent 305deg,
+          #4aa3ff 330deg,
+          #006eff 345deg,
+          transparent 360deg
+        ) !important;
+        animation: spin 2.8s linear infinite !important;
       }
 
       .left-section .cube .face.bottom .shop-now-btn {
+        position: relative !important;
+        inset: auto !important;
+        width: 100% !important;
+        height: 100% !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+        align-items: center !important;
+        justify-content: center !important;
         font-size: 0.68rem !important;
         letter-spacing: 1px !important;
-        padding: 0.35rem 0.7rem !important;
+        padding: 0.25rem 0.55rem !important;
         text-decoration: none !important;
+        box-shadow: none !important;
       }
 
+
+    /* Desktop hero copy: keep the complete title on one line at wide scales. */
+    @media (min-width: 1601px) {
+      .left-section .cube .face:nth-child(2) .text-overlay {
+        width: 92% !important;
+        max-width: 780px !important;
+      }
+
+      .left-section .cube .face:nth-child(2) .text-overlay h1 {
+        max-width: 780px !important;
+        white-space: nowrap !important;
+      }
+
+      .left-section .cube .face:nth-child(2) .text-overlay p {
+        max-width: 680px !important;
+      }
+    }
       .left-section .cube .face.bottom .shop-now-btn span {
         text-decoration: none !important;
       }
@@ -1408,24 +1503,6 @@
         flex-basis: 1.35rem !important;
       }
 
-      .left-section .cube .face:nth-child(8) .glow-wrap-consultation {
-        display: inline-flex !important;
-        width: 132px !important;
-        min-width: 132px !important;
-        height: 36px !important;
-        min-height: 36px !important;
-        overflow: hidden !important;
-      }
-
-      .left-section .cube .face:nth-child(8) .link-content-consultation {
-        width: fit-content !important;
-        min-width: 0 !important;
-        height: 32px !important;
-        padding: 0.3rem 0.8rem !important;
-        font-size: 0.64rem !important;
-        letter-spacing: 0.7px !important;
-        white-space: nowrap !important;
-      }
     }
 
     /* Native desktop equivalent of the preferred compact 80% view. */
@@ -1545,6 +1622,178 @@
 
       .stackops-site-footer {
         padding: 28px 40px 54px;
+      }
+    }
+  </style>
+  <style id="home-laptop-square-layout">
+    /* Laptop widths: use one shared square size for both hero panels. */
+    @media (min-width: 1025px) and (max-width: 1600px) {
+      .content {
+        min-height: calc(100vh - 66px) !important;
+        box-sizing: border-box !important;
+        justify-content: center !important;
+        align-items: center !important;
+        gap: clamp(3rem, 4vw, 4rem) !important;
+      }
+
+      .left-section,
+      .right-section {
+        --laptop-panel-size: min(39vw, calc(100vh - 190px), 560px);
+        flex: 0 0 var(--laptop-panel-size) !important;
+        width: var(--laptop-panel-size) !important;
+        max-width: var(--laptop-panel-size) !important;
+        min-width: var(--laptop-panel-size) !important;
+        height: var(--laptop-panel-size) !important;
+        min-height: var(--laptop-panel-size) !important;
+        max-height: var(--laptop-panel-size) !important;
+        padding: 0 !important;
+        align-self: center !important;
+      }
+
+      .left-section .cube-container,
+      .left-section .cube,
+      .left-section .cube .face {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+      }
+
+      .right-section {
+        overflow: hidden !important;
+      }
+
+      .right-section .menu-grid {
+        grid-auto-rows: auto !important;
+        grid-template-rows: repeat(2, minmax(0, auto)) !important;
+        align-content: center !important;
+      }
+
+      .right-section .menu-item {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        aspect-ratio: 1 / 1 !important;
+      }
+
+      /* Keep laptop copy wider than its heading and keep labels on one line. */
+      .left-section .cube .face:nth-child(2) .text-overlay {
+        width: 98% !important;
+        max-width: none !important;
+      }
+
+      .left-section .cube .face:nth-child(2) .text-overlay h1 {
+        display: inline-block !important;
+        font-size: clamp(2.5rem, 3.5vw, 3.4rem) !important;
+        width: max-content !important;
+        max-width: 100% !important;
+        white-space: nowrap !important;
+      }
+
+      .left-section .cube .face:nth-child(2) .text-overlay p {
+        width: 100% !important;
+        max-width: none !important;
+      }
+
+      .right-section .menu-item span {
+        white-space: nowrap !important;
+        overflow-wrap: normal !important;
+        word-break: keep-all !important;
+        font-size: 0.62rem !important;
+      }
+
+      .left-section .cube .face .link-content,
+      .left-section .cube .face .shop-now-btn,
+      .left-section .cube .face .link-content-stackcon,
+      .left-section .cube .face .link-content-consultation,
+      .left-section .cube .face .link-content-sap,
+      .left-section .cube .face .link-content-audit,
+      .left-section .cube .face .warranty-buy-btn,
+      .left-section .cube .face .link-content-face3 {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+        overflow-wrap: normal !important;
+      }
+
+      .left-section .cube .face .glow-wrap-audit {
+        width: 150px !important;
+        min-width: 150px !important;
+        height: 36px !important;
+        min-height: 36px !important;
+      }
+
+      .left-section .cube .face .link-content-audit {
+        width: 100% !important;
+        height: 100% !important;
+        font-size: 0.62rem !important;
+        padding: 0.25rem 0.55rem !important;
+      }
+
+      .left-section .cube .face.bottom .glow-wrap-shop {
+        top: auto !important;
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        right: auto !important;
+        bottom: 9% !important;
+        width: 174px !important;
+        min-width: 174px !important;
+        height: 42px !important;
+        min-height: 42px !important;
+      }
+
+      .left-section .cube .face:nth-child(6) .text-overlay-warranty {
+        position: absolute !important;
+        left: clamp(0.9rem, 5vw, 1.4rem) !important;
+        right: auto !important;
+        top: auto !important;
+        bottom: 8% !important;
+        width: auto !important;
+        height: auto !important;
+      }
+
+      .left-section .cube .face:nth-child(6) .glow-wrap-warranty {
+        position: relative !important;
+        display: inline-flex !important;
+        width: 150px !important;
+        min-width: 150px !important;
+        height: 38px !important;
+        min-height: 38px !important;
+        overflow: hidden !important;
+      }
+
+      .left-section .cube .face:nth-child(6) .warranty-buy-btn {
+        position: relative !important;
+        inset: auto !important;
+        display: flex !important;
+        width: 100% !important;
+        height: 100% !important;
+        align-items: center !important;
+        justify-content: center !important;
+        white-space: nowrap !important;
+      }
+    }
+  </style>
+  <style id="desktop-trust-card-sizing">
+    /* Large desktop only: keep laptops on their native compact card sizing. */
+    @media (min-width: 1601px) {
+      .left-section .cube-container .cube .face.top .text-overlay5 h2 {
+        font-size: 0.84rem !important;
+      }
+
+      .left-section .cube-container .cube .face.top .text-overlay5 h1 {
+        font-size: 2.775rem !important;
+        margin-top: 1.35rem !important;
+        margin-bottom: 1.5rem !important;
+      }
+
+      .left-section .cube-container .cube .face.top .text-overlay5 .glow-wrap-face3 {
+        width: 240px !important;
+        height: 63px !important;
+        margin-top: 0 !important;
+      }
+
+      .left-section .cube-container .cube .face.top .text-overlay5 .link-content-face3 {
+        font-size: 1.02rem !important;
+        padding: 0.525rem 1.2rem !important;
       }
     }
   </style>

@@ -172,6 +172,7 @@ section {
 /* Header & Navigation */
 header {
   width: 100%;
+  min-height: 82px;
   padding: 1rem 3vw;
   display: flex;
   align-items: center;
@@ -187,6 +188,12 @@ header {
     0 8px 40px rgba(0, 0, 0, 0.25);
 
   border-radius: 50px;
+}
+
+@media (max-width: 768px) {
+    header {
+        min-height: 0;
+    }
 }
 
 header.sticky {

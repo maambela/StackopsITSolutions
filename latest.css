@@ -290,6 +290,12 @@ body {
   border-radius: 50px;
 }
 
+@media (min-width: 769px) {
+  .navbar {
+    min-height: 82px;
+  }
+}
+
 
 .logo img {
   width: 130px;
@@ -3640,10 +3646,13 @@ footer a:hover {
     height: auto; /* Will size to content */
     border-radius: 40px;
     overflow: hidden; /* CRUCIAL: This clips the moving gradient */
-    box-shadow: 0 4px 15px rgba(0, 162, 255, 0.199);
+    padding: 2px;
+    background: rgba(8, 12, 16, 0.7);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 15px rgba(0, 162, 255, 0.199);
     transition: transform 0.2s ease;
     z-index: 10;
     pointer-events: auto !important;
+    isolation: isolate;
 }
 
 .glow-wrap-shop:hover {
@@ -3654,19 +3663,18 @@ footer a:hover {
 /* Glowing border layer for shop-now-btn */
 .glowing-border-layer-shop {
     position: absolute;
-    top: -80px;
-    left: -80px;
-    width: 360px;
-    height: 210px;
+    inset: -52px -52px;
     z-index: 1;
     background: conic-gradient(
         #0068e0 0%,
         hsla(207, 100%, 50%, 0) 25%,
-        #0084ff00 50%,
-        #0077ff00 75%,
+        rgba(0, 132, 255, 0) 50%,
+        rgba(0, 119, 255, 0) 75%,
         #005ae0 100%
     );
     animation: spin 3s linear infinite;
+    filter: blur(0.3px) saturate(1.15);
+    opacity: 0.9;
 }
 
 .shop-now-btn {
@@ -3683,13 +3691,13 @@ footer a:hover {
     padding: clamp(0.5rem, 1.5vw, 1rem) clamp(1rem, 2vw, 1.5rem);
     font-size: clamp(0.75rem, 1.5vw, 1rem);
     border: none;
-    border-radius: 40px;
+    border-radius: 38px;
     cursor: pointer;
-    box-shadow: 0 0 10px rgba(0, 68, 255, 0.541);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 10px rgba(0, 68, 255, 0.541);
     letter-spacing: 2px;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     z-index: 2; /* Above the glowing border layer */
-    margin: 2px; /* Small gap for the glow effect */
+    margin: 0; /* Keep the animated beam inside the button edge */
 }
 
 .arrow-circle {
@@ -3843,53 +3851,52 @@ footer a:hover {
 /* Glow-wrap for StackCon Sign Up Button - Bottom Left Positioned */
 .glow-wrap-stackcon {
     position: absolute;
-    top: clamp(91%, 8%, 12%);
-    left: clamp(71%, 71%, 71%);
-    right: auto;
-    width: clamp(140px, 12vw, 180px);
-    height: clamp(40px, 3.5vw, 50px);
-    border-radius: 50px;
+    right: clamp(1.2rem, 2.5vw, 2.5rem);
+    bottom: clamp(0.9rem, 1.6vw, 1.6rem);
+    left: auto;
+    width: auto;
+    min-width: 190px;
+    max-width: 100%;
+    height: auto;
+    border-radius: 999px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
+    padding: 1px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.8), rgba(120,180,255,0.8), rgba(255,255,255,0.7));
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.2);
     transition: transform 0.2s ease;
     z-index: 10;
     pointer-events: auto !important;
 }
 
 .glow-wrap-stackcon:hover {
-    transform: scale(1.05);
+    transform: scale(1.03);
     animation: live-glow 1.5s infinite alternate;
 }
 
-/* Glowing border layer for StackCon button - Subtle white glow */
+/* Clean border glow without the messy bleed */
 .glowing-border-layer-stackcon {
     position: absolute;
-    top: -80px;
-    left: -80px;
-    width: 360px;
-    height: 210px;
+    inset: -42px -42px;
     z-index: 1;
     background: conic-gradient(
-        rgb(0, 110, 255) 0%,
-        rgba(255, 153, 1, 0.603) 25%,
-        rgba(255, 255, 255, 0) 50%,
-        rgba(255, 187, 0, 0.719) 75%,
-        rgb(0, 102, 255) 100%
+        rgba(255,255,255,0.8) 0%,
+        rgba(131,180,255,0.8) 28%,
+        rgba(255,255,255,0.2) 50%,
+        rgba(137,156,255,0.7) 72%,
+        rgba(255,255,255,0.8) 100%
     );
     animation: spin 3s linear infinite;
+    filter: blur(0.25px) saturate(1.08);
+    opacity: 0.9;
 }
 
 .link-content-stackcon {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: calc(100% - 4px);
-    height: calc(100% - 4px);
-    display: flex;
+    position: relative;
+    display: inline-flex;
     justify-content: center;
     align-items: center;
     text-decoration: none;
-    border-radius: 48px;
+    border-radius: 999px;
     background: #000000;
     color: #ffffff !important;
     font-size: clamp(0.85rem, 1.1vw, 1rem);
@@ -3899,8 +3906,11 @@ footer a:hover {
     z-index: 2;
     transition: all 0.3s;
     pointer-events: auto;
-    padding: 0;
+    padding: 0.72rem 1.55rem;
     text-transform: none;
+    white-space: nowrap;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
 }
 
 .link-content-stackcon:hover {
