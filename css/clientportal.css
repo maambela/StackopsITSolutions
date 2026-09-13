@@ -14671,24 +14671,44 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     margin-right: auto;
   }
 
-  /* The card keeps its full 480 x 820 design composition — tall, with its
-     existing interior rhythm untouched — and is shrunk purely with `zoom`,
-     so every element inside (logo, text, both buttons, padding, radius,
-     glow AND the tall proportion) scales down in exact proportion. */
+  /* The card keeps its full 480-wide design composition, shrunk purely
+     with `zoom` (logo, text, both buttons, padding, radius and glow all
+     scale down in exact proportion); height is set per-band below,
+     independently of the zoom-linked width, to hold a fixed physical
+     clearance to the viewport's top and bottom edges. */
   .login-section.active .login-choice-card.liquid-glass-card {
     width: 480px;
     max-width: 480px;
-    height: 820px;
-    min-height: 820px;
     margin-inline: auto;
     overflow: visible;
     scrollbar-gutter: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
-  /* Nudge only the logo and the text up a step (everything else still
-     rides the band `zoom` untouched). */
-  .login-section.active .login-choice-card.liquid-glass-card .login-logo {
-    width: 90px;
+  /* `overflow: visible` above (needed so no scrollbar clips the card) means
+     this glass overlay - a plain unrounded rectangle - would otherwise poke
+     past the card's rounded corners, showing a pixelated square patch over
+     the curve. Round it to match so the curve stays clean at every corner. */
+  .login-section.active .login-choice-card.liquid-glass-card::before {
+    border-radius: inherit;
+  }
+
+  /* The logo now lives as a direct child of the card (moved out of
+     .login-header in the markup) so it can be pinned to the card's actual
+     top-left corner - its original position - independently of
+     `justify-content: center` above, which only centers the remaining
+     content (title/buttons/info) as its own group. Sized up so it reads
+     clearly at these small laptop-band zoom levels. */
+  .login-section.active .login-choice-card.liquid-glass-card > .login-logo {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 140px;
+    height: auto;
+    margin: 0;
+    z-index: 3;
   }
   .login-section.active .login-choice-card.liquid-glass-card .login-header > p {
     font-size: 0.9rem;
@@ -14712,28 +14732,37 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 /* ---- 14" laptops -------------------------------------------------- */
-/*      one knob: `zoom`. 0.62 -> visible card width ~298px            */
+/*      `zoom` -> visible card width = 480 x zoom (0.65 -> ~312px).    */
+/*      `height` is set independently, pre-divided by that same zoom,  */
+/*      so the RENDERED card (after zoom shrinks it) ends up exactly   */
+/*      100vh minus 3cm tall - i.e. a fixed 1.5cm gap above and below  */
+/*      it - at any window height, not just one fixed resolution.      */
 @media (min-width: 1024px) and (max-width: 1289px) {
   .login-section.active .login-choice-card.liquid-glass-card {
-    zoom: 0.62;
+    zoom: 0.65;
+    height: calc((100vh - 3cm) / 0.65) !important;
+    min-height: calc((100vh - 3cm) / 0.65) !important;
   }
 }
 
 /* ---- 15" laptops  (Dell Inspiron 15, ~1362px viewport) ----------- */
-/*      0.645 -> visible card width ~310px. Today's view was 0.8, so   */
-/*      this default 100% now reads like you'd zoomed the browser to   */
-/*      ~80%: thinner card, buttons + text shrunk in proportion.       */
+/*      0.67 -> visible card width ~322px; height keeps the same fixed */
+/*      1.5cm top/bottom clearance described above.                    */
 @media (min-width: 1290px) and (max-width: 1470px) {
   .login-section.active .login-choice-card.liquid-glass-card {
-    zoom: 0.645;
+    zoom: 0.67;
+    height: calc((100vh - 3cm) / 0.67) !important;
+    min-height: calc((100vh - 3cm) / 0.67) !important;
   }
 }
 
 /* ---- 16" laptops ------------------------------------------------- */
-/*      0.67 -> visible card width ~322px                             */
+/*      0.70 -> visible card width ~336px; same fixed 1.5cm clearance. */
 @media (min-width: 1471px) and (max-width: 1720px) {
   .login-section.active .login-choice-card.liquid-glass-card {
-    zoom: 0.67;
+    zoom: 0.70;
+    height: calc((100vh - 3cm) / 0.70) !important;
+    min-height: calc((100vh - 3cm) / 0.70) !important;
   }
 }
 
@@ -14745,6 +14774,28 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     min-height: 820px;
     overflow-y: visible;
     scrollbar-gutter: auto;
+  }
+}
+
+/* =====================================================================
+   DASHBOARD  —  14"/15"/16" LAPTOP CLEANUP
+   ---------------------------------------------------------------------
+   Same 1024-1720px laptop range as the sign-in card above. Two fixes:
+   the fixed header sat flush (1px) against the top of the viewport, and
+   the project-card row had no enforced aspect ratio, so a card whose
+   text happened to wrap an extra line could render taller than its
+   siblings. Grid `stretch` papers over that most of the time, but an
+   explicit ratio makes every card (and its side-peek clones, which
+   mirror the main card's measured size via JS) a guaranteed clean
+   rectangle regardless of content length.
+   ===================================================================== */
+@media (min-width: 1024px) and (max-width: 1720px) {
+  .site-header {
+    top: 16px;
+  }
+
+  .projects-grid .project-card {
+    aspect-ratio: 1.7;
   }
 }
 
