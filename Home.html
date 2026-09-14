@@ -1672,6 +1672,8 @@
         width: calc(100% - 590px) !important;
         max-width: calc(100% - 590px) !important;
         min-width: 0 !important;
+        height: clamp(440px, 38vw, 560px) !important;
+        min-height: clamp(440px, 38vw, 560px) !important;
         margin-right: 0 !important;
         transform: translateX(10px) !important;
         border-radius: clamp(18px, 2vw, 26px) !important;
@@ -1689,22 +1691,22 @@
         overflow: hidden !important;
       }
 
-      .left-section .cube-container,
-      .left-section .cube,
-      .left-section .cube .face {
+      .left-section .cube-container {
         width: 100% !important;
         max-width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
+        height: 100% !important;
+        max-height: 100% !important;
       }
 
       .left-section .cube {
         width: 100% !important;
-        height: clamp(440px, 38vw, 560px) !important;
-        max-height: clamp(440px, 38vw, 560px) !important;
+        height: 100% !important;
+        max-height: 100% !important;
       }
 
       .left-section .cube .face {
+        width: 100% !important;
+        height: 100% !important;
         border-radius: clamp(28px, 2.8vw, 40px) !important;
         overflow: hidden !important;
       }
