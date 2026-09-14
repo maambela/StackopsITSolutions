@@ -2886,15 +2886,27 @@ body.client-portal-page {
 }
 
 .site-header .logo img {
-  width: 130px;
+  width: 82px;
   height: auto;
 }
 
-/* Match Home page logo sizing on small phones */
+/* Match ClientDashboardHome logo sizing on all screens */
+@media (min-width: 1025px) and (max-width: 1600px) {
+  .site-header .logo img {
+    width: 90px;
+  }
+}
+
+@media (min-width: 1025px) and (max-height: 900px) {
+  .site-header .logo img {
+    width: 80px;
+  }
+}
+
 @media (max-width: 600px) {
   .site-header .logo img {
-    width: clamp(96px, 28vw, 132px);
-    max-width: 48vw;
+    width: clamp(70px, 20vw, 82px);
+    max-width: 35vw;
   }
 }
 
@@ -2953,7 +2965,7 @@ body.client-portal-page {
 }
 
 .portal-logo img {
-  width: 130px;
+  width: 82px;
   height: auto;
 }
 

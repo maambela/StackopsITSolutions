@@ -878,7 +878,7 @@
       }
 
       .left-section {
-        width: min(43vw, 620px);
+        width: min(435vw, 620px);
         min-height: 470px;
         padding: 0 !important;
         align-self: center;
@@ -913,10 +913,10 @@
       /* The cube is intentionally denser on laptops, so keep every text slide
          inside the smaller native image frame instead of using desktop text sizes. */
       .left-section .cube .text-overlay {
-        left: 2.75rem !important;
+        left: 0.5rem !important;
         right: auto !important;
-        width: min(78%, 980px) !important;
-        max-width: 980px !important;
+        width: min(85%, 1150px) !important;
+        max-width: 1150px !important;
         padding: 0.5rem !important;
         gap: 0.45rem !important;
       }
@@ -925,7 +925,7 @@
         font-size: clamp(2.2rem, 3.2vw, 4rem) !important;
         line-height: 1.15 !important;
         margin: 0 0 1rem !important;
-        max-width: 980px !important;
+        max-width: 1150px !important;
         white-space: normal !important;
       }
 
@@ -933,7 +933,7 @@
         font-size: 0.9rem !important;
         line-height: 1.55 !important;
         margin: 0 !important;
-        max-width: 760px !important;
+        max-width: 950px !important;
       }
 
       .left-section .cube .text-overlay5 {
@@ -1074,7 +1074,22 @@
       }
 
       .logo-container {
-        width: 46px;
+        position: fixed !important;
+        right: 24px !important;
+        bottom: 60px !important;
+        top: auto !important;
+        left: auto !important;
+        width: 46px !important;
+        height: 46px !important;
+        border-radius: 50% !important;
+        border: 2px solid rgba(59, 130, 246, 0.9) !important;
+        box-shadow:
+          inset 0 1px 1px rgba(255, 255, 255, 0.2),
+          0 0 0 1px rgba(59, 130, 246, 0.26),
+          0 0 18px rgba(59, 130, 246, 0.75),
+          0 0 32px rgba(59, 130, 246, 0.38),
+          0 10px 22px rgba(0, 0, 0, 0.32) !important;
+        transform: none !important;
       }
 
       .services-grid-section .service-container {
@@ -1353,10 +1368,10 @@
     @media (min-width: 769px) {
       .left-section .cube .face:nth-child(2) .text-overlay {
         top: 50% !important;
-        left: 5% !important;
+        left: 2% !important;
         right: auto !important;
-        width: 80% !important;
-        max-width: 470px !important;
+        width: 85% !important;
+        max-width: 600px !important;
         padding: 0 !important;
         transform: translateY(-50%) !important;
       }
@@ -1366,7 +1381,7 @@
       }
 
       .left-section .cube .face:nth-child(2) .text-overlay p {
-        max-width: 470px !important;
+        max-width: 600px !important;
       }
 
       .left-section .cube .face.top .text-overlay5 {
@@ -1626,32 +1641,52 @@
     }
   </style>
   <style id="home-laptop-square-layout">
-    /* Laptop widths: use one shared square size for both hero panels.
-       Range matches the 14"/15"/16" band used elsewhere on the site
-       (1024-1720px viewport width). */
+    /* Laptop widths: use a wide rectangular hero instead of forcing both panels
+       into a square footprint. This keeps the section stretching to the header width
+       while preserving the image content and panel spacing on 14"/15"/16" screens. */
     @media (min-width: 1025px) and (max-width: 1720px) {
       .content {
+        width: calc(100% - 18px) !important;
         min-height: calc(100vh - 66px) !important;
         box-sizing: border-box !important;
-        justify-content: center !important;
+        justify-content: space-between !important;
         align-items: center !important;
-        gap: clamp(4rem, 5.5vw, 5.5rem) !important;
+        gap: clamp(0.1rem, 0.3vw, 0.5rem) !important;
+        padding: 1.2rem 0 1rem !important;
+        margin: 0 auto !important;
       }
 
       .left-section,
       .right-section {
-        --laptop-panel-size: min(41vw, calc(100vh - 170px), 585px);
-        flex: 0 0 var(--laptop-panel-size) !important;
-        width: var(--laptop-panel-size) !important;
-        max-width: var(--laptop-panel-size) !important;
-        min-width: var(--laptop-panel-size) !important;
-        height: var(--laptop-panel-size) !important;
-        min-height: var(--laptop-panel-size) !important;
-        max-height: var(--laptop-panel-size) !important;
+        flex: 0 0 auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
         padding: 0 !important;
         margin-left: 0 !important;
         margin-right: 0 !important;
         align-self: center !important;
+      }
+
+      .left-section {
+        width: calc(100% - 590px) !important;
+        max-width: calc(100% - 590px) !important;
+        min-width: 0 !important;
+        margin-right: 0 !important;
+        transform: translateX(10px) !important;
+        border-radius: clamp(18px, 2vw, 26px) !important;
+      }
+
+      .right-section {
+        width: clamp(440px, 38vw, 560px) !important;
+        max-width: clamp(440px, 38vw, 560px) !important;
+        min-width: 0 !important;
+        height: clamp(440px, 38vw, 560px) !important;
+        min-height: clamp(440px, 38vw, 560px) !important;
+        margin-left: 0 !important;
+        transform: translateX(-10px) !important;
+        border-radius: clamp(28px, 2.8vw, 40px) !important;
+        overflow: hidden !important;
       }
 
       .left-section .cube-container,
@@ -1659,64 +1694,74 @@
       .left-section .cube .face {
         width: 100% !important;
         max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
+        height: auto !important;
+        max-height: none !important;
       }
 
-      .right-section {
+      .left-section .cube {
+        width: 100% !important;
+        height: clamp(440px, 38vw, 560px) !important;
+        max-height: clamp(440px, 38vw, 560px) !important;
+      }
+
+      .left-section .cube .face {
+        border-radius: clamp(28px, 2.8vw, 40px) !important;
         overflow: hidden !important;
       }
 
+      .left-section .cube .face > img,
+      .left-section .cube .face > video,
+      .left-section .cube .face > .image,
+      .left-section .cube .face > .media {
+        border-radius: inherit !important;
+      }
+
       .right-section .menu-grid {
-        grid-auto-rows: auto !important;
-        grid-template-rows: repeat(2, minmax(0, auto)) !important;
-        /* Drop the older 120px-per-column floor - it fought the smaller
-           width below, forcing the grid wider than intended. */
+        grid-auto-rows: 1fr !important;
+        grid-template-rows: repeat(2, minmax(110px, 1fr)) !important;
         grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
         align-content: center !important;
-        /* A bit smaller than the panel now that the panel itself grew -
-           keeps the grid's own edge gap and its inter-item gap matching. */
-        width: min(64%, 340px) !important;
-        max-width: min(64%, 340px) !important;
+        width: min(72%, 330px) !important;
+        max-width: min(72%, 330px) !important;
         gap: clamp(1rem, 1.8vw, 1.5rem) !important;
         margin: auto !important;
+        height: auto !important;
       }
 
       .right-section .menu-item {
-        width: 100% !important;
-        height: auto !important;
-        min-height: 0 !important;
+        width: clamp(88px, 7vw, 118px) !important;
+        height: clamp(88px, 7vw, 118px) !important;
+        min-width: 88px !important;
+        min-height: 88px !important;
+        max-width: 118px !important;
+        max-height: 118px !important;
         aspect-ratio: 1 / 1 !important;
       }
 
-      /* Keep the copy fully inside the card - inset from both edges (not a
-         width % anchored only on the left) so it can never spill past the
-         right edge and get clipped mid-word, whatever the panel size is. */
       .left-section .cube .face:nth-child(2) .text-overlay {
-        left: 2rem !important;
-        right: 2rem !important;
+        left: 0.8rem !important;
+        right: 1rem !important;
         width: auto !important;
         max-width: none !important;
       }
 
       .left-section .cube .face:nth-child(2) .text-overlay h1 {
         display: block !important;
-        font-size: clamp(2rem, 3vw, 2.8rem) !important;
+        font-size: clamp(1.8rem, 2.8vw, 2.6rem) !important;
         width: 100% !important;
         max-width: 100% !important;
         white-space: normal !important;
+        line-height: 1.2 !important;
+        margin-bottom: 1rem !important;
       }
 
       .left-section .cube .face:nth-child(2) .text-overlay p {
         width: 100% !important;
         max-width: none !important;
-        font-size: clamp(0.68rem, 0.95vw, 0.82rem) !important;
-        line-height: 1.55 !important;
+        font-size: clamp(0.75rem, 1vw, 0.9rem) !important;
+        line-height: 1.6 !important;
       }
 
-      /* Same fix for the "Why clients trust us" slide: its small header
-         line was fixed to one line at a font size too big for the column,
-         so it overflowed and got clipped mid-word by the card's edge. */
       .left-section .cube .face.top .text-overlay5 h2 {
         white-space: normal !important;
         font-size: clamp(0.5rem, 0.85vw, 0.6rem) !important;
@@ -1728,6 +1773,16 @@
         overflow-wrap: normal !important;
         word-break: keep-all !important;
         font-size: 0.62rem !important;
+      }
+
+      .right-section .menu-item:nth-child(5) span {
+        position: relative !important;
+        left: -8px !important;
+      }
+
+      .right-section .menu-item:nth-child(6) span {
+        position: relative !important;
+        left: -8px !important;
       }
 
       .left-section .cube .face .link-content,
@@ -2262,11 +2317,12 @@
                   </div>
                 </div> -->
             </a>
-        <div class="logo-container">
-          <img src="Images/Logos/RemovedStackOpsONLY.png" alt="StackOps IT Solutions Logo" class="actual-logo-image">
-        </div>
       </div>
     </section>
+
+    <div class="logo-container" aria-label="StackOps launcher">
+      <img src="Images/Logos/RemovedStackOpsONLY.png" alt="StackOps IT Solutions Logo" class="actual-logo-image">
+    </div>
 
   </main>
 
