@@ -12307,10 +12307,10 @@ async function fetchGovernancePayloadFromApi() {
             dataSource: 'Microsoft Graph authentication methods',
             frequency: 'Quarterly',
             status: mfaCoverage >= 90 ? 'Connected' : 'Attention Required',
-            evidence: `${mfaRegistered} of ${workforceUsers.length} workforce users have a registered MFA method. Guest users remain visible but are excluded from workforce MFA scope. Current MFA coverage is ${mfaCoverage}%.`,
+            evidence: `${mfaRegistered} of ${workforceUsers.length} Sunbird internal users have a registered MFA method. Guest users remain visible but are excluded from the Sunbird internal-user MFA scope. Current MFA coverage is ${mfaCoverage}%.`,
             evidenceData: {
-                scope: 'workforce_member_only',
-                total_workforce_users: workforceUsers.length,
+                scope: 'sunbird_internal_users',
+                total_internal_users: workforceUsers.length,
                 total_guest_users: externalUserRows.length,
                 mfa_registered: mfaRegistered,
                 mfa_missing: Math.max(0, workforceUsers.length - mfaRegistered),
@@ -12573,12 +12573,12 @@ async function fetchComplianceControlsFromApi() {
             });
 
             const coverage = totalUsers > 0 ? Math.round((mfaRegistered / totalUsers) * 100) : 0;
-            let insight = coverage === 100 ? "🟢 Workforce MFA fully enforced" : 
-                         (coverage >= 80 ? "🟡 Workforce MFA partially enforced" : "🔴 Workforce users exposed to credential theft");
+            let insight = coverage === 100 ? "🟢 Sunbird internal-user MFA fully enforced" : 
+                         (coverage >= 80 ? "🟡 Sunbird internal-user MFA partially enforced" : "🔴 Sunbird internal users exposed to credential theft");
 
             controls.push({
-                name: "MFA on all accounts", area: "Identity", insight: `${insight} (scope: workforce Member accounts only; Guests excluded)`,
-                evidenceData: { scope: 'workforce_member_only', total_users: totalUsers, guest_users: users.filter(user => isGuestMicrosoftUser(user)).length, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
+                name: "MFA on all accounts", area: "Identity", insight: `${insight} (scope: Sunbird internal users only; Guests excluded)`,
+                evidenceData: { scope: 'sunbird_internal_users', total_users: totalUsers, guest_users: users.filter(user => isGuestMicrosoftUser(user)).length, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
             });
         } catch (e) { console.error('MFA Control Error', e); }
 
@@ -12887,10 +12887,10 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
             });
 
             if (mfaMissingCount > 0) {
-                addTask("Complete MFA rollout", "Identity", "High", "🔴 Workforce users vulnerable",
-                    "Workforce users without MFA are highly susceptible to credential stuffing and phishing attacks. Guest accounts remain visible but are excluded from the workforce rollout scope.",
-                    `${mfaMissingCount} workforce users without MFA registered.`,
-                    "1. Open Azure AD Conditional Access.\n2. Enforce MFA for all workforce Member accounts.\n3. Run registration campaign and keep Guests excluded from the workforce rollout metric.",
+                addTask("Complete MFA rollout", "Identity", "High", "🔴 Sunbird internal users vulnerable",
+                    "Sunbird internal users without MFA are highly susceptible to credential stuffing and phishing attacks. Guest accounts remain visible but are excluded from the Sunbird internal-user rollout scope.",
+                    `${mfaMissingCount} Sunbird internal users without MFA registered.`,
+                    "1. Open Azure AD Conditional Access.\n2. Enforce MFA for all Sunbird internal accounts.\n3. Run registration campaign and keep Guests excluded from the Sunbird internal-user rollout metric.",
                     "Microsoft Graph authentication methods",
                     usersWithoutMfa.slice(0, 50)
                 );

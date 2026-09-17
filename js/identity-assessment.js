@@ -5,8 +5,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
 
-    const MFA_SCOPE = 'entra_members_v1';
-    const MFA_SCOPE_LABEL = 'Workforce MFA registration (Entra Members)';
+    const MFA_SCOPE = 'sunbird_internal_users_v1';
+    const MFA_SCOPE_LABEL = 'Sunbird internal users MFA registration (Entra Members)';
 
     // Native Entra userType is authoritative. Legacy email/isExternal guesses are not evidence.
     function userType(user = {}) {
@@ -16,7 +16,7 @@
     function isWorkforce(user) { return userType(user) === 'Member'; }
     function isGuest(user) { return userType(user) === 'Guest'; }
     function typeLabel(user) {
-        return isWorkforce(user) ? 'Workforce (Member)' : isGuest(user) ? 'External (Guest)' : 'User type unknown';
+        return isWorkforce(user) ? 'Sunbird internal user (Member)' : isGuest(user) ? 'External (Guest)' : 'User type unknown';
     }
     function mfaValue(user = {}) {
         if (['unknown', 'unavailable', 'stale'].includes(String(user.mfaStatus || '').toLowerCase())) return null;
@@ -95,7 +95,7 @@
     }
     function scopeDescription(metrics) {
         const coverage = metrics.mfaCoverage == null ? 'Coverage unavailable' : `Coverage ${metrics.mfaCoverage}%`;
-        return `${metrics.mfaEnabled} of ${metrics.workforceUsers} workforce accounts have registered MFA. ` +
+        return `${metrics.mfaEnabled} of ${metrics.workforceUsers} Sunbird internal users have registered MFA. ` +
             `${metrics.mfaMissing} not registered; ${metrics.mfaUnknown} unknown. ${coverage}. ` +
             `${metrics.externalUsers} Guests excluded; ${metrics.unknownUserTypes} user types unknown. ` +
             'Registration evidence does not confirm MFA enforcement.';
