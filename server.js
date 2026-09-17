@@ -12578,7 +12578,7 @@ async function fetchComplianceControlsFromApi() {
 
             controls.push({
                 name: "MFA on all accounts", area: "Identity", insight: `${insight} (scope: Sunbird internal users only; Guests excluded)`,
-                evidenceData: { scope: 'sunbird_internal_users', total_users: totalUsers, guest_users: users.filter(user => isGuestMicrosoftUser(user)).length, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
+                evidenceData: { scope: 'sunbird_internal_users', total_users: totalUsers, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
             });
         } catch (e) { console.error('MFA Control Error', e); }
 

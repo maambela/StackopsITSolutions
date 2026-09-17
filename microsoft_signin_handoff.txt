@@ -1,0 +1,531 @@
+Microsoft sign-in pattern to reuse in a different repo
+
+This is the same pattern used here: a secure Microsoft Entra OIDC login, followed by a server-side approval check, then a local session JWT. The important part is that the app does not trust the browser alone; it validates the signed ID token, checks the tenant/user match, and only then creates the app session.
+
+Use this as a copy-paste blueprint for your new repo.
+
+1) Azure App Registration setup
+
+In Microsoft Entra ID:
+
+1. Create an App Registration
+2. Add a Web platform
+3. Set Redirect URI to:
+   - https://your-domain.com/api/auth/microsoft/callback
+4. Create a client secret
+5. Under Authentication, allow:
+   - Accounts in this organizational directory only, or
+   - Multi-tenant if your app will be used across tenants
+6. Do not require Graph permissions for the basic login itself
+7. Use only these OIDC scopes:
+   - openid
+   - profile
+   - email
+
+Recommended env vars:
+
+ENTRA_PORTAL_CLIENT_ID=your-app-client-id
+ENTRA_PORTAL_CLIENT_SECRET=your-app-client-secret
+ENTRA_PORTAL_REDIRECT_URI=https://your-domain.com/api/auth/microsoft/callback
+JWT_SECRET=replace_with_long_random_value
+
+> For the login itself, you do not need Microsoft Graph permissions. Graph can be added later only for extra profile or directory data.
+
+2) Server-side logic to paste into your new repo
+
+Use this in your Express app:
+
+```js
+const express = require('express');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
+
+const app = express();
+app.use(express.json());
+app.use(cookieParser());
+
+const MICROSOFT_PORTAL_OAUTH_COOKIE = 'ms_portal_oauth';
+const MICROSOFT_PORTAL_BOOTSTRAP_COOKIE = 'ms_portal_bootstrap';
+const MICROSOFT_PORTAL_OAUTH_TTL_MS = 5 * 60 * 1000;
+const MICROSOFT_PORTAL_BOOTSTRAP_TTL_MS = 2 * 60 * 1000;
+
+const {
+  ENTRA_PORTAL_CLIENT_ID,
+  ENTRA_PORTAL_CLIENT_SECRET,
+  ENTRA_PORTAL_REDIRECT_URI,
+  JWT_SECRET
+} = process.env;
+
+function safeSecretString(value) {
+  return String(value || '').trim();
+}
+
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function parseBase64UrlJson(value) {
+  try {
+    return JSON.parse(Buffer.from(String(value || ''), 'base64url').toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function secureStringEquals(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function microsoftPortalCookieOptions(ttlMs, path) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path,
+    maxAge: ttlMs
+  };
+}
+
+async function getMicrosoftPortalAuthConfig() {
+  const clientId = safeSecretString(ENTRA_PORTAL_CLIENT_ID);
+  const clientSecret = safeSecretString(ENTRA_PORTAL_CLIENT_SECRET);
+  const redirectUri = safeSecretString(ENTRA_PORTAL_REDIRECT_URI);
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('Microsoft portal sign-in is not configured.');
+  }
+
+  return { clientId, clientSecret, redirectUri };
+}
+
+async function fetchMicrosoftOidcMetadata() {
+  const authority = 'organizations';
+  const metadataUrl = `https://login.microsoftonline.com/${authority}/v2.0/.well-known/openid-configuration`;
+
+  const response = await fetch(metadataUrl);
+  if (!response.ok) {
+    throw new Error(`Microsoft OIDC metadata request failed: ${response.status}`);
+  }
+
+  const metadata = await response.json();
+
+  if (!metadata?.authorization_endpoint || !metadata?.token_endpoint || !metadata?.jwks_uri || !metadata?.issuer) {
+    throw new Error('Microsoft OIDC metadata is incomplete.');
+  }
+
+  return metadata;
+}
+
+async function fetchMicrosoftSigningKeys(metadata) {
+  const response = await fetch(metadata.jwks_uri);
+  if (!response.ok) {
+    throw new Error(`Microsoft signing-key request failed: ${response.status}`);
+  }
+
+  const body = await response.json();
+  if (!Array.isArray(body?.keys)) {
+    throw new Error('Microsoft signing keys are unavailable.');
+  }
+
+  return body.keys;
+}
+
+function validateTokenHeaderAndClaims(header, claims, config) {
+  const tenantIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (!header || !claims) throw new Error('Missing Microsoft identity token parts.');
+  if (header.alg !== 'RS256') throw new Error('Unexpected Microsoft signing algorithm.');
+  if (!header.kid) throw new Error('Missing Microsoft token key id.');
+  if (!tenantIdPattern.test(String(claims.tid || ''))) throw new Error('Microsoft token missing a valid tenant id.');
+  if (claims.aud !== config.clientId) throw new Error('Microsoft token audience does not match this app.');
+}
+
+async function validateMicrosoftPortalIdToken(idToken, config, metadata, expectedNonce) {
+  const [headerPart, payloadPart, signaturePart, extraPart] = String(idToken || '').split('.');
+
+  if (extraPart) {
+    throw new Error('Microsoft identity token format is invalid.');
+  }
+
+  const header = parseBase64UrlJson(headerPart);
+  const claims = parseBase64UrlJson(payloadPart);
+
+  validateTokenHeaderAndClaims(header, claims, config);
+
+  const signingKeys = await fetchMicrosoftSigningKeys(metadata);
+  const signingKey = signingKeys.find(key => key.kid === header.kid && key.kty === 'RSA');
+
+  if (!signingKey) {
+    throw new Error('Matching Microsoft signing key not found.');
+  }
+
+  const publicKey = crypto.createPublicKey({
+    key: signingKey,
+    format: 'jwk'
+  });
+
+  const message = Buffer.from(`${headerPart}.${payloadPart}`);
+  const signature = Buffer.from(signaturePart, 'base64url');
+
+  const validSignature = crypto.verify(
+    'RSA-SHA256',
+    message,
+    publicKey,
+    signature
+  );
+
+  if (!validSignature) {
+    throw new Error('Microsoft identity token signature is invalid.');
+  }
+
+  const expectedIssuer = String(metadata.issuer).replace('{tenantid}', claims.tid);
+  const now = Math.floor(Date.now() / 1000);
+
+  if (claims.iss !== expectedIssuer) {
+    throw new Error('Microsoft token issuer mismatch.');
+  }
+
+  if (!secureStringEquals(claims.nonce, expectedNonce)) {
+    throw new Error('Microsoft token nonce mismatch.');
+  }
+
+  if (!Number.isFinite(Number(claims.exp)) || Number(claims.exp) <= now - 60) {
+    throw new Error('Microsoft token is expired.');
+  }
+
+  if (claims.nbf && Number(claims.nbf) > now + 60) {
+    throw new Error('Microsoft token is not yet valid.');
+  }
+
+  return claims;
+}
+
+// Replace this with your own DB lookup.
+async function getUserByEmail(email) {
+  // Example:
+  // return db.query("SELECT * FROM users WHERE email = ?", [email]);
+  return null;
+}
+
+// Replace this with your own tenant-to-company mapping logic.
+async function getCompanyForEntraTenant(tenantId) {
+  // Example:
+  // return db.query("SELECT * FROM company_microsoft_mapping WHERE tenant_id = ?", [tenantId]);
+  return { companyId: 1 };
+}
+
+// Replace this with your own user approval logic.
+async function resolveApprovedEntraUser(identity) {
+  const tenantId = String(identity.tid || '').toLowerCase();
+  const objectId = String(identity.oid || '').toLowerCase();
+  const email = String(identity.email || identity.preferred_username || '').toLowerCase();
+
+  if (!tenantId || !objectId) {
+    throw new Error('Microsoft identity is missing tenant or user object data.');
+  }
+
+  const company = await getCompanyForEntraTenant(tenantId);
+  if (!company?.companyId) {
+    throw new Error('Microsoft tenant is not approved for this application.');
+  }
+
+  if (!email) {
+    throw new Error('Microsoft login did not return a usable email address.');
+  }
+
+  const user = await getUserByEmail(email);
+  if (!user) {
+    throw new Error('Microsoft user is not pre-approved for this application.');
+  }
+
+  if (Number(user.companyId) !== Number(company.companyId)) {
+    throw new Error('Microsoft user is not assigned to the approved company.');
+  }
+
+  return user;
+}
+
+async function buildPortalAuthentication(user) {
+  const jwtPayload = {
+    id: user.id,
+    email: user.email,
+    role: user.role || 'user',
+    companyId: user.companyId || null
+  };
+
+  const accessToken = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: '1h' });
+
+  return {
+    accessToken,
+    redirect: user.role === 'admin' ? '/Admin.html' : '/ClientPortal.html',
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      role: user.role || 'user',
+      companyId: user.companyId || null
+    }
+  };
+}
+
+app.get('/api/auth/microsoft/signin', async (req, res) => {
+  try {
+    const config = await getMicrosoftPortalAuthConfig();
+    const metadata = await fetchMicrosoftOidcMetadata();
+
+    const state = crypto.randomBytes(32).toString('base64url');
+    const nonce = crypto.randomBytes(32).toString('base64url');
+    const codeVerifier = crypto.randomBytes(64).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    const authState = {
+      state,
+      nonce,
+      codeVerifier,
+      redirectUri: config.redirectUri,
+      expiresAt: Date.now() + MICROSOFT_PORTAL_OAUTH_TTL_MS
+    };
+
+    res.cookie(
+      MICROSOFT_PORTAL_OAUTH_COOKIE,
+      base64UrlJson(authState),
+      microsoftPortalCookieOptions(MICROSOFT_PORTAL_OAUTH_TTL_MS, '/api/auth/microsoft/callback')
+    );
+
+    const authorizeUrl = new URL(metadata.authorization_endpoint);
+    authorizeUrl.search = new URLSearchParams({
+      client_id: config.clientId,
+      response_type: 'code',
+      redirect_uri: config.redirectUri,
+      response_mode: 'query',
+      scope: 'openid profile email',
+      state,
+      nonce,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256'
+    }).toString();
+
+    return res.redirect(authorizeUrl.toString());
+  } catch (error) {
+    console.error('[Microsoft Auth] Sign-in start failed:', error.message);
+    return res.status(503).json({ success: false, message: 'Microsoft sign-in is not available.' });
+  }
+});
+
+app.get('/api/auth/microsoft/callback', async (req, res) => {
+  const clearOauthCookie = () => {
+    res.clearCookie(MICROSOFT_PORTAL_OAUTH_COOKIE, microsoftPortalCookieOptions(0, '/api/auth/microsoft/callback'));
+  };
+
+  try {
+    if (req.query.error) {
+      clearOauthCookie();
+      return res.redirect('/microsoft-auth-complete.html?error=cancelled');
+    }
+
+    const oauthState = parseBase64UrlJson(req.cookies[MICROSOFT_PORTAL_OAUTH_COOKIE]);
+    const returnedState = String(req.query.state || '');
+    const code = String(req.query.code || '');
+
+    if (!oauthState || !code || !oauthState.redirectUri || oauthState.expiresAt < Date.now()) {
+      clearOauthCookie();
+      return res.redirect('/microsoft-auth-complete.html?error=invalid_request');
+    }
+
+    const validState = Boolean(oauthState.state) && secureStringEquals(oauthState.state, returnedState);
+    if (!validState) {
+      clearOauthCookie();
+      return res.redirect('/microsoft-auth-complete.html?error=invalid_request');
+    }
+
+    const config = await getMicrosoftPortalAuthConfig();
+    const metadata = await fetchMicrosoftOidcMetadata();
+
+    const tokenResponse = await fetch(metadata.token_endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: oauthState.redirectUri,
+        code_verifier: oauthState.codeVerifier
+      })
+    });
+
+    const tokenPayload = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenPayload.id_token) {
+      throw new Error(`Microsoft token exchange failed (${tokenResponse.status}).`);
+    }
+
+    const identity = await validateMicrosoftPortalIdToken(
+      tokenPayload.id_token,
+      config,
+      metadata,
+      oauthState.nonce
+    );
+
+    const user = await resolveApprovedEntraUser(identity);
+
+    const bootstrapToken = jwt.sign({
+      purpose: 'microsoft-portal-bootstrap',
+      userId: user.id,
+      email: user.email,
+      tenantId: identity.tid,
+      oid: identity.oid
+    }, JWT_SECRET, { expiresIn: '2m' });
+
+    clearOauthCookie();
+    res.cookie(
+      MICROSOFT_PORTAL_BOOTSTRAP_COOKIE,
+      bootstrapToken,
+      microsoftPortalCookieOptions(MICROSOFT_PORTAL_BOOTSTRAP_TTL_MS, '/api/auth/microsoft/complete')
+    );
+
+    return res.redirect('/microsoft-auth-complete.html');
+  } catch (error) {
+    clearOauthCookie();
+    console.error('[Microsoft Auth] Callback failed:', error.message);
+    return res.redirect('/microsoft-auth-complete.html?error=failed');
+  }
+});
+
+app.get('/api/auth/microsoft/complete', async (req, res) => {
+  const clearBootstrapCookie = () => {
+    res.clearCookie(MICROSOFT_PORTAL_BOOTSTRAP_COOKIE, microsoftPortalCookieOptions(0, '/api/auth/microsoft/complete'));
+  };
+
+  try {
+    const token = req.cookies[MICROSOFT_PORTAL_BOOTSTRAP_COOKIE];
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'Your Microsoft sign-in session has expired.' });
+    }
+
+    const bootstrap = jwt.verify(token, JWT_SECRET);
+    if (bootstrap?.purpose !== 'microsoft-portal-bootstrap' || !bootstrap?.email) {
+      throw new Error('Invalid Microsoft sign-in session.');
+    }
+
+    const user = await getUserByEmail(bootstrap.email);
+    if (!user || Number(user.id) !== Number(bootstrap.userId)) {
+      throw new Error('The portal user is no longer available.');
+    }
+
+    const portalAuthentication = await buildPortalAuthentication(user);
+    clearBootstrapCookie();
+
+    return res.json({ success: true, ...portalAuthentication });
+  } catch (error) {
+    clearBootstrapCookie();
+    console.error('[Microsoft Auth] Completion failed:', error.message);
+    return res.status(401).json({ success: false, message: 'Unable to complete Microsoft sign-in.' });
+  }
+});
+```
+
+3) Front-end completion page
+
+Create a page such as `microsoft-auth-complete.html`:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Completing sign-in</title>
+</head>
+<body>
+  <main>
+    <p id="message">Completing your secure Microsoft sign-in…</p>
+  </main>
+
+  <script>
+    (async function completeMicrosoftSignIn() {
+      const message = document.getElementById('message');
+      const error = new URLSearchParams(window.location.search).get('error');
+
+      if (error) {
+        message.textContent =
+          error === 'not_authorized'
+            ? 'Your Microsoft account is not authorised for this application.'
+            : 'Microsoft sign-in was cancelled or could not be completed. Please try again.';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/auth/microsoft/complete', {
+          credentials: 'same-origin',
+          cache: 'no-store'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.accessToken || !data.user) {
+          throw new Error(data.message || 'Unable to complete sign-in.');
+        }
+
+        localStorage.setItem('authToken', data.accessToken);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        sessionStorage.setItem('userEmail', data.user.email);
+        sessionStorage.setItem('isLoggedIn', 'true');
+
+        window.location.replace(data.redirect || '/ClientPortal.html');
+      } catch (failure) {
+        message.textContent = failure.message || 'Unable to complete Microsoft sign-in. Please try again.';
+      }
+    })();
+  </script>
+</body>
+</html>
+```
+
+4) Why this logic is secure
+
+This flow is secure because it does all of the following:
+
+- starts with Entra authorization using PKCE
+- stores the OAuth state and nonce in an HttpOnly cookie
+- validates the ID token signature using Microsoft’s JWKS
+- checks audience, issuer, nonce, expiry, and tenant
+- matches the authenticated user against your pre-approved local user records
+- creates a local app session only after all checks pass
+
+This prevents browser tampering and ensures you only allow approved people into the app.
+
+5) Important repo-specific replacement points
+
+When you paste this into a new project, replace these parts:
+
+- getUserByEmail() with your DB or user model
+- getCompanyForEntraTenant() with your tenant mapping logic
+- resolveApprovedEntraUser() with your company approval logic
+- buildPortalAuthentication() with your app’s session/token behavior
+- redirect targets like /Admin.html and /ClientPortal.html
+
+6) Minimal rule of thumb
+
+For the new app, use this exact pattern:
+
+- Sign-in entry point: /api/auth/microsoft/signin
+- Callback: /api/auth/microsoft/callback
+- Completion step: /api/auth/microsoft/complete
+- Use OIDC only: openid profile email
+- Validate the signed ID token
+- Match tenant + approved user
+- Generate a local JWT session
+- Never trust the browser’s user object without server validation
+
+If you want, I can turn this into a cleaner version tailored to either:
+1. Express + MySQL
+2. Express + MongoDB
+3. Next.js app router setup
+4. a generic reusable auth module for the new repo
