@@ -71,17 +71,22 @@ async function buildIdentityDashboardPayload({
         if (hasAdminRole && !hasMFA) riskLevel = 'HIGH';
         else if (daysSinceSignIn > 30) riskLevel = 'MEDIUM';
         const isNewLocation = Boolean(lastSignIn && lastSignIn.location === 'Unknown Location');
+        const rawUserType = String(user.userType || user.UserType || '').trim().toLowerCase();
+        const isGuest = rawUserType === 'guest' || (user.userPrincipalName && user.userPrincipalName.includes('#EXT#'));
+        const isWorkforce = rawUserType === 'member' || (!rawUserType && user.userPrincipalName && !user.userPrincipalName.includes('#EXT#'));
 
         return {
             id: user.id,
             displayName: user.displayName || 'Unknown User',
             mail: user.mail,
             userPrincipalName: user.userPrincipalName,
+            userType: isGuest ? 'Guest' : isWorkforce ? 'Member' : 'Unknown',
             jobTitle: user.jobTitle || 'No Title',
             mobilePhone: user.mobilePhone || 'N/A',
             roles: userRoles,
             hasAdminRole,
-            isExternal: Boolean(user.mail?.endsWith('.com') && !user.mail?.endsWith('sunbird.com')),
+            isExternal: isGuest,
+            isWorkforce,
             mfaEnabled: hasMFA,
             authMethodCount: authMethods.length,
             riskLevel,
@@ -104,16 +109,21 @@ async function buildIdentityDashboardPayload({
     });
 
     const totalUsers = enrichedUsers.length;
-    const adminUsers = enrichedUsers.filter(user => user.hasAdminRole).length;
-    const mfaEnabledUsers = enrichedUsers.filter(user => user.mfaEnabled).length;
-    const mfaPercentage = totalUsers ? ((mfaEnabledUsers / totalUsers) * 100).toFixed(1) : '0.0';
+    const workforceUsers = enrichedUsers.filter(user => user.isWorkforce === true);
+    const externalUsers = enrichedUsers.filter(user => user.isExternal === true);
+    const unknownUserTypes = enrichedUsers.filter(user => !user.isWorkforce && !user.isExternal).length;
+    const adminUsers = workforceUsers.filter(user => user.hasAdminRole).length;
+    const mfaEnabledUsers = workforceUsers.filter(user => user.mfaEnabled).length;
+    const mfaMissingUsers = workforceUsers.filter(user => user.mfaEnabled === false).length;
+    const mfaUnknownUsers = workforceUsers.length - mfaEnabledUsers - mfaMissingUsers;
+    const mfaPercentage = workforceUsers.length ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1) : '0.0';
     const highRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'HIGH').length;
     const mediumRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'MEDIUM').length;
     const activeUsers24h = enrichedUsers.filter(user => user.lastSignIn.daysSince <= 1).length;
     const usersWithCompleteProfile = enrichedUsers.filter(user =>
         user.jobTitle !== 'No Title' && user.mobilePhone !== 'N/A'
     ).length;
-    const privilegedUsersWithoutMFA = enrichedUsers.filter(user => user.hasAdminRole && !user.mfaEnabled).length;
+    const privilegedUsersWithoutMFA = workforceUsers.filter(user => user.hasAdminRole && !user.mfaEnabled).length;
 
     let identityRiskScore = 0;
     enrichedUsers.forEach(user => {
@@ -196,15 +206,21 @@ async function buildIdentityDashboardPayload({
         fetchedAt: collectedAt.toISOString(),
         summary: {
             totalUsers,
+            workforceUsers: workforceUsers.length,
+            externalUsers: externalUsers.length,
+            unknownUserTypes,
             activeUsers24h,
             activeUsersPercentage: totalUsers ? Math.round((activeUsers24h / totalUsers) * 100) : 0,
             adminUsers,
             mfaEnabledPercentage: mfaPercentage,
+            mfaEnabledUsers,
+            mfaMissingUsers,
+            mfaUnknownUsers,
             highRiskUsers,
             highRiskBreakdown: {
                 adminWithoutMFA: privilegedUsersWithoutMFA,
                 neverSignedIn: enrichedUsers.filter(user => user.lastSignIn.daysSince > 999).length,
-                externalUser: enrichedUsers.filter(user => user.isExternal).length
+                externalUser: externalUsers.length
             },
             securityScore,
             identityRiskScore,

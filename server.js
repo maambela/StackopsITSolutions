@@ -513,7 +513,7 @@ function sendSunbirdJson(res, payload, operation) {
 async function fetchMicrosoftUsers(token) {
   try {
         const data = await fetchMicrosoftGraphJson(
-            'https://graph.microsoft.com/v1.0/users?$top=250&$select=displayName,mail,jobTitle,mobilePhone,userPrincipalName,id',
+            'https://graph.microsoft.com/v1.0/users?$top=250&$select=displayName,mail,jobTitle,mobilePhone,userPrincipalName,id,userType,accountEnabled,assignedLicenses,licenseAssignmentStates',
             token,
             'Microsoft Graph users'
         );
@@ -10571,18 +10571,43 @@ async function fetchRoleAssignmentsFromApi(companyId) {
     return roleAssignments;
 }
 
+function isWorkforceMicrosoftUser(user) {
+    const userType = String(user?.userType || user?.UserType || '').trim().toLowerCase();
+    const principal = String(user?.userPrincipalName || user?.mail || '').toLowerCase();
+    if (userType === 'member') return true;
+    if (userType === 'guest') return false;
+    return false;
+}
+
+function isGuestMicrosoftUser(user) {
+    const userType = String(user?.userType || user?.UserType || '').trim().toLowerCase();
+    const principal = String(user?.userPrincipalName || user?.mail || '').toLowerCase();
+    if (userType === 'guest') return true;
+    if (principal.includes('#ext#') || principal.includes('onmicrosoft.com#ext#')) return true;
+    return false;
+}
+
 function normalizeMicrosoftUsers(users) {
-    return (users || []).map(user => ({
-        id: user.id,
-        displayName: user.displayName || 'Unknown User',
-        mail: user.mail || user.userPrincipalName || 'N/A',
-        jobTitle: user.jobTitle || 'No Title',
-        mobilePhone: user.mobilePhone || 'N/A',
-        userPrincipalName: user.userPrincipalName,
-        isExternal: user.userPrincipalName && user.userPrincipalName.includes('#EXT#'),
-        status: 'active',
-        lastSync: new Date().toISOString()
-    }));
+    return (users || []).map(user => {
+        const isGuest = isGuestMicrosoftUser(user);
+        const isMember = isWorkforceMicrosoftUser(user);
+        const userType = String(user.userType || user.UserType || '').trim().toLowerCase();
+        return {
+            id: user.id,
+            displayName: user.displayName || 'Unknown User',
+            mail: user.mail || user.userPrincipalName || 'N/A',
+            jobTitle: user.jobTitle || 'No Title',
+            mobilePhone: user.mobilePhone || 'N/A',
+            userPrincipalName: user.userPrincipalName,
+            userType: isMember ? 'Member' : isGuest ? 'Guest' : userType ? userType.charAt(0).toUpperCase() + userType.slice(1) : 'Unknown',
+            isExternal: isGuest,
+            isWorkforce: isMember,
+            status: 'active',
+            lastSync: new Date().toISOString(),
+            assignedLicenses: Array.isArray(user.assignedLicenses) ? user.assignedLicenses : [],
+            licenseAssignmentStates: Array.isArray(user.licenseAssignmentStates) ? user.licenseAssignmentStates : []
+        };
+    });
 }
 
 async function fetchIdentityDetailsFromApi(tokenOverride = null) {
@@ -12150,10 +12175,11 @@ async function fetchGovernancePayloadFromApi() {
             status: alert.status || 'unknown'
         });
 
+        const workforceUsers = users.filter(user => isWorkforceMicrosoftUser(user));
         let mfaRegistered = 0;
         const usersWithoutMfa = [];
-        if (users.length) {
-            await mapWithConcurrency(users, 8, async (user) => {
+        if (workforceUsers.length) {
+            await mapWithConcurrency(workforceUsers, 8, async (user) => {
                 const authMethods = await fetchUserAuthMethods(token, user.id);
                 if (hasRealMfaMethod(authMethods)) {
                     mfaRegistered++;
@@ -12163,12 +12189,9 @@ async function fetchGovernancePayloadFromApi() {
             });
         }
 
-        const externalUserRows = users.filter(user =>
-            String(user.userPrincipalName || user.mail || '').includes('#EXT#') ||
-            String(user.userPrincipalName || user.mail || '').toLowerCase().includes('onmicrosoft.com#ext#')
-        ).map(userBrief);
-        const mfaCoverage = users.length ? Math.round((mfaRegistered / users.length) * 100) : 0;
-        const adminUserRows = users.filter(user => adminIds.has(user.id)).map(userBrief);
+        const externalUserRows = users.filter(user => isGuestMicrosoftUser(user)).map(userBrief);
+        const mfaCoverage = workforceUsers.length ? Math.round((mfaRegistered / workforceUsers.length) * 100) : 0;
+        const adminUserRows = workforceUsers.filter(user => adminIds.has(user.id)).map(userBrief);
         const nonCompliantDeviceRows = devices.filter(device => String(device.complianceState || '').toLowerCase() !== 'compliant').map(deviceBrief);
         const staleDeviceRows = devices.filter(device => {
             const lastSync = new Date(device.lastSyncDateTime || device.lastContactedDateTime || 0).getTime();
@@ -12284,13 +12307,16 @@ async function fetchGovernancePayloadFromApi() {
             dataSource: 'Microsoft Graph authentication methods',
             frequency: 'Quarterly',
             status: mfaCoverage >= 90 ? 'Connected' : 'Attention Required',
-            evidence: `${mfaRegistered} of ${users.length} users have a registered MFA method. Current MFA coverage is ${mfaCoverage}%.`,
+            evidence: `${mfaRegistered} of ${workforceUsers.length} workforce users have a registered MFA method. Guest users remain visible but are excluded from workforce MFA scope. Current MFA coverage is ${mfaCoverage}%.`,
             evidenceData: {
-                total_users: users.length,
+                scope: 'workforce_member_only',
+                total_workforce_users: workforceUsers.length,
+                total_guest_users: externalUserRows.length,
                 mfa_registered: mfaRegistered,
-                mfa_missing: Math.max(0, users.length - mfaRegistered),
+                mfa_missing: Math.max(0, workforceUsers.length - mfaRegistered),
                 mfa_coverage: `${mfaCoverage}%`,
-                users_without_mfa: usersWithoutMfa.slice(0, 50)
+                users_without_mfa: usersWithoutMfa.slice(0, 50),
+                guest_users_sample: externalUserRows.slice(0, 20)
             }
         });
 
@@ -12532,11 +12558,12 @@ async function fetchComplianceControlsFromApi() {
         // 1. MFA ON ALL ACCOUNTS (API)
         try {
             const users = await fetchMicrosoftUsers(token);
+            const workforceUsers = users.filter(user => isWorkforceMicrosoftUser(user));
             let mfaRegistered = 0;
-            const totalUsers = users.length;
+            const totalUsers = workforceUsers.length;
             const usersWithoutMfa = [];
 
-            await mapWithConcurrency(users, 8, async (user) => {
+            await mapWithConcurrency(workforceUsers, 8, async (user) => {
                 const authMethods = await fetchUserAuthMethods(token, user.id);
                 if (hasRealMfaMethod(authMethods)) {
                     mfaRegistered++;
@@ -12546,12 +12573,12 @@ async function fetchComplianceControlsFromApi() {
             });
 
             const coverage = totalUsers > 0 ? Math.round((mfaRegistered / totalUsers) * 100) : 0;
-            let insight = coverage === 100 ? "🟢 MFA fully enforced" : 
-                         (coverage >= 80 ? "🟡 MFA partially enforced" : "🔴 Users exposed to credential theft");
+            let insight = coverage === 100 ? "🟢 Workforce MFA fully enforced" : 
+                         (coverage >= 80 ? "🟡 Workforce MFA partially enforced" : "🔴 Workforce users exposed to credential theft");
 
             controls.push({
-                name: "MFA on all accounts", area: "Identity", insight: insight,
-                evidenceData: { total_users: totalUsers, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
+                name: "MFA on all accounts", area: "Identity", insight: `${insight} (scope: workforce Member accounts only; Guests excluded)`,
+                evidenceData: { scope: 'workforce_member_only', total_users: totalUsers, guest_users: users.filter(user => isGuestMicrosoftUser(user)).length, mfa_registered: mfaRegistered, mfa_missing: totalUsers - mfaRegistered, coverage: `${coverage}%`, users_without_mfa: usersWithoutMfa.slice(0, 50) }
             });
         } catch (e) { console.error('MFA Control Error', e); }
 
@@ -12818,6 +12845,7 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
         // ---------------------------------------------------------
         try {
             const users = await fetchMicrosoftUsers(token);
+            const workforceUsers = users.filter(user => isWorkforceMicrosoftUser(user));
             let mfaMissingCount = 0;
             let weakAdminCount = 0;
             let mixedAdminCount = 0;
@@ -12825,7 +12853,6 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
             const weakAdminUsers = [];
             const mixedAdminUsers = [];
 
-            // Check roles for admin tasks
             const roleAssignments = await fetchMicrosoftRoleAssignments(token);
             const adminIds = new Set();
             roleAssignments.forEach(assignment => {
@@ -12835,7 +12862,7 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
                 }
             });
 
-            await mapWithConcurrency(users, 8, async (user) => {
+            await mapWithConcurrency(workforceUsers, 8, async (user) => {
                 const authMethods = await fetchUserAuthMethods(token, user.id);
                 const hasMfa = hasRealMfaMethod(authMethods);
                 const isAdmin = adminIds.has(user.id);
@@ -12846,13 +12873,11 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
                 }
 
                 if (isAdmin) {
-                    // Task 2: Enforce admin MFA (Checking for weak/no MFA)
                     if (!hasMfa || authMethods.length < 2) {
                         weakAdminCount++;
                         weakAdminUsers.push(userBrief(user));
                     }
 
-                    // Task 3: Separate admin accounts (Heuristic: Standard email format used as admin)
                     const upn = (user.userPrincipalName || '').toLowerCase();
                     if (!upn.includes('admin') && !upn.includes('adm-')) {
                         mixedAdminCount++;
@@ -12861,12 +12886,11 @@ async function fetchOperationsPayloadFromApi({ signal = null, collectorContext =
                 }
             });
 
-            // Task 1: Complete MFA rollout
             if (mfaMissingCount > 0) {
-                addTask("Complete MFA rollout", "Identity", "High", "🔴 Users vulnerable",
-                    "Users without MFA are highly susceptible to credential stuffing and phishing attacks.",
-                    `${mfaMissingCount} users without MFA registered.`,
-                    "1. Open Azure AD Conditional Access.\n2. Enforce MFA policy for all users.\n3. Run registration campaign.",
+                addTask("Complete MFA rollout", "Identity", "High", "🔴 Workforce users vulnerable",
+                    "Workforce users without MFA are highly susceptible to credential stuffing and phishing attacks. Guest accounts remain visible but are excluded from the workforce rollout scope.",
+                    `${mfaMissingCount} workforce users without MFA registered.`,
+                    "1. Open Azure AD Conditional Access.\n2. Enforce MFA for all workforce Member accounts.\n3. Run registration campaign and keep Guests excluded from the workforce rollout metric.",
                     "Microsoft Graph authentication methods",
                     usersWithoutMfa.slice(0, 50)
                 );
@@ -13131,16 +13155,22 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             // Check for unusual location (simple logic - can be enhanced)
             const isNewLocation = lastSignIn && lastSignIn.location === 'Unknown Location';
 
+            const userType = String(user.userType || user.UserType || '').trim().toLowerCase();
+            const isGuest = isGuestMicrosoftUser(user);
+            const isWorkforce = isWorkforceMicrosoftUser(user);
+
             return {
                 id: user.id,
                 displayName: user.displayName || 'Unknown User',
                 mail: user.mail,
                 userPrincipalName: user.userPrincipalName,
+                userType: isGuest ? 'Guest' : isWorkforce ? 'Member' : 'Unknown',
                 jobTitle: user.jobTitle || 'No Title',
                 mobilePhone: user.mobilePhone || 'N/A',
                 roles: userRoles,
                 hasAdminRole: hasAdminRole,
-                isExternal: user.mail?.endsWith('.com') && !user.mail?.endsWith('sunbird.com') ? true : false,
+                isExternal: isGuest,
+                isWorkforce,
                 mfaEnabled: hasMFA,
                 authMethodCount: authMethods.length,
                 riskLevel: riskLevel,
@@ -13162,11 +13192,16 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         });
         operation.step('users_enriched', { users: enrichedUsers.length });
 
-        // Calculate dashboard metrics
+        // Calculate dashboard metrics using native Entra workforce scope.
         const totalUsers = enrichedUsers.length;
-        const adminUsers = enrichedUsers.filter(u => u.hasAdminRole).length;
-        const mfaEnabledUsers = enrichedUsers.filter(u => u.mfaEnabled).length;
-        const mfaPercentage = ((mfaEnabledUsers / totalUsers) * 100).toFixed(1);
+        const workforceUsers = enrichedUsers.filter(u => u.isWorkforce === true);
+        const externalUsers = enrichedUsers.filter(u => u.isExternal === true);
+        const unknownUserTypes = enrichedUsers.filter(u => !u.isWorkforce && !u.isExternal).length;
+        const adminUsers = workforceUsers.filter(u => u.hasAdminRole).length;
+        const mfaEnabledUsers = workforceUsers.filter(u => u.mfaEnabled).length;
+        const mfaMissingUsers = workforceUsers.filter(u => u.mfaEnabled === false).length;
+        const mfaUnknownUsers = workforceUsers.length - mfaEnabledUsers - mfaMissingUsers;
+        const mfaPercentage = workforceUsers.length ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1) : '0.0';
         const highRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'HIGH').length;
         const mediumRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'MEDIUM').length;
         const activeUsers24h = enrichedUsers.filter(u => u.lastSignIn.daysSince <= 1).length;
@@ -13175,7 +13210,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         ).length;
 
         // 🎯 NEW: A. Privileged Risk - Admins without MFA
-        const privilegedUsersWithoutMFA = enrichedUsers.filter(u => u.hasAdminRole && !u.mfaEnabled).length;
+        const privilegedUsersWithoutMFA = workforceUsers.filter(u => u.hasAdminRole && !u.mfaEnabled).length;
 
         // 🎯 NEW: B. Identity Risk Score (calculated, not random)
         let identityRiskScore = 0;
@@ -13248,17 +13283,17 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
 
         // 🎯 NEW: H. Identity Hygiene Score
         const profileCompleteness = Math.round((enrichedUsers.filter(u => u.jobTitle !== 'No Title').length / totalUsers) * 100);
-        const authCompleteness = Math.round((mfaEnabledUsers / totalUsers) * 100);
-        const activityCompleteness = Math.round((enrichedUsers.filter(u => u.lastSignIn.daysSince <= 90).length / totalUsers) * 100);
+        const workforceBase = Math.max(1, workforceUsers.length);
+        const authCompleteness = Math.round((mfaEnabledUsers / workforceBase) * 100);
+        const activityCompleteness = Math.round((workforceUsers.filter(u => u.lastSignIn.daysSince <= 90).length / workforceBase) * 100);
         const identityHygieneScore = Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
 
-        // System health metrics
         const systemHealth = {
-            performance: Math.round((enrichedUsers.filter(u => u.lastSignIn.status === 'Success').length / totalUsers) * 100) || 0,
-            availability: Math.round(((activeUsers24h / totalUsers) * 100) || 0),
-            security: Math.round((mfaEnabledUsers / totalUsers) * 100) || 0,
-            compliance: Math.round((usersWithCompleteProfile / totalUsers) * 100) || 0,
-            backup: Math.round((enrichedUsers.filter(u => u.authMethodCount > 1).length / totalUsers) * 100) || 0
+            performance: Math.round((workforceUsers.filter(u => u.lastSignIn.status === 'Success').length / workforceBase) * 100) || 0,
+            availability: Math.round(((workforceUsers.filter(u => u.lastSignIn.daysSince <= 1).length / workforceBase) * 100) || 0),
+            security: Math.round((mfaEnabledUsers / workforceBase) * 100) || 0,
+            compliance: Math.round((workforceUsers.filter(u => u.jobTitle !== 'No Title' && u.mobilePhone !== 'N/A').length / workforceBase) * 100) || 0,
+            backup: Math.round((workforceUsers.filter(u => u.authMethodCount > 1).length / workforceBase) * 100) || 0
         };
 
         // Smart insights
@@ -13311,15 +13346,20 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             fetchedAt: new Date().toISOString(),
             summary: {
                 totalUsers,
+                workforceUsers: workforceUsers.length,
+                externalUsers: externalUsers.length,
+                unknownUserTypes,
                 activeUsers24h,
                 activeUsersPercentage: Math.round((activeUsers24h / totalUsers) * 100),
                 adminUsers,
                 mfaEnabledPercentage: mfaPercentage,
+                mfaEnabledUsers,
+                mfaMissingUsers,
                 highRiskUsers,
                 highRiskBreakdown: {
                     adminWithoutMFA: privilegedUsersWithoutMFA,
                     neverSignedIn: enrichedUsers.filter(u => u.lastSignIn.daysSince > 999).length,
-                    externalUser: enrichedUsers.filter(u => u.isExternal).length
+                    externalUser: externalUsers.length
                 },
                 securityScore,
                 identityRiskScore,
@@ -16425,7 +16465,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
         case 'governance': {
             if (governanceEvidenceService) {
                 try {
-                    await collectAndPersistGovernanceEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
+                    await collectAndPersistGovernanceEvidence(companyId, 'enterprise_refresh');
                     return null;
                 } catch (error) {
                     const refreshError = new Error(`Governance evidence refresh failed: ${error.message}`);
@@ -16442,7 +16482,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
         case 'compliance': {
             if (complianceEvidenceService) {
                 try {
-                    await collectAndPersistComplianceEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
+                    await collectAndPersistComplianceEvidence(companyId, 'enterprise_refresh');
                     return null;
                 } catch (error) {
                     const refreshError = new Error(`Compliance evidence refresh failed: ${error.message}`);
@@ -16459,7 +16499,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
         case 'operations': {
             if (operationsEvidenceService) {
                 try {
-                    await collectAndPersistOperationsEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
+                    await collectAndPersistOperationsEvidence(companyId, 'enterprise_refresh');
                     return null;
                 } catch (error) {
                     const refreshError = new Error(`Operations evidence refresh failed: ${error.message}`);

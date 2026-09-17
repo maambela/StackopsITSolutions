@@ -128,13 +128,13 @@ test('dashboard context builders include StackCTRL calculated metrics and eviden
         evidence: [{
             evidenceType: 'users',
             data: [
-                { id: 1, mfaEnabled: true, riskLevel: 'SAFE', roles: ['User'], lastSignIn: { device: 'Laptop', status: 'Success', dateTime: new Date().toISOString() } },
-                { id: 2, mfaEnabled: false, riskLevel: 'HIGH', roles: ['Global Administrator'], isExternal: true, lastSignIn: { device: 'Unknown', status: 'Failed' } }
+                { id: 1, userType: 'Member', mfaEnabled: true, riskLevel: 'SAFE', roles: ['User'], lastSignIn: { device: 'Laptop', status: 'Success', dateTime: new Date().toISOString() } },
+                { id: 2, userType: 'Guest', mfaEnabled: false, riskLevel: 'HIGH', roles: ['Global Administrator'], isExternal: true, lastSignIn: { device: 'Unknown', status: 'Failed' } }
             ]
         }]
     }));
-    assert.equal(identity.dashboardMetrics.mfaCoverage, 50);
-    assert.equal(identity.dashboardMetrics.adminsWithoutMfa, 1);
+    assert.equal(identity.dashboardMetrics.mfaCoverage, 100);
+    assert.equal(identity.dashboardMetrics.adminsWithoutMfa, 0);
     assert.equal(identity.dashboardMetrics.signInIssues, 1);
     assert.equal(identity.chartsData.riskDistribution.high, 1);
 
@@ -152,9 +152,34 @@ test('dashboard context builders include StackCTRL calculated metrics and eviden
     assert.equal(devices.dashboardMetrics.unmanagedDevices, 1);
 });
 
+test('workforce MFA excludes Guests and unknown user types from the denominator', () => {
+    const usersRows = [
+        { id: 'm1', userType: 'Member', mfa_enabled: true },
+        { id: 'm2', userType: 'Member', mfa_enabled: false },
+        { id: 'm3', userType: 'Member', mfa_enabled: false },
+        { id: 'g1', userType: 'Guest', mfa_enabled: false },
+        { id: 'g2', userType: 'Guest', mfa_enabled: true },
+        { id: 'u1', userType: 'Unknown', mfa_enabled: false }
+    ];
+
+    const processed = buildIdentityDashboardSource({
+        metricsRow: { total_users: 6, mfa_enabled_users: 2, mfa_percentage: 33 },
+        usersRows
+    });
+
+    assert.equal(processed.dashboardMetrics.workforceUsers, 3);
+    assert.equal(processed.dashboardMetrics.externalUsers, 2);
+    assert.equal(processed.dashboardMetrics.unknownUserTypes, 1);
+    assert.equal(processed.dashboardMetrics.mfaEnabled, 1);
+    assert.equal(processed.dashboardMetrics.mfaMissing, 2);
+    assert.equal(processed.dashboardMetrics.mfaCoverage, 33);
+    assert.equal(processed.dashboardMetrics.mfaAssessmentStatus, 'incomplete');
+});
+
 test('Identity dashboard and StackCTRL context share the exact user-derived premium dashboard metrics', () => {
     const usersRows = Array.from({ length: 57 }, (_, index) => ({
         id: `user-${index + 1}`,
+        userType: index >= 53 ? 'Guest' : 'Member',
         mfa_enabled: index < 5 || (index >= 6 && index <= 46),
         roles: JSON.stringify(index < 5
             ? ['Global Administrator', 'Security Administrator']
@@ -181,8 +206,8 @@ test('Identity dashboard and StackCTRL context share the exact user-derived prem
     const expected = {
         totalUsers: 57,
         mfaEnabled: 46,
-        mfaMissing: 11,
-        mfaCoverage: 81,
+        mfaMissing: 7,
+        mfaCoverage: 87,
         privilegedUsers: 6,
         highRiskUsers: 1,
         adminsWithoutMfa: 1,

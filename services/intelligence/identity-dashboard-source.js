@@ -1,3 +1,10 @@
+function normalizeUserType(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'member') return 'Member';
+    if (normalized === 'guest') return 'Guest';
+    return 'Unknown';
+}
+
 function numberValue(value, fallback = 0) {
     if (value === null || value === undefined || value === '') return fallback;
     const number = Number(value);
@@ -22,19 +29,26 @@ function booleanValue(value) {
 }
 
 function normalizeIdentityDashboardUser(row = {}) {
+    const userType = normalizeUserType(row.userType ?? row.user_type ?? row.UserType ?? row.type ?? row.accountType);
+    const isWorkforce = userType === 'Member';
+    const isExternal = userType === 'Guest';
     return {
         id: row.id || row.ID || null,
         displayName: row.displayName || row.display_name || 'Unknown User',
         mail: row.mail || null,
         userPrincipalName: row.userPrincipalName || row.user_principal_name || null,
+        userType,
         jobTitle: row.jobTitle || row.job_title || 'No Title',
         mobilePhone: row.mobilePhone || row.mobile_phone || 'N/A',
         roles: parseArray(row.roles),
-        mfaEnabled: booleanValue(row.mfaEnabled ?? row.mfa_enabled),
+        mfaEnabled: booleanValue(row.mfaEnabled ?? row.mfa_enabled ?? row.mfaRegistered ?? row.hasMfa),
         authMethodCount: numberValue(row.authMethodCount ?? row.auth_method_count),
         riskLevel: row.riskLevel || row.risk_level || 'SAFE',
-        isExternal: booleanValue(row.isExternal ?? row.is_external),
+        isExternal,
+        isWorkforce,
         accountEnabled: row.accountEnabled ?? row.account_enabled ?? true,
+        assignedLicenses: Array.isArray(row.assignedLicenses) ? row.assignedLicenses : [],
+        licenseAssignmentStates: Array.isArray(row.licenseAssignmentStates) ? row.licenseAssignmentStates : [],
         lastSignIn: {
             dateTime: row.lastSignIn?.dateTime || row.last_signin_datetime || null,
             daysSince: numberValue(row.lastSignIn?.daysSince ?? row.days_since_signin, 999),
@@ -83,12 +97,16 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
     const users = mergeRoleAssignments(usersRows.map(normalizeIdentityDashboardUser), roleAssignments);
     const hasUsers = users.length > 0;
     const totalUsers = hasUsers ? users.length : numberValue(metricsRow.total_users);
-    const mfaEnabled = hasUsers ? users.filter(user => user.mfaEnabled).length : numberValue(metricsRow.mfa_enabled_users);
-    const mfaCoverage = totalUsers ? Math.round((mfaEnabled / totalUsers) * 100) : numberValue(metricsRow.mfa_percentage);
-    const privilegedUsersList = users.filter(user => privilegedRoleNames(user).length > 0);
+    const workforceUsers = users.filter(user => user.isWorkforce);
+    const externalUsers = users.filter(user => user.isExternal);
+    const unknownUserTypes = users.filter(user => user.userType === 'Unknown').length;
+    const mfaEnabled = workforceUsers.filter(user => user.mfaEnabled).length;
+    const mfaMissing = workforceUsers.filter(user => user.mfaEnabled === false).length;
+    const mfaUnknown = workforceUsers.length - mfaEnabled - mfaMissing;
+    const mfaCoverage = workforceUsers.length ? Math.round((mfaEnabled / workforceUsers.length) * 100) : 0;
+    const privilegedUsersList = workforceUsers.filter(user => privilegedRoleNames(user).length > 0);
     const privilegedUsers = hasUsers ? privilegedUsersList.length : numberValue(metricsRow.admin_users);
     const highRiskUsers = hasUsers ? users.filter(user => String(user.riskLevel).toUpperCase() === 'HIGH').length : numberValue(metricsRow.high_risk_users);
-    const externalUsers = hasUsers ? users.filter(user => user.isExternal).length : numberValue(metricsRow.external_users);
     const unknownDevices = hasUsers
         ? users.filter(user => /unknown|no sign-in|n\/a/i.test(String(user.lastSignIn.device || 'Unknown'))).length
         : numberValue(riskRow.device_unknown);
@@ -97,6 +115,7 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
     const multiplePrivilegedRoles = hasUsers ? users.filter(user =>
         user.roles.map(roleName).filter(role => /(admin|global|privileged|security|directory)/i.test(role)).length > 1
     ).length : 0;
+    const mfaAssessmentStatus = unknownUserTypes || mfaUnknown ? 'incomplete' : workforceUsers.length ? 'complete' : 'not_applicable';
     const securityScore = Math.round(
         (mfaCoverage * 0.4) +
         ((100 - (totalUsers > 0 ? (highRiskUsers / totalUsers) * 100 : 0)) * 0.3) +
@@ -104,15 +123,19 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
     );
     const dashboardMetrics = {
         totalUsers,
+        workforceUsers: workforceUsers.length,
+        externalUsers: externalUsers.length,
+        unknownUserTypes,
         activeUsers: numberValue(metricsRow.active_users_24h),
         mfaEnabled,
-        mfaMissing: Math.max(0, totalUsers - mfaEnabled),
+        mfaMissing,
+        mfaUnknown,
         mfaCoverage,
+        mfaAssessmentStatus,
         privilegedUsers,
         adminsWithoutMfa,
         highRiskUsers,
         signInIssues,
-        externalUsers,
         unknownDevices,
         multiplePrivilegedRoles,
         securityScore

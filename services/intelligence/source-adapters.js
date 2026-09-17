@@ -225,6 +225,8 @@ function blockedStoredEvidenceResult({
     const reason = snapshot?.ErrorMessage || snapshot?.IncompleteReason || defaultMessage;
     const dashboardMetrics = snapshot?.DashboardMetricsJson || {};
     return {
+        status: 'missing',
+        freshness: { lastUpdated: null, ageMinutes: null },
         records: [],
         notConfigured: !tenantConfigured,
         metrics: dashboardMetrics,
@@ -232,6 +234,7 @@ function blockedStoredEvidenceResult({
         sourceLineage: storedEvidenceLineage(snapshot, lineageOptions),
         evidence: [],
         warnings: [`${reason} Azure analysis is blocked until API-connected evidence collection succeeds.`],
+        errorMessage: reason,
         rawReference: { table, recordId: snapshot?.ID || null }
     };
 }
@@ -1149,7 +1152,7 @@ async load(pool, companyId, capability) {
 
                 const snapshot = snapshots[0];
 
-                if (!snapshot) {
+                if (!snapshot || !Number(snapshot.IsComplete) || !['complete', 'completed_with_warnings'].includes(String(snapshot.CollectionStatus || ''))) {
                     const latestRows = await queryRows(
                         pool,
                         `SELECT *
@@ -1161,7 +1164,7 @@ async load(pool, companyId, capability) {
                     );
 
                     return blockedStoredEvidenceResult({
-                        snapshot: latestRows[0],
+                        snapshot: latestRows[0] || snapshot,
                         tenantConfigured: tenant.length > 0,
                         table: this.table,
                         displayName: 'Governance',
@@ -1171,10 +1174,7 @@ async load(pool, companyId, capability) {
 
                 const evidenceRows = await queryRows(
                     pool,
-                    `SELECT *
-                    FROM StackCTRLGovernanceEvidence
-                    WHERE SnapshotID = ?
-                    ORDER BY ID`,
+                    `SELECT * FROM StackCTRLGovernanceEvidence WHERE SnapshotID = ? ORDER BY ID`,
                     [snapshot.ID]
                 );
 
@@ -1331,7 +1331,7 @@ async load(pool, companyId, capability) {
 
                 const snapshot = snapshots[0];
 
-                if (!snapshot) {
+                if (!snapshot || !Number(snapshot.IsComplete) || !['complete', 'completed_with_warnings'].includes(String(snapshot.CollectionStatus || ''))) {
                     const latestRows = await queryRows(
                         pool,
                         `SELECT *
@@ -1343,7 +1343,7 @@ async load(pool, companyId, capability) {
                     );
 
                     return blockedStoredEvidenceResult({
-                        snapshot: latestRows[0],
+                        snapshot: latestRows[0] || snapshot,
                         tenantConfigured: tenant.length > 0,
                         table: this.table,
                         displayName: 'Compliance Validation',
@@ -1353,10 +1353,7 @@ async load(pool, companyId, capability) {
 
                 const evidenceRows = await queryRows(
                     pool,
-                    `SELECT *
-                     FROM StackCTRLComplianceEvidence
-                     WHERE SnapshotID = ?
-                     ORDER BY ID`,
+                    `SELECT * FROM StackCTRLComplianceEvidence WHERE SnapshotID = ? ORDER BY ID`,
                     [snapshot.ID]
                 );
 

@@ -1,0 +1,272 @@
+Γ£ö Cloudflare adapter refreshes the dashboard service when backend evidence is missing (10.8408ms)
+Γ£ö Cloudflare stored-evidence sort failure becomes a warning when live metrics succeed (1.5429ms)
+[Intelligence Source] Cloudflare Network Security refresh error: {
+  sourceKey: 'cloudflare_network_security',
+  companyId: 1,
+  errorMessage: 'cloudflare_network_security source refresh exceeded 15ms.',
+  isRefreshError: false,
+  notConfigured: false,
+  hasStoredData: false
+}
+Γ£ö a stalled source refresh becomes an explicit adapter error instead of blocking snapshot creation (20.6482ms)
+Γ£ö dashboard context builders include StackCTRL calculated metrics and evidence lists (5.2014ms)
+Γ£ö workforce MFA excludes Guests and unknown user types from the denominator (2.1758ms)
+Γ£ö Identity dashboard and StackCTRL context share the exact user-derived premium dashboard metrics (2.8591ms)
+Γ£ö Sunbird Identity adapter reads the latest complete saved StackCTRL evidence without recalculating metrics (2.4072ms)
+Γ£ö Cloudflare dashboard context exposes network metrics, evidence, and chart-ready values (2.7071ms)
+Γ£ö not-expected sources do not gain artificial evidence from a dashboard builder (0.8422ms)
+Γ£ö governance evidence excludes manual attestation rows from Azure input (9.4607ms)
+Γ£ö compliance evidence excludes manual attestation controls from Azure input (3.5176ms)
+Γ£ö operations evidence excludes manual configuration tasks such as 1Password from Azure input (1.7493ms)
+Γ£ö api evidence filters identify manual-only records (0.4345ms)
+Γ£ö manual-only dashboard payloads create explicit blocked evidence results (1.9735ms)
+Γ£ö stores persist manual-only snapshots as blocked with counts and ErrorMessage (7.125ms)
+Γ£ö the six Governance, Compliance, and Operations evidence tables are declared (0.7618ms)
+Γ£û blocked saved snapshots expose total, API, manual, status, and reason lineage (4.5895ms)
+Γ£û latest complete API-connected snapshots are available to Enterprise adapters (1.9658ms)
+Γ£û dashboard_request and enterprise_refresh invoke all three evidence collectors (9.8066ms)
+Γä╣ tests 19
+Γä╣ suites 0
+Γä╣ pass 16
+Γä╣ fail 3
+Γä╣ cancelled 0
+Γä╣ skipped 0
+Γä╣ todo 0
+Γä╣ duration_ms 355.5068
+
+Γ£û failing tests:
+
+test at tests\governance-compliance-operations-evidence.test.js:155:1
+Γ£û blocked saved snapshots expose total, API, manual, status, and reason lineage (4.5895ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'error' !== 'missing'
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\governance-compliance-operations-evidence.test.js:186:16)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'error',
+    expected: 'missing',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\governance-compliance-operations-evidence.test.js:196:1
+Γ£û latest complete API-connected snapshots are available to Enterprise adapters (1.9658ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'error'
+  - 'available'
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\governance-compliance-operations-evidence.test.js:229:16)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'error',
+    expected: 'available',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\governance-compliance-operations-evidence.test.js:238:1
+Γ£û dashboard_request and enterprise_refresh invoke all three evidence collectors (9.8066ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /collectAndPersistGovernanceEvidence\(companyId, 'enterprise_refresh'\)/. Input:
+  
+  "const bcrypt = require('bcryptjs');\r\n" +
+    "const express = require('express');\r\n" +
+    "const mysql = require('mysql2/promise');\r\n" +
+    "const axios = require('axios');\r\n" +
+    "const cors = require('cors');\r\n" +
+    "const path = require('path');\r\n" +
+    "const jwt = require('jsonwebtoken');\r\n" +
+    "const crypto = require('crypto');\r\n" +
+    "const PDFDocument = require('pdfkit');\r\n" +
+    "const fs = require('fs');\r\n" +
+    "const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');\r\n" +
+    "const { Webhook } = require('svix');\r\n" +
+    "const SVGtoPDF = require('svg-to-pdfkit');\r\n" +
+    "const { ClientSecretCredential } = require('@azure/identity');\r\n" +
+    'const {\r\n' +
+    '    normalizeSeverity: normalizeWhatsAppSeverity,\r\n' +
+    '    normalizeWhatsAppRecipient,\r\n' +
+    '    sendSecurityAlert\r\n' +
+    "} = require('./services/whatsapp');\r\n" +
+    "const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');\r\n" +
+    "const { createAzureOpenAIService } = require('./services/azure-openai');\r\n" +
+    "const { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');\r\n" +
+    "const { createStackCTRLIntelligenceScheduler, DEFAULT_OUTPUT_TYPES } = require('./services/intelligence/scheduler');\r\n" +
+    "const { buildIdentityDashboardSource } = require('./services/intelligence/identity-dashboard-source');\r\n" +
+    "const { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');\r\n" +
+    "const { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');\r\n" +
+    "const { createIdentityEvidenceAutomation } = require('./services/intelligence/identity-evidence-automation');\r\n" +
+    "const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');\r\n" +
+    "const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');\r\n" +
+    "const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');\r\n" +
+    "const { buildEmailDashboardPayload } = require('./services/intelligence/email-dashboard-processor');\r\n" +
+    "const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');\r\n" +
+    "const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');\r\n" +
+    "const { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');\r\n" +
+    "const { createNetworkEvidenceStore } = require('./services/intelligence/network-evidence-store');\r\n" +
+    "const { createNetworkEvidenceAutomation } = require('./services/intelligence/network-evidence-automation');\r\n" +
+    "const { buildBackupDashboardPayload } = require('./services/intelligence/backup-dashboard-processor');\r\n" +
+    "const { createBackupEvidenceStore } = require('./services/intelligence/backup-evidence-store');\r\n" +
+    "const { createTrackedCollectorRegistry, runAbortableOperation, acquireConnectionWithDeadline, runDatabaseOperationWithDeadline } = require('./services/intelligence/collector-runtime');\r\n" +
+    "const { createBackupEvidenceAutomation } = require('./services/intelligence/backup-evidence-automation');\r\n" +
+    "const { buildApplicationsDashboardPayload } = require('./services/intelligence/applications-dashboard-processor');\r\n" +
+    "const { createApplicationsEvidenceStore } = require('./services/intelligence/applications-evidence-store');\r\n" +
+    "const { createApplicationsEvidenceAutomation } = require('./services/intelligence/applications-evidence-automation');\r\n" +
+    "const { buildSecurityDashboardPayload } = require('./services/intelligence/security-dashboard-processor');\r\n" +
+    "const { createSecurityEvidenceStore } = require('./services/intelligence/security-evidence-store');\r\n" +
+    "const { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');\r\n" +
+    "const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');\r\n" +
+    "const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');\r\n" +
+    "const { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');\r\n" +
+    "const { buildComplianceDashboardPayload } = require('./services/intelligence/compliance-dashboard-processor');\r\n" +
+    "const { createComplianceEvidenceStore } = require('./services/intelligence/compliance-evidence-store');\r\n" +
+    "const { createComplianceEvidenceAutomation } = require('./services/intelligence/compliance-evidence-automation');\r\n" +
+    "const { buildOperationsDashboardPayload } = require('./services/intelligence/operations-dashboard-processor');\r\n" +
+    "const { createOperationsEvidenceStore } = require('./services/intelligence/operations-evidence-store');\r\n" +
+    "const { createOperationsEvidenceAutomation } = require('./services/intelligence/operations-evidence-automation');\r\n" +
+    "const { createStackCTRLServerAutomation } = require('./services/intelligence/server-automation');\r\n" +
+    "const { createAdminIntelligenceService } = require('./services/admin-intelligence');\r\n" +
+    "const { createEnterpriseIntelligenceService } = require('./services/enterprise-intelligence');\r\n" +
+    "const { DateTime } = require('luxon');\r\n" +
+    "const { createStackCTRLIntelligenceRouter } = require('./routes/stackctrl-intelligence');\r\n" +
+    "const { createAdminIntelligenceRouter } = require('./routes/admin-intelligence');\r\n" +
+    "const { createPowerBIReportingService } = require('./services/powerbi-reporting');\r\n" +
+    "const { createPowerBIReportingRouter } = require('./routes/powerbi-reporting');\r\n" +
+    '\r\n' +
+    '// invoice payment endpoints \r\n' +
+    'require("dotenv").config();\r\n' +
+    '\r\n' +
+    "const ACCESS_TOKEN_SECRET = '7a076e42670cfe26193655fe5f48b776defe078754ca16fb9ae0a054b354d335';\r\n" +
+    'const accessContextCache = new Map();\r\n' +
+    '\r\n' +
+    'function getTenantByEmail(email) {\r\n' +
+    "  const key = String(email || '').toLowerCase();\r\n" +
+    '  const cached = accessContextCache.get(key);\r\n' +
+    '  if (!cached) return null;\r\n' +
+    '  return {\r\n' +
+    "    clientId: cached.accessType || 'standard',\r\n" +
+    '    tenantId: cached.tenantId || null,\r\n' +
+    '    companyId: cached.companyId || null\r\n' +
+    '  };\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    '// ===============================\r\n' +
+    '// MICROSOFT GRAPH -  Identity Protection\r\n' +
+    '// ===============================\r\n' +
+    '// Token cache (in production, use Redis or database)\r\n' +
+    'const microsoftTokenCache = new Map();\r\n' +
+    'let microsoftGraphCredentialsCache = null;\r\n' +
+    'let microsoftGraphCredentialsPromise = null;\r\n' +
+    'let microsoftGraphTokenPromise = null;\r\n' +
+    'let microsoftGraphStartupWarningShown = false;\r\n' +
+    'const MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS = Math.max(3000, Number(process.env.MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS) || 12000);\r\n' +
+    'const MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS = Math.max(3000, Number(process.env.MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS) || 12000);\r\n' +
+    'const STACKCTRL_COLLECTOR_TIMEOUT_MS = Math.max(15000, Number(process.env.STACKCTRL_COLLECTOR_TIMEOUT_MS) || 180000);\r\n' +
+    'const BACKUP_DATABASE_TIMEOUT_MS = Math.max(5000, Number(process.env.BACKUP_DATABASE_TIMEOUT_MS) || 30000);\r\n' +
+    'const authMethodsCache = new Map();\r\n' +
+    'const AUTH_METHODS_CACHE_TTL_MS = 5 * 60 * 1000;\r\n' +
+    'let identityEvidenceService = null;\r\n' +
+    'let deviceEvidenceService = null;\r\n' +
+    'let emailEvidenceService = null;\r\n' +
+    'let networkEvidenceService = null;\r\n' +
+    'let backupEvidenceService = null;\r\n' +
+    'let applicationsEvidenceService = null;\r\n' +
+    'let securityEvidenceService = null;\r\n' +
+    'let governanceEvidenceService = null;\r\n' +
+    'let complianceEvidenceService = null;\r\n' +
+    'let operationsEvidenceService = null;\r\n' +
+    '\r\n' +
+    'function sleep(ms) {\r\n' +
+    '  return new Promise(resolve => setTimeout(resolve, ms));\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function getCachedAuthMethods(userId) {\r\n' +
+    '  const cached = authMethodsCache.get(userId);\r\n' +
+    '  if (!cached) return null;\r\n' +
+    '  if (cached.expiresAt <= Date.now()) {\r\n' +
+    '    authMethodsCache.delete(userId);\r\n' +
+    '    return null;\r\n' +
+    '  }\r\n' +
+    '  return cached.methods;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function setCachedAuthMethods(userId, methods) {\r\n' +
+    '  authMethodsCache.set(userId, {\r\n' +
+    '    methods: Array.isArray(methods) ? methods : [],\r\n' +
+    '    expiresAt: Date.now() + AUTH_METHODS_CACHE_TTL_MS\r\n' +
+    '  });\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function hasRealMfaMethod(authMethods) {\r\n' +
+    '  if (!Array.isArray(authMethods) || authMethods.length === 0) return false;\r\n' +
+    '  return authMethods.some(method => {\r\n' +
+    "    const type = String(method?.['@odata.type'] || '').toLowerCase();\r\n" +
+    '    // Password alone is not MFA; anything else counts as extra factor.\r\n' +
+    "    return type && !type.includes('passwordauthenticationmethod');\r\n" +
+    '  });\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'async function mapWithConcurrency(items, limit, worker) {\r\n' +
+    '  const safeLimit = Math.max(1, Number(limit) || 1);\r\n' +
+    '  const output = new Array(items.length);\r\n' +
+    '  let cursor = 0;\r\n' +
+    '\r\n' +
+    '  async function runner() {\r\n' +
+    '    while (cursor < items.length) {\r\n' +
+    '      const index = cursor++;\r\n' +
+    '      output[index] = await worker(items[index], index);\r\n' +
+    '    }\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  await Promise.all(Array.from({ length: Math.min(safeLimit, items.length) }, () => runner()));\r\n' +
+    '  return output;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'async function getMicrosoftGraphCredentials({ securityAlerts = false } = {}) {\r\n' +
+    "  if (microsoftGraphCredentialsCache) return { ...microsoftGraphCredentialsCache, source: 'cache' };\r\n" +
+    '  if (microsoftGraphCredentialsPromise) return microsoftGraphCredentialsPromise;\r\n' +
+    "  if (securityAlerts) console.log('[security_alerts:graph_credentials:start] Loading Microsoft Graph credentials');\r\n" +
+    '  const load = (async () => {\r\n' +
+    '    try {\r\n' +
+    '      const [tenantId, clientId, clientSecret] = await promiseWithTimeout(\r\n' +
+    '        Promise.all([\r\n' +
+    "          getSecret('MICROSOFT_TENANT_ID'),\r\n" +
+    "          getSecret('MICROSOFT_CLIENT_ID'),\r\n" +
+    "          getSecret('MICROSOFT_CLIENT_SECRET')\r\n" +
+    '        ]),\r\n' +
+    '        MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS,\r\n' +
+    "        'Microsoft Graph credential loading'\r\n" +
+    '      );\r\n' +
+    '      if (!tenantId || !clientId || !clientSecret) {\r\n' +
+    "        const error = new Error('Missing Microsoft Graph credentials: MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, and MICROSOFT_CLIENT_SECRET are required');\r\n" +
+    "        error.code = 'GRAPH_CREDENTIALS_UNAVAILABLE';\r\n" +
+    '        throw error;\r\n' +
+    '      }\r\n' +
+    '      microsoftGraphCredentialsCache = { tenantId, clientId, clientSecret };\r\n' +
+    "      if (securityAlerts) console.log('[security_alerts:graph_credentials:complete_or_failed] complete (credentials cached)');\r\n" +
+    "      return { ...microsoftGraphCredentialsCache, source: 'secret_or_environment' };\r\n" +
+    '    } catch (error) {\r\n' +
+    '      if (microsoftGraphCredentialsCache) {\r\n' +
+    '        if (securityAlerts) console.warn('... 909313 more characters
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\governance-compliance-operations-evidence.test.js:242:16)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: `const bcrypt = require('bcryptjs');\r\nconst express = require('express');\r\nconst mysql = require('mysql2/promise');\r\nconst axios = require('axios');\r\nconst cors = require('cors');\r\nconst path = require('path');\r\nconst jwt = require('jsonwebtoken');\r\nconst crypto = require('crypto');\r\nconst PDFDocument = require('pdfkit');\r\nconst fs = require('fs');\r\nconst {SecretManagerServiceClient} = require('@google-cloud/secret-manager');\r\nconst { Webhook } = require('svix');\r\nconst SVGtoPDF = require('svg-to-pdfkit');\r\nconst { ClientSecretCredential } = require('@azure/identity');\r\nconst {\r\n    normalizeSeverity: normalizeWhatsAppSeverity,\r\n    normalizeWhatsAppRecipient,\r\n    sendSecurityAlert\r\n} = require('./services/whatsapp');\r\nconst { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');\r\nconst { createAzureOpenAIService } = require('./services/azure-openai');\r\nconst { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');\r\nconst { createStackCTRLIntelligenceScheduler, DEFAULT_OUTPUT_TYPES } = require('./services/intelligence/scheduler');\r\nconst { buildIdentityDashboardSource } = require('./services/intelligence/identity-dashboard-source');\r\nconst { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');\r\nconst { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');\r\nconst { createIdentityEvidenceAutomation } = require('./services/intelligence/identity-evidence-automation');\r\nconst { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');\r\nconst { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');\r\nconst { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');\r\nconst { buildEmailDashboardPayload } = require('./services/intelligence/email-dashboard-processor');\r\nconst { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');\r\nconst { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');\r\nconst { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');\r\nconst { createNetworkEvidenceStore } = require('./services/intelligence/network-evidence-store');\r\nconst { createNetworkEvidenceAutomation } = require('./services/intelligence/network-evidence-automation');\r\nconst { buildBackupDashboardPayload } = require('./services/intelligence/backup-dashboard-processor');\r\nconst { createBackupEvidenceStore } = require('./services/intelligence/backup-evidence-store');\r\nconst { createTrackedCollectorRegistry, runAbortableOperation, acquireConnectionWithDeadline, runDatabaseOperationWithDeadline } = require('./services/intelligence/collector-runtime');\r\nconst { createBackupEvidenceAutomation } = require('./services/intelligence/backup-evidence-automation');\r\nconst { buildApplicationsDashboardPayload } = require('./services/intelligence/applications-dashboard-processor');\r\nconst { createApplicationsEvidenceStore } = require('./services/intelligence/applications-evidence-store');\r\nconst { createApplicationsEvidenceAutomation } = require('./services/intelligence/applications-evidence-automation');\r\nconst { buildSecurityDashboardPayload } = require('./services/intelligence/security-dashboard-processor');\r\nconst { createSecurityEvidenceStore } = require('./services/intelligence/security-evidence-store');\r\nconst { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');\r\nconst { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');\r\nconst { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');\r\nconst { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');\r\nconst { buildComplianceDashboardPayload } = require('./services/intelligence/compliance-dashboard-processor');\r\nconst { createComplianceEvidenceStore } = require('./services/intelligence/compliance-evidence-store');\r\nconst { createComplianceEvidenceAutomation } = require('./services/intelligence/compliance-evidence-automation');\r\nconst { buildOperationsDashboardPayload } = require('./services/intelligence/operations-dashboard-processor');\r\nconst { createOperationsEvidenceStore } = require('./services/intelligence/operations-evidence-store');\r\nconst { createOperationsEvidenceAutomation } = require('./services/intelligence/operations-evidence-automation');\r\nconst { createStackCTRLServerAutomation } = require('./services/intelligence/server-automation');\r\nconst { createAdminIntelligenceService } = require('./services/admin-intelligence');\r\nconst { createEnterpriseIntelligenceService } = require('./services/enterprise-intelligence');\r\nconst { DateTime } = require('luxon');\r\nconst { createStackCTRLIntelligenceRouter } = require('./routes/stackctrl-intelligence');\r\nconst { createAdminIntelligenceRouter } = require('./routes/admin-intelligence');\r\nconst { createPowerBIReportingService } = require('./services/powerbi-reporting');\r\nconst { createPowerBIReportingRouter } = require('./routes/powerbi-reporting');\r\n\r\n// invoice payment endpoints \r\nrequire("dotenv").config();\r\n\r\nconst ACCESS_TOKEN_SECRET = '7a076e42670cfe26193655fe5f48b776defe078754ca16fb9ae0a054b354d335';\r\nconst accessContextCache = new Map();\r\n\r\nfunction getTenantByEmail(email) {\r\n  const key = String(email || '').toLowerCase();\r\n  const cached = accessContextCache.get(key);\r\n  if (!cached) return null;\r\n  return {\r\n    clientId: cached.accessType || 'standard',\r\n    tenantId: cached.tenantId || null,\r\n    companyId: cached.companyId || null\r\n  };\r\n}\r\n\r\n// ===============================\r\n// MICROSOFT GRAPH -  Identity Protection\r\n// ===============================\r\n// Token cache (in production, use Redis or database)\r\nconst microsoftTokenCache = new Map();\r\nlet microsoftGraphCredentialsCache = null;\r\nlet microsoftGraphCredentialsPromise = null;\r\nlet microsoftGraphTokenPromise = null;\r\nlet microsoftGraphStartupWarningShown = false;\r\nconst MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS = Math.max(3000, Number(process.env.MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS) || 12000);\r\nconst MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS = Math.max(3000, Number(process.env.MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS) || 12000);\r\nconst STACKCTRL_COLLECTOR_TIMEOUT_MS = Math.max(15000, Number(process.env.STACKCTRL_COLLECTOR_TIMEOUT_MS) || 180000);\r\nconst BACKUP_DATABASE_TIMEOUT_MS = Math.max(5000, Number(process.env.BACKUP_DATABASE_TIMEOUT_MS) || 30000);\r\nconst authMethodsCache = new Map();\r\nconst AUTH_METHODS_CACHE_TTL_MS = 5 * 60 * 1000;\r\nlet identityEvidenceService = null;\r\nlet deviceEvidenceService = null;\r\nlet emailEvidenceService = null;\r\nlet networkEvidenceService = null;\r\nlet backupEvidenceService = null;\r\nlet applicationsEvidenceService = null;\r\nlet securityEvidenceService = null;\r\nlet governanceEvidenceService = null;\r\nlet complianceEvidenceService = null;\r\nlet operationsEvidenceService = null;\r\n\r\nfunction sleep(ms) {\r\n  return new Promise(resolve => setTimeout(resolve, ms));\r\n}\r\n\r\nfunction getCachedAuthMethods(userId) {\r\n  const cached = authMethodsCache.get(userId);\r\n  if (!cached) return null;\r\n  if (cached.expiresAt <= Date.now()) {\r\n    authMethodsCache.delete(userId);\r\n    return null;\r\n  }\r\n  return cached.methods;\r\n}\r\n\r\nfunction setCachedAuthMethods(userId, methods) {\r\n  authMethodsCache.set(userId, {\r\n    methods: Array.isArray(methods) ? methods : [],\r\n    expiresAt: Date.now() + AUTH_METHODS_CACHE_TTL_MS\r\n  });\r\n}\r\n\r\nfunction hasRealMfaMethod(authMethods) {\r\n  if (!Array.isArray(authMethods) || authMethods.length === 0) return false;\r\n  return authMethods.some(method => {\r\n    const type = String(method?.['@odata.type'] || '').toLowerCase();\r\n    // Password alone is not MFA; anything else counts as extra factor.\r\n    return type && !type.includes('passwordauthenticationmethod');\r\n  });\r\n}\r\n\r\nasync function mapWithConcurrency(items, limit, worker) {\r\n  const safeLimit = Math.max(1, Number(limit) || 1);\r\n  const output = new Array(items.length);\r\n  let cursor = 0;\r\n\r\n  async function runner() {\r\n    while (cursor < items.length) {\r\n      const index = cursor++;\r\n      output[index] = await worker(items[index], index);\r\n    }\r\n  }\r\n\r\n  await Promise.all(Array.from({ length: Math.min(safeLimit, items.length) }, () => runner()));\r\n  return output;\r\n}\r\n\r\nasync function getMicrosoftGraphCredentials({ securityAlerts = false } = {}) {\r\n  if (microsoftGraphCredentialsCache) return { ...microsoftGraphCredentialsCache, source: 'cache' };\r\n  if (microsoftGraphCredentialsPromise) return microsoftGraphCredentialsPromise;\r\n  if (securityAlerts) console.log('[security_alerts:graph_credentials:start] Loading Microsoft Graph credentials');\r\n  const load = (async () => {\r\n    try {\r\n      const [tenantId, clientId, clientSecret] = await promiseWithTimeout(\r\n        Promise.all([\r\n          getSecret('MICROSOFT_TENANT_ID'),\r\n          getSecret('MICROSOFT_CLIENT_ID'),\r\n          getSecret('MICROSOFT_CLIENT_SECRET')\r\n        ]),\r\n        MICROSOFT_GRAPH_CREDENTIAL_TIMEOUT_MS,\r\n        'Microsoft Graph credential loading'\r\n      );\r\n      if (!tenantId || !clientId || !clientSecret) {\r\n        const error = new Error('Missing Microsoft Graph credentials: MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, and MICROSOFT_CLIENT_SECRET are required');\r\n        error.code = 'GRAPH_CREDENTIALS_UNAVAILABLE';\r\n        throw error;\r\n      }\r\n      microsoftGraphCredentialsCache = { tenantId, clientId, clientSecret };\r\n      if (securityAlerts) console.log('[security_alerts:graph_credentials:complete_or_failed] complete (credentials cached)');\r\n      return { ...microsoftGraphCredentialsCache, source: 'secret_or_environment' };\r\n    } catch (error) {\r\n      if (microsoftGraphCredentialsCache) {\r\n        if (securityAlerts) console.warn(`... 909313 more characters,
+    expected: /collectAndPersistGovernanceEvidence\(companyId, 'enterprise_refresh'\)/,
+    operator: 'match',
+    diff: 'simple'
+  }
