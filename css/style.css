@@ -16,6 +16,43 @@
     --accent-glow: #1E90FF; /* Dodger Blue for the glow */
 }
 
+.logo-container {
+    position: fixed;
+    right: 24px;
+    bottom: 60px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    min-height: 46px;
+    max-height: 46px;
+    padding: 0;
+    border: 2px solid rgba(59, 130, 246, 0.9);
+    border-radius: 50%;
+    background: rgba(14, 17, 24, 0.82);
+    box-shadow: 0 0 18px rgba(59, 130, 246, 0.75), 0 0 32px rgba(59, 130, 246, 0.38);
+    cursor: pointer;
+}
+
+.logo-container img {
+    display: block;
+    width: 58%;
+    height: 58%;
+    object-fit: contain;
+}
+
+@media (max-width: 768px) {
+    .logo-container {
+        right: 24px;
+        bottom: 24px;
+    }
+}
+
 
 
 html {

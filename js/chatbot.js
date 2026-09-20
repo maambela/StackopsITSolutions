@@ -64,9 +64,15 @@ class StackOpsChatbot {
                 }
 
                 .main-toggle {
-                    width: 64px;
-                    height: 64px;
-                    border-radius: 50%;
+                    width: 64px !important;
+                    height: 64px !important;
+                    min-width: 64px;
+                    max-width: 64px;
+                    min-height: 64px;
+                    max-height: 64px;
+                    flex: 0 0 64px;
+                    aspect-ratio: 1 / 1;
+                    border-radius: 50% !important;
                     background: transparent;
                     backdrop-filter: blur(10px) saturate(180%);
                     -webkit-backdrop-filter: blur(10px) saturate(180%);
@@ -439,8 +445,13 @@ class StackOpsChatbot {
                     }
 
                     .main-toggle {
-                        width: 56px;
-                        height: 56px;
+                        width: 56px !important;
+                        height: 56px !important;
+                        min-width: 56px;
+                        max-width: 56px;
+                        min-height: 56px;
+                        max-height: 56px;
+                        flex-basis: 56px;
                     }
 
                     .chat-corner {
@@ -492,8 +503,13 @@ class StackOpsChatbot {
                     }
 
                     .main-toggle {
-                        width: 52px;
-                        height: 52px;
+                        width: 52px !important;
+                        height: 52px !important;
+                        min-width: 52px;
+                        max-width: 52px;
+                        min-height: 52px;
+                        max-height: 52px;
+                        flex-basis: 52px;
                     }
 
                     .chat-corner {
