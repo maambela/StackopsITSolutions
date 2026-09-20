@@ -19,6 +19,29 @@
       aspect-ratio: 1 / 1;
       border-radius: 50% !important;
     }
+
+    .right-section .menu-item {
+      box-sizing: border-box;
+      width: 110px !important;
+      height: 110px !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      aspect-ratio: 1 / 1;
+    }
+
+    .right-section .menu-item:nth-child(5) span,
+    .right-section .menu-item:nth-child(6) span {
+      width: 100%;
+      margin-inline: 0;
+      text-align: center;
+    }
+
+    @media (max-width: 600px) {
+      .right-section .menu-item {
+        width: 82px !important;
+        height: 82px !important;
+      }
+    }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -1792,13 +1815,15 @@
       }
 
       .right-section .menu-item:nth-child(5) span {
-        position: relative !important;
-        left: -8px !important;
+        left: auto !important;
+        transform: none !important;
+        text-align: center !important;
       }
 
       .right-section .menu-item:nth-child(6) span {
-        position: relative !important;
-        left: -8px !important;
+        left: auto !important;
+        transform: none !important;
+        text-align: center !important;
       }
 
       .left-section .cube .face .link-content,
