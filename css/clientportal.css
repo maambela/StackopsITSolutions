@@ -3203,6 +3203,12 @@ body.client-portal-page {
   filter: saturate(0.72);
 }
 
+.side-peek-nav:hover .side-peek-card.credential-security-active,
+.side-peek-nav .side-peek-card.credential-security-active {
+  opacity: 1;
+  filter: none;
+}
+
 .side-peek-card.credential-security-dimmed .project-card {
   pointer-events: none;
 }
@@ -3255,6 +3261,14 @@ body.client-portal-page {
   margin-top: 1px;
 }
 
+.side-peek-card.credential-security-active .project-title h3 {
+  font-size: 0.68rem;
+}
+
+.side-peek-card.credential-security-active .project-type {
+  font-size: 0.57rem;
+}
+
 .side-peek-card .project-status-badge {
   font-size: 0.45rem;
   padding: 2px 5px;
@@ -3299,6 +3313,17 @@ body.client-portal-page {
 .side-peek-card .risk-dot {
   width: 7px;
   height: 7px;
+}
+
+.side-peek-card.credential-security-active .credential-security-feed-metric strong {
+  font-size: 0.68rem;
+}
+
+.side-peek-card.credential-security-active .credential-security-feed-metric span,
+.side-peek-card.credential-security-active .credential-security-feed-caption,
+.side-peek-card.credential-security-active .credential-security-card-detail,
+.side-peek-card.credential-security-active .credential-security-card-status {
+  font-size: 0.54rem;
 }
 
 body:not(.sunbird-client-portal) .non-sunbird-blur-gated {
@@ -4115,6 +4140,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 }
 
 .credential-security-feed-caption,
+.credential-security-card-detail,
 .credential-security-card-status {
   overflow: hidden;
   color: rgba(255, 255, 255, 0.58);
@@ -4122,6 +4148,11 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.credential-security-card-detail {
+  color: rgba(255, 255, 255, 0.72);
+  font-variant-numeric: tabular-nums;
 }
 
 .credential-security-card-footer {

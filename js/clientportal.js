@@ -1042,6 +1042,9 @@ let onePasswordEventsData = null;
 let onePasswordEventsRequest = null;
 let onePasswordEventsFetchState = 'idle';
 let onePasswordEventsLastError = '';
+let credentialSecurityLit = false;
+let onePasswordAnalyticsPeriod = '7';
+let onePasswordAnalyticsRequest = null;
 let projectGridHasRendered = false;
 
 function toBooleanMfa(value) {
@@ -10935,27 +10938,13 @@ function renderSidePeekCards() {
         if (prevProject.id === 9) {
             sidePeekPrev.classList.add('credential-security-peek');
             sidePeekPrev.classList.remove('no-interaction');
-            let credentialSecurityHovered = false;
-            let credentialSecurityLit = false;
 
             const syncCredentialSecurityCardState = () => {
                 sidePeekPrevCard.classList.toggle('credential-security-dimmed', !credentialSecurityLit);
                 sidePeekPrevCard.classList.toggle('credential-security-active', credentialSecurityLit);
-                sidePeekPrevCard.classList.toggle(
-                    'expanded-left',
-                    credentialSecurityHovered || credentialSecurityLit
-                );
             };
 
-            sidePeekPrev.onmouseenter = () => {
-                credentialSecurityHovered = true;
-                syncCredentialSecurityCardState();
-            };
-
-            sidePeekPrev.onmouseleave = () => {
-                credentialSecurityHovered = false;
-                syncCredentialSecurityCardState();
-            };
+            syncCredentialSecurityCardState();
 
             sidePeekPrev.onclick = (e) => {
                 if (e.target.closest('[data-onepassword-open]')) {
@@ -10963,9 +10952,9 @@ function renderSidePeekCards() {
                 }
                 e.preventDefault();
                 e.stopPropagation();
-                credentialSecurityLit = true;
+                credentialSecurityLit = !credentialSecurityLit;
                 syncCredentialSecurityCardState();
-                fetchOnePasswordEvents();
+                if (credentialSecurityLit) fetchOnePasswordEvents();
             };
 
             syncCredentialSecurityCardState();
@@ -11836,74 +11825,51 @@ function renderOnePasswordEventError(content, message) {
 function renderSunbirdCredentialSecurityDashboard(data) {
     const content = document.getElementById('sunbird-credential-security-content');
     if (!content) return;
-
-    const syncEntries = Array.isArray(data?.sync) ? data.sync : [];
-    const stateEntries = Array.isArray(data?.state) ? data.state : [];
-    const syncByFeed = new Map(syncEntries.map(feed => [feed?.eventType, feed]));
-    const stateByFeed = new Map(stateEntries.map(state => [state?.eventType, state]));
-    const eventRecords = Array.isArray(data?.events) ? data.events : [];
-    const records = eventRecords.slice(0, 30);
-    const successfulSyncDates = stateEntries
-        .map(state => state?.lastSuccessfulSyncAt ? new Date(state.lastSuccessfulSyncAt) : null)
-        .filter(date => date && !Number.isNaN(date.getTime()));
-    const latestSuccessfulSync = successfulSyncDates.length
-        ? formatOnePasswordEventDate(new Date(Math.max(...successfulSyncDates.map(date => date.getTime()))))
-        : 'No successful sync recorded';
-
+    const analytics = data?.analytics;
+    if (!analytics) { content.innerHTML = '<div class="credential-events-loading" role="status"><span class="credential-events-spinner" aria-hidden="true"></span><span>Loading selected-period analytics…</span></div>'; return; }
+    const metrics = analytics.metrics || {}, signIns = analytics.signIns || {}, audit = analytics.audit || {}, summaries = analytics.summaries || {}, integration = Array.isArray(data.integration) ? data.integration : [];
+    const esc = value => escapeIdentityText(String(value ?? 'Not reported'));
+    const chart = (title, rows) => !rows?.length ? '' : `<article class="network-dashboard-panel credential-chart"><div class="credential-panel-heading"><h3>${esc(title)}</h3><span>Actual events</span></div><ul class="credential-chart-bars" aria-label="${esc(title)}">${rows.map(row => `<li><span>${esc(row.label || row.bucket)}</span><div class="credential-chart-track" aria-hidden="true"><i style="width:${Math.max(3, (Number(row.count ?? row.total) || 0) / Math.max(...rows.map(item => Number(item.count ?? item.total) || 0), 1) * 100)}%"></i></div><strong>${esc(row.count ?? row.total)}</strong></li>`).join('')}</ul></article>`;
+    const kpis = [['Total Sign-ins', metrics.totalSignIns, 'fas fa-right-to-bracket'], ['Successful Sign-ins', metrics.successfulSignIns, 'fas fa-circle-check'], ['Failed Sign-ins', metrics.failedSignIns, 'fas fa-circle-xmark'], ['Total Audit Events', metrics.totalAuditEvents, 'fas fa-clipboard-list'], ['Item Usage Events', metrics.itemUsageEvents, 'fas fa-key'], ['Active Users', metrics.activeUsers, 'fas fa-users'], ['Unique Devices', metrics.uniqueDevices, 'fas fa-laptop'], ['Events in Period', metrics.totalEvents, 'fas fa-wave-square']].filter(([, value]) => value !== undefined && value !== null);
+    const signinRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.user)}</td><td>${event.result ? `<span class="credential-result credential-result-${esc(event.result)}">${esc(event.result)}</span>` : 'Not reported'}</td><td>${esc(event.eventType)}</td><td>${esc(event.platform)}</td><td>${esc(event.location)}</td></tr>`;
+    const auditRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.actor)}</td><td>${esc(event.action)}</td><td>${esc(event.objectType)}</td><td>${esc(event.objectId)}</td><td>${esc(event.location)}</td></tr>`;
     content.innerHTML = `
-        <div class="credential-events-summary">
-            ${ONEPASSWORD_EVENT_FEEDS.map(feed => {
-                const sync = syncByFeed.get(feed.key);
-                const state = stateByFeed.get(feed.key);
-                const hasCount = sync?.processedEvents !== undefined && sync?.processedEvents !== null &&
-                    String(sync.processedEvents).trim() !== '' &&
-                    Number.isSafeInteger(Number(sync.processedEvents)) && Number(sync.processedEvents) >= 0;
-                const count = hasCount ? String(Number(sync.processedEvents)) : 'Not reported';
-                const status = getOnePasswordEventText(state?.status || sync?.status) || 'Not reported';
-                const statusClass = status.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-                return `
-                    <article class="network-dashboard-panel credential-events-feed">
-                        <span>${escapeIdentityText(feed.label)}</span>
-                        <strong>${escapeIdentityText(count)}</strong>
-                        <em>processed this sync</em>
-                        <small class="credential-events-status credential-events-status-${statusClass}">${escapeIdentityText(status)}</small>
-                    </article>
-                `;
-            }).join('')}
-        </div>
-        <div class="credential-events-sync-note">
-            <i class="fas fa-clock" aria-hidden="true"></i>
-            <span>Last successful sync</span>
-            <strong>${escapeIdentityText(latestSuccessfulSync)}</strong>
-        </div>
-        <article class="network-dashboard-panel credential-events-recent">
-            <div class="network-evidence-section-title">
-                <h3>Recent events</h3>
-                <span>Showing ${records.length} of ${eventRecords.length} returned</span>
-            </div>
-            <div class="network-dashboard-table-wrap">
-                <table class="network-dashboard-table">
-                    <thead><tr><th>Time</th><th>Feed</th><th>Event</th><th>Actor</th><th>Context</th></tr></thead>
-                    <tbody>
-                        ${records.length ? records.map(record => {
-                            const metadata = record?.metadata && typeof record.metadata === 'object' ? record.metadata : {};
-                            const feedLabel = ONEPASSWORD_EVENT_FEEDS.find(feed => feed.key === record?.eventType)?.label || '1Password event';
-                            const detail = getOnePasswordEventText(metadata.action || metadata.type || metadata.category || metadata.object_type) || feedLabel;
-                            return `
-                                <tr>
-                                    <td>${escapeIdentityText(formatOnePasswordEventDate(record?.timestamp || metadata.timestamp))}</td>
-                                    <td>${escapeIdentityText(feedLabel)}</td>
-                                    <td>${escapeIdentityText(detail)}</td>
-                                    <td>${escapeIdentityText(getOnePasswordEventActor(metadata))}</td>
-                                    <td>${escapeIdentityText(getOnePasswordEventContext(metadata))}</td>
-                                </tr>
-                            `;
-                        }).join('') : '<tr><td colspan="5" class="sunbird-empty-row">No recent events were returned by 1Password.</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-        </article>
-    `;
+      <section class="credential-analytics-toolbar" aria-label="Analytics period"><div><span class="credential-eyebrow">ANALYTICS WINDOW</span><strong>${esc(analytics.range?.startAt ? `${formatOnePasswordEventDate(analytics.range.startAt)} – ${formatOnePasswordEventDate(analytics.range.endAt)}` : 'Selected period')}</strong></div><label>Period <select data-credential-period><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label><div class="credential-custom-range ${onePasswordAnalyticsPeriod === 'custom' ? '' : 'is-hidden'}" data-custom-range><label>From <input type="date" data-range-start></label><label>To <input type="date" data-range-end></label><button type="button" data-range-apply>Apply</button></div></section>
+      <section class="credential-kpi-grid" aria-label="Credential Security KPIs">${kpis.map(([label, value, icon]) => `<article class="credential-kpi"><i class="${icon}" aria-hidden="true"></i><span>${esc(label)}</span><strong>${esc(value)}</strong><small>Selected period</small></article>`).join('')}</section>
+      ${signIns.total ? `<section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUTHENTICATION ANALYTICS</span><h3>Sign-in activity</h3></div><p>Charts are derived from retained event metadata.</p></div><div class="credential-chart-grid">${chart('Sign-ins over time', signIns.timeline)}${signIns.successful !== undefined ? chart('Successful vs failed', [{ label: 'Successful', count: signIns.successful }, { label: 'Failed', count: signIns.failed }]) : ''}${chart('By user', signIns.byUser)}${chart('By country', signIns.byCountry)}${chart('By platform', signIns.byPlatform)}${chart('By event type', signIns.byType)}${chart('Activity by hour', signIns.byHour)}</div></section>` : ''}
+      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Only events explicitly classified as failed are shown.</p></div>${chart('Failed attempts over time', (signIns.timeline || []).map(point => ({ label: point.bucket, count: point.failed || 0 })).filter(point => point.count))}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins recorded for the selected period.</td></tr>'}</tbody></table></div></section>` : ''}
+      <section class="credential-analytics-section"><div class="credential-section-title"><div><span>RECENT AUTHENTICATION</span><h3>Authentication activity</h3></div><p>Actual 1Password sign-in records.</p></div><div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No sign-in events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
+      <section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUDIT EVENTS</span><h3>Audit detail</h3></div><p>${esc(audit.total || 0)} audit events in the selected period.</p></div><div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object type</th><th>Object ID</th><th>Location</th></tr></thead><tbody>${audit.recent?.map(auditRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No audit events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
+      ${metrics.itemUsageEvents === 0 ? '<div class="credential-empty-state"><i class="fas fa-key" aria-hidden="true"></i>No item usage events recorded for the selected period.</div>' : ''}
+      ${(summaries.countries?.length || summaries.platforms?.length || summaries.eventTypes?.length) ? `<section class="credential-summary-grid">${chart('Geographic summary', summaries.countries)}${chart('Client / platform summary', summaries.platforms)}${chart('Event types', summaries.eventTypes)}</section>` : ''}
+      <section class="credential-health"><div class="credential-section-title"><div><span>INTEGRATION HEALTH</span><h3>1Password sync status</h3></div><p>Persisted integration state per feed.</p></div><div class="credential-health-grid">${integration.map(feed => `<article><span>${esc(ONEPASSWORD_EVENT_FEEDS.find(item => item.key === feed.eventType)?.label || feed.eventType)}</span><strong class="credential-health-${esc(String(feed.status || '').toLowerCase())}">${esc(feed.status)}</strong><small>Last successful: ${esc(feed.lastSuccessfulSyncAt ? formatOnePasswordEventDate(feed.lastSuccessfulSyncAt) : null)}</small><small>Last attempt: ${esc(feed.lastAttemptedSyncAt ? formatOnePasswordEventDate(feed.lastAttemptedSyncAt) : null)}</small><small>Cursor: ${feed.hasCursor ? 'available' : 'not reported'}</small>${feed.lastError ? `<small class="credential-health-error">Latest error: ${esc(feed.lastError)}</small>` : ''}</article>`).join('') || '<p class="sunbird-empty-row">Sync metadata is not available yet.</p>'}</div></section>`;
+    const selector = content.querySelector('[data-credential-period]');
+    selector.value = onePasswordAnalyticsPeriod;
+    selector.addEventListener('change', () => { onePasswordAnalyticsPeriod = selector.value; if (selector.value === 'custom') content.querySelector('[data-custom-range]')?.classList.remove('is-hidden'); else loadOnePasswordAnalytics(data); });
+    const start = content.querySelector('[data-range-start]'), end = content.querySelector('[data-range-end]');
+    if (start && end) { const now = new Date(); end.value = now.toISOString().slice(0, 10); start.value = new Date(now - 7 * 86400000).toISOString().slice(0, 10); content.querySelector('[data-range-apply]')?.addEventListener('click', () => { if (start.value && end.value && start.value < end.value) loadOnePasswordAnalytics(data, { startAt: `${start.value}T00:00:00.000Z`, endAt: `${end.value}T23:59:59.999Z` }); }); }
+}
+
+function loadOnePasswordAnalytics(data, customRange) {
+    if (!data || onePasswordAnalyticsRequest) return onePasswordAnalyticsRequest || Promise.resolve(null);
+    const endAt = customRange?.endAt || new Date().toISOString();
+    const days = [1, 7, 30, 90].includes(Number(onePasswordAnalyticsPeriod)) ? Number(onePasswordAnalyticsPeriod) : 7;
+    const startAt = customRange?.startAt || new Date(new Date(endAt).getTime() - days * 86400000).toISOString();
+    const content = document.getElementById('sunbird-credential-security-content');
+    let authToken = ''; try { authToken = localStorage.getItem('authToken') || ''; } catch (_) { /* no storage */ }
+    if (!authToken) return Promise.resolve(null);
+    if (content) content.innerHTML = '<div class="credential-events-loading" role="status"><span class="credential-events-spinner" aria-hidden="true"></span><span>Loading selected-period analytics…</span></div>';
+    onePasswordAnalyticsRequest = fetch(`/api/sunbird/onepassword/analytics?${new URLSearchParams({ startAt, endAt })}`, { cache: 'no-store', headers: { Authorization: `Bearer ${authToken}` } })
+        .then(async response => ({ response, result: await response.json().catch(() => null) }))
+        .then(({ response, result }) => {
+            if (!response.ok || !result?.success) throw new Error(result?.message || 'Unable to load 1Password analytics right now.');
+            data.analytics = result.analytics; data.integration = result.integration; onePasswordEventsData = data;
+            if (document.getElementById('sunbird-credential-security-content')?.isConnected) renderSunbirdCredentialSecurityDashboard(data);
+            return data;
+        })
+        .catch(error => { const active = document.getElementById('sunbird-credential-security-content'); if (active?.isConnected) renderOnePasswordEventError(active, getOnePasswordEventText(error.message) || 'Unable to load 1Password analytics right now.'); return null; })
+        .finally(() => { onePasswordAnalyticsRequest = null; });
+    return onePasswordAnalyticsRequest;
 }
 
 function updateCredentialSecurityCardSummary(state, data) {
@@ -11911,6 +11877,21 @@ function updateCredentialSecurityCardSummary(state, data) {
     if (!cards.length) return;
     const syncByFeed = new Map((Array.isArray(data?.sync) ? data.sync : []).map(feed => [feed?.eventType, feed]));
     const stateByFeed = new Map((Array.isArray(data?.state) ? data.state : []).map(feed => [feed?.eventType, feed]));
+    const processedCounts = ONEPASSWORD_EVENT_FEEDS.map(feed => syncByFeed.get(feed.key)?.processedEvents);
+    const hasAllProcessedCounts = processedCounts.every(count =>
+        count !== undefined && count !== null && String(count).trim() !== '' &&
+        Number.isSafeInteger(Number(count)) && Number(count) >= 0
+    );
+    const totalProcessed = hasAllProcessedCounts
+        ? processedCounts.reduce((total, count) => total + Number(count), 0)
+        : null;
+    const safeTotalProcessed = Number.isSafeInteger(totalProcessed) ? totalProcessed : null;
+    const successfulDates = (Array.isArray(data?.state) ? data.state : [])
+        .map(feed => feed?.lastSuccessfulSyncAt ? new Date(feed.lastSuccessfulSyncAt) : null)
+        .filter(date => date && !Number.isNaN(date.getTime()));
+    const latestSuccessfulDate = successfulDates.length
+        ? new Date(Math.max(...successfulDates.map(date => date.getTime())))
+        : null;
     cards.forEach(card => {
         ONEPASSWORD_EVENT_FEEDS.forEach(feed => {
             const value = card.querySelector(`[data-onepassword-count="${feed.key}"]`);
@@ -11930,6 +11911,31 @@ function updateCredentialSecurityCardSummary(state, data) {
                 ? String(Number(count))
                 : 'Not reported';
         });
+
+        const detail = card.querySelector('[data-onepassword-card-detail]');
+        if (detail) {
+            if (state === 'loading') {
+                detail.textContent = 'Retrieving feed details…';
+                detail.removeAttribute('title');
+            } else if (state === 'error') {
+                detail.textContent = 'Feed details unavailable';
+                detail.removeAttribute('title');
+            } else if (state === 'success' && data) {
+                const totalLabel = safeTotalProcessed === null ? 'Total not reported' : `${safeTotalProcessed} total this sync`;
+                const syncLabel = latestSuccessfulDate
+                    ? latestSuccessfulDate.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                    : 'No successful sync';
+                detail.textContent = `${totalLabel} · Last sync ${syncLabel}`;
+                if (latestSuccessfulDate) {
+                    detail.title = `Last successful sync: ${formatOnePasswordEventDate(latestSuccessfulDate)}`;
+                } else {
+                    detail.removeAttribute('title');
+                }
+            } else {
+                detail.textContent = 'Totals and sync time appear after Open';
+                detail.removeAttribute('title');
+            }
+        }
 
         const note = card.querySelector('[data-onepassword-card-status]');
         if (!note) return;
@@ -11990,8 +11996,7 @@ function fetchOnePasswordEvents({ force = false } = {}) {
     }
     if (!force && onePasswordEventsData) {
         updateCredentialSecurityCardSummary('success', onePasswordEventsData);
-        if (content) renderSunbirdCredentialSecurityDashboard(onePasswordEventsData);
-        return Promise.resolve(onePasswordEventsData);
+        return onePasswordEventsData.analytics ? (content && renderSunbirdCredentialSecurityDashboard(onePasswordEventsData), Promise.resolve(onePasswordEventsData)) : loadOnePasswordAnalytics(onePasswordEventsData);
     }
 
     onePasswordEventsFetchState = 'loading';
@@ -12052,8 +12057,7 @@ async function syncOnePasswordEventsFromApi() {
         onePasswordEventsFetchState = 'success';
         onePasswordEventsLastError = '';
         updateCredentialSecurityCardSummary('success', data);
-        const content = document.getElementById('sunbird-credential-security-content');
-        if (content?.isConnected) renderSunbirdCredentialSecurityDashboard(data);
+        await loadOnePasswordAnalytics(data);
         return data;
     } catch (_) {
         onePasswordEventsFetchState = 'error';
@@ -12880,6 +12884,7 @@ function createProjectCard(project) {
                     `).join('')}
                 </div>
                 <div class="credential-security-feed-caption">Events processed this sync</div>
+                <div class="credential-security-card-detail" data-onepassword-card-detail aria-live="polite">Totals and sync time appear after Open</div>
                 <div class="credential-security-card-status" data-onepassword-card-status aria-live="polite">Sync not requested</div>
                 <div class="credential-security-card-footer">
                     <button class="credential-security-onepassword-button" type="button" data-onepassword-open aria-label="Open Credential Security Events dashboard">Open</button>
