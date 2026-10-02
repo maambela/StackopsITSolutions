@@ -782,7 +782,7 @@ const mockProjects = [
         id: 9,
         name: "Credential Security", 
         type: "Password & Credential Management",
-        status: "inactive",
+        status: "active",
         risks: { critical: 1, high: 1, medium: 1 },
         securityScore: 85,
         uptime: 98.5,
@@ -10928,30 +10928,47 @@ function renderSidePeekCards() {
         // Credential Security Card (ID 9) logic
         if (prevProject.id === 9) {
             sidePeekPrev.classList.remove('no-interaction');
-            
-            const handleExpand = () => {
-                sidePeekPrevCard.classList.add('expanded-left');
-            };
-            
-            const handleCollapse = () => {
-                if (!isCredentialSecurityLocked) {
-                    sidePeekPrevCard.classList.remove('expanded-left');
+            let credentialSecurityHovered = false;
+            let credentialSecurityClickOpen = false;
+
+            const syncCredentialSecurityCardState = () => {
+                sidePeekPrevCard.classList.toggle('credential-security-dimmed', isCredentialSecurityLocked);
+                sidePeekPrevCard.classList.toggle('credential-security-active', !isCredentialSecurityLocked);
+                sidePeekPrevCard.classList.toggle(
+                    'expanded-left',
+                    !isCredentialSecurityLocked && (credentialSecurityHovered || credentialSecurityClickOpen)
+                );
+                const badge = sidePeekPrevCard.querySelector('.project-status-badge');
+                if (badge) {
+                    badge.classList.toggle('status-inactive', isCredentialSecurityLocked);
+                    badge.classList.toggle('status-active', !isCredentialSecurityLocked);
+                    badge.textContent = isCredentialSecurityLocked ? 'Inactive' : 'Active';
                 }
             };
-            
-            sidePeekPrev.onmouseenter = handleExpand;
-            sidePeekPrev.onmouseleave = handleCollapse;
-            
+
+            sidePeekPrev.onmouseenter = () => {
+                credentialSecurityHovered = true;
+                syncCredentialSecurityCardState();
+            };
+
+            sidePeekPrev.onmouseleave = () => {
+                credentialSecurityHovered = false;
+                credentialSecurityClickOpen = false;
+                syncCredentialSecurityCardState();
+            };
+
             sidePeekPrev.onclick = (e) => {
+                if (e.target.closest('[data-onepassword-sync]')) {
+                    return;
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 isCredentialSecurityLocked = !isCredentialSecurityLocked;
-                if (isCredentialSecurityLocked) {
-                    handleExpand();
-                } else {
-                    handleCollapse();
-                }
+                credentialSecurityClickOpen = !isCredentialSecurityLocked;
+                syncCredentialSecurityCardState();
             };
+
+            syncCredentialSecurityCardState();
         } else {
             sidePeekPrev.onmouseenter = null;
             sidePeekPrev.onmouseleave = null;
@@ -12502,14 +12519,15 @@ function createProjectCard(project) {
     const networkSecurityPanelHTML = project.id === 10 ? renderNetworkSecurityCardPanel(project) : '';
     const credentialSecurityOnePasswordHTML = project.id === 9
         ? `<div class="credential-security-onepassword">
-                <span class="credential-security-onepassword-brand">
-                    <img src="Images/1password.webp" alt="" aria-hidden="true">
-                    <span>1Password Tenant</span>
-                </span>
-                <button class="credential-security-onepassword-button" type="button" data-onepassword-sync aria-expanded="false">
-                    <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
-                    <span>View 1Password Activity</span>
-                </button>
+                <div class="credential-security-onepassword-header">
+                    <span class="credential-security-onepassword-brand">
+                        <img src="Images/1password.webp" alt="" aria-hidden="true">
+                        <span>1Password Tenant</span>
+                    </span>
+                    <button class="credential-security-onepassword-button" type="button" data-onepassword-sync aria-expanded="false">
+                        Open
+                    </button>
+                </div>
                 <div class="credential-security-onepassword-activity" data-onepassword-activity role="status" aria-live="polite" hidden>
                     <p data-onepassword-status></p>
                     <ul data-onepassword-events></ul>
@@ -12567,7 +12585,7 @@ function createProjectCard(project) {
                 <p class="project-type">${project.type}</p>
             </div>
             <span class="project-status-badge status-${project.status.toLowerCase()}">
-                ${project.status}
+                ${project.id === 9 ? 'Active' : project.status}
             </span>
 
         </div>
@@ -12620,16 +12638,19 @@ async function loadOnePasswordActivity(card) {
     const authToken = localStorage.getItem('authToken');
     if (!button || !activity || !status || !eventsList) return;
 
+    const isOpen = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(isOpen));
+    activity.hidden = !isOpen;
+    if (!isOpen) return;
+    if (activity.dataset.loaded === 'true' || button.disabled) return;
+
     if (!authToken) {
-        activity.hidden = false;
         status.textContent = 'Sign in to view 1Password activity.';
         return;
     }
 
     button.disabled = true;
-    button.setAttribute('aria-expanded', 'true');
-    button.querySelector('span').textContent = 'Loading activity...';
-    activity.hidden = false;
+    button.textContent = 'Open';
     status.textContent = 'Retrieving 1Password activity...';
     eventsList.replaceChildren();
 
@@ -12659,6 +12680,7 @@ async function loadOnePasswordActivity(card) {
             .join(' · ');
         const records = Array.isArray(data.events) ? data.events : [];
         status.textContent = `${syncSummary || 'Activity sync complete.'}${records.length ? ` · ${records.length} recent events` : ' · No events returned'}`;
+        activity.dataset.loaded = 'true';
 
         records.slice(0, 12).forEach(record => {
             const metadata = record?.metadata && typeof record.metadata === 'object' ? record.metadata : {};
@@ -12683,7 +12705,7 @@ async function loadOnePasswordActivity(card) {
         status.textContent = error.message || 'Unable to retrieve 1Password activity right now. Please try again later.';
     } finally {
         button.disabled = false;
-        button.querySelector('span').textContent = 'View 1Password Activity';
+        button.textContent = 'Open';
     }
 }
 
