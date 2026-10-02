@@ -4070,35 +4070,82 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 }
 
 .credential-security-onepassword {
-  display: grid;
-  gap: 4px;
-  margin-top: 4px;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  margin-top: 2px;
   position: relative;
   z-index: 2;
   pointer-events: auto;
 }
 
-.credential-security-onepassword-header {
+.credential-security-feed-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.credential-security-feed-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.credential-security-feed-metric strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credential-security-feed-metric span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.52rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credential-security-feed-caption,
+.credential-security-card-status {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.48rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credential-security-card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-top: auto;
+  padding-top: 3px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .credential-security-onepassword-brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 0.7rem;
-  line-height: 1.2;
-  flex: 1 1 auto;
+  justify-content: flex-end;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
 .credential-security-onepassword-brand img {
-  width: 15px;
-  height: 15px;
+  display: block;
+  width: 17px;
+  height: 17px;
   object-fit: contain;
 }
 
@@ -4107,18 +4154,16 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  align-self: start;
-  gap: 6px;
-  min-height: 30px;
+  min-height: 23px;
   max-width: none;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 4px 9px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.045);
   color: rgba(255, 255, 255, 0.84);
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.61rem;
   line-height: 1;
   cursor: pointer;
   pointer-events: auto;
@@ -4142,54 +4187,37 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   cursor: wait;
 }
 
-.credential-security-feed-summary {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 0.62rem;
-  line-height: 1.2;
-}
-
-.credential-security-feed-summary span:first-child {
-  flex: 0 0 auto;
-  color: rgba(255, 255, 255, 0.82);
-  font-weight: 400;
-}
-
-.credential-security-feed-summary span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.side-peek-card .credential-security-onepassword-header {
-  gap: 6px;
-}
-
 .side-peek-card .credential-security-onepassword-brand {
-  font-size: 0.57rem;
-}
-
-.side-peek-card .credential-security-onepassword-brand img {
-  width: 13px;
-  height: 13px;
-}
-
-.side-peek-card .credential-security-onepassword-button {
-  min-height: 24px;
-  padding: 4px 8px;
-  font-size: 0.62rem;
-}
-
-.side-peek-card .credential-security-feed-summary {
   font-size: 0.55rem;
 }
 
+.side-peek-card .credential-security-onepassword-brand img {
+  width: 16px;
+  height: 16px;
+}
+
+.side-peek-card .credential-security-onepassword-button {
+  min-height: 22px;
+  padding: 4px 8px;
+  font-size: 0.59rem;
+}
+
+.side-peek-card .credential-security-feed-summary {
+  gap: 4px;
+}
+
+.side-peek-card .credential-security-feed-metric strong {
+  font-size: 0.68rem;
+}
+
+.side-peek-card .credential-security-feed-metric span,
+.side-peek-card .credential-security-feed-caption,
+.side-peek-card .credential-security-card-status {
+  font-size: 0.47rem;
+}
+
 .side-peek-card .project-card[data-project-id="9"] .project-risks {
-  padding-top: 6px;
+  display: none;
 }
 
 .cloudflare-badge.network-security-brand-square {
@@ -4597,6 +4625,102 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   outline: 2px solid rgba(147, 197, 253, 0.78);
   outline-offset: 2px;
 }
+
+.credential-analytics-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(103, 232, 249, 0.18);
+  border-radius: 8px;
+  background: linear-gradient(110deg, rgba(8, 31, 47, 0.72), rgba(18, 28, 43, 0.56));
+}
+
+.credential-analytics-toolbar > div:first-child { margin-right: auto; }
+.credential-eyebrow,
+.credential-section-title > div > span {
+  display: block;
+  color: #67e8f9;
+  font-size: 0.63rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+.credential-analytics-toolbar strong { display: block; margin-top: 3px; color: #e5eefb; font-size: 0.78rem; font-weight: 300; }
+.credential-analytics-toolbar label,
+.credential-custom-range label { display: grid; gap: 5px; color: rgba(229, 238, 251, 0.65); font-size: 0.67rem; }
+.credential-analytics-toolbar select,
+.credential-custom-range input,
+.credential-custom-range button {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 5px;
+  background: rgba(2, 13, 25, 0.7);
+  color: #e5eefb;
+  font: inherit;
+}
+.credential-custom-range { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.credential-custom-range.is-hidden { display: none; }
+.credential-custom-range button { cursor: pointer; color: #a5f3fc; }
+.credential-custom-range button:hover,
+.credential-custom-range button:focus-visible { border-color: rgba(103, 232, 249, 0.72); background: rgba(8, 47, 73, 0.72); }
+
+.credential-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.credential-kpi {
+  position: relative;
+  min-height: 116px;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  background: rgba(17, 28, 43, 0.7);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.045);
+}
+.credential-kpi::after { content: ''; position: absolute; right: -24px; bottom: -40px; width: 96px; height: 96px; border: 1px solid rgba(103, 232, 249, 0.12); border-radius: 50%; }
+.credential-kpi i { color: #67e8f9; font-size: 0.82rem; }
+.credential-kpi span { display: block; margin-top: 10px; color: rgba(229, 238, 251, 0.62); font-size: 0.7rem; }
+.credential-kpi strong { display: block; margin-top: 2px; color: #f8fafc; font-size: 1.55rem; font-weight: 300; font-variant-numeric: tabular-nums; }
+.credential-kpi small { color: rgba(148, 163, 184, 0.62); font-size: 0.61rem; }
+.credential-kpi-success { border-color: rgba(74, 222, 128, 0.2); }.credential-kpi-success i { color: #86efac; }
+.credential-kpi-danger { border-color: rgba(248, 113, 113, 0.25); }.credential-kpi-danger i { color: #fca5a5; }
+
+.credential-analytics-section,
+.credential-health {
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(13, 24, 38, 0.52);
+}
+.credential-section-title,
+.credential-panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.credential-section-title h3,
+.credential-panel-heading h3 { margin: 3px 0 0; color: #f1f5f9; font-size: 0.98rem; font-weight: 300; }
+.credential-section-title p,
+.credential-panel-heading span { max-width: 44ch; margin: 0; color: rgba(203, 213, 225, 0.56); font-size: 0.69rem; line-height: 1.45; text-align: right; }
+.credential-chart-grid,
+.credential-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.credential-chart { min-width: 0; padding: 13px; border-color: rgba(148, 163, 184, 0.13); background: rgba(15, 32, 48, 0.5); }
+.credential-chart-bars { display: grid; gap: 7px; max-height: 260px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.credential-chart-bars li { display: grid; grid-template-columns: minmax(65px, .75fr) minmax(70px, 1.7fr) 28px; align-items: center; gap: 8px; min-width: 0; }
+.credential-chart-bars li > span { overflow: hidden; color: rgba(226, 232, 240, 0.67); font-size: 0.66rem; text-overflow: ellipsis; white-space: nowrap; }
+.credential-chart-bars li > strong { color: #dbeafe; font-size: 0.66rem; font-weight: 400; font-variant-numeric: tabular-nums; text-align: right; }
+.credential-chart-track { position: relative; height: 8px; overflow: hidden; border-radius: 2px; background: rgba(148, 163, 184, 0.12); }
+.credential-chart-track i,
+.credential-chart-track b,
+.credential-chart-track em { position: absolute; top: 0; bottom: 0; left: 0; display: block; }
+.credential-chart-track i { background: linear-gradient(90deg, #0891b2, #67e8f9); }.credential-chart-track b { background: rgba(74, 222, 128, 0.72); }.credential-chart-track em { left: auto; right: 0; background: rgba(248, 113, 113, 0.78); }
+.credential-failed-section { border-color: rgba(248, 113, 113, 0.22); }.credential-failed-section .credential-section-title > div > span { color: #fca5a5; }
+.credential-result { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.64rem; text-transform: capitalize; }.credential-result-successful { color: #86efac; background: rgba(22, 101, 52, 0.22); }.credential-result-failed { color: #fca5a5; background: rgba(127, 29, 29, 0.28); }
+.credential-empty-state { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border: 1px dashed rgba(148, 163, 184, 0.24); border-radius: 7px; color: rgba(203, 213, 225, 0.66); font-size: 0.76rem; }.credential-empty-state i { color: #fbbf24; }
+.credential-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.credential-health-grid article { display: grid; gap: 6px; padding: 12px; border-left: 2px solid rgba(103, 232, 249, 0.5); background: rgba(15, 32, 48, 0.48); }.credential-health-grid span { color: rgba(203, 213, 225, 0.62); font-size: 0.69rem; }.credential-health-grid strong { color: #e5eefb; font-size: 0.81rem; font-weight: 400; text-transform: capitalize; }.credential-health-grid small { color: rgba(203, 213, 225, 0.54); font-size: 0.64rem; line-height: 1.35; }.credential-health-complete { color: #86efac !important; }.credential-health-failed { color: #fca5a5 !important; }.credential-health-error { color: #fbbf24 !important; }
+
+@media (max-width: 1050px) { .credential-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }.credential-chart-grid, .credential-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .credential-analytics-toolbar, .credential-section-title { align-items: stretch; }.credential-analytics-toolbar > div:first-child { width: 100%; }.credential-kpi-grid, .credential-chart-grid, .credential-summary-grid, .credential-health-grid { grid-template-columns: 1fr; }.credential-section-title { flex-direction: column; }.credential-section-title p { text-align: left; }.credential-custom-range { width: 100%; }.credential-custom-range label { flex: 1; }.credential-chart-bars li { grid-template-columns: 78px minmax(70px, 1fr) 26px; } }
 
 .cloudflare-badge {
   gap: 8px;
@@ -13184,6 +13308,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 
   body.sunbird-client-portal .credential-security-onepassword-button {
     min-height: 40px;
+  }
+
+  body.sunbird-client-portal .side-peek-card .credential-security-onepassword-button {
+    min-height: 22px;
   }
 
   body.sunbird-client-portal .project-preview-section.visible {

@@ -5,6 +5,7 @@ const API_BASE_URL = 'https://events.1password.eu/api/v1';
 const PAGE_SIZE = 100;
 const INITIAL_LOOKBACK_DAYS = 120;
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_ANALYTICS_RANGE_DAYS = 366;
 const EVENT_FEEDS = Object.freeze({
     signinattempts: {
         endpoint: 'signinattempts',
@@ -108,6 +109,27 @@ function toMysqlDateTime(value) {
     if (typeof value !== 'string' || !value) return null;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 23).replace('T', ' ');
+}
+
+function analyticsText(value) {
+    return ['string', 'number', 'boolean'].includes(typeof value) ? String(value).trim().slice(0, 160) : '';
+}
+function analyticsMetadata(value) {
+    if (value && typeof value === 'object') return value;
+    try { return JSON.parse(value) || {}; } catch (_) { return {}; }
+}
+function analyticsActor(metadata) {
+    const actor = metadata.target_user || metadata.actor_details || metadata.user;
+    return actor && typeof actor === 'object' ? analyticsText(actor.name || actor.email || actor.uuid) : analyticsText(actor);
+}
+function analyticsResult(metadata) {
+    const value = `${analyticsText(metadata.category)} ${analyticsText(metadata.type)}`.toLowerCase();
+    if (/fail|denied|reject|invalid|error|blocked/.test(value)) return 'failed';
+    if (/success|succeed|allow|approved|complete|credentials_ok/.test(value)) return 'successful';
+    return '';
+}
+function analyticsBuckets(map, limit = 12) {
+    return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([label, count]) => ({ label, count }));
 }
 
 function classifyUpstreamError(error, feed, hadCursor, logger) {
@@ -304,6 +326,42 @@ function createOnePasswordEventsService({ pool, getSecret, logger = console, pos
         });
     }
 
+    async function getCompanyAnalytics(companyId, { startAt, endAt } = {}) {
+        const numericCompanyId = Number(companyId);
+        if (!Number.isInteger(numericCompanyId) || numericCompanyId <= 0) throw new OnePasswordEventsError('invalid_company', 'A valid tenant is required.', 400);
+        const end = endAt ? new Date(endAt) : new Date();
+        const start = startAt ? new Date(startAt) : new Date(end.getTime() - 7 * 86400000);
+        if (Number.isNaN(start) || Number.isNaN(end) || start >= end) throw new OnePasswordEventsError('invalid_range', 'Choose a valid analytics date range.', 400);
+        if (end - start > MAX_ANALYTICS_RANGE_DAYS * 86400000) throw new OnePasswordEventsError('range_too_large', 'The analytics date range cannot exceed 366 days.', 400);
+        await ensureSchema();
+        const [[rows], [states]] = await Promise.all([
+            pool.query(`SELECT EventType, EventTimestamp, MetadataJson FROM StackCTRL1PasswordEventMetadata WHERE CompanyID = ? AND EventTimestamp >= ? AND EventTimestamp < ? ORDER BY EventTimestamp DESC, ID DESC`, [numericCompanyId, toMysqlDateTime(start.toISOString()), toMysqlDateTime(end.toISOString())]),
+            pool.query(`SELECT EventType, LastProcessedCursor, LastSuccessfulSyncAt, SyncStatus, LastError, UpdatedAt FROM StackCTRL1PasswordEventSyncState WHERE CompanyID = ?`, [numericCompanyId])
+        ]);
+        const events = rows.map(row => { const metadata = analyticsMetadata(row.MetadataJson); return { eventType: row.EventType, timestamp: metadata.timestamp || row.EventTimestamp || null, metadata }; });
+        const signIns = events.filter(event => event.eventType === 'signinattempts');
+        const audits = events.filter(event => event.eventType === 'auditevents');
+        const itemUsages = events.filter(event => event.eventType === 'itemusages');
+        const users = new Set(), devices = new Set(), countries = new Map(), platforms = new Map(), eventTypes = new Map(), byUser = new Map(), byCountry = new Map(), byPlatform = new Map(), byType = new Map(), byHour = new Map(), timeline = new Map();
+        const add = (map, value) => { if (value) map.set(value, (map.get(value) || 0) + 1); };
+        let successful = 0, failed = 0, classified = 0;
+        for (const event of events) {
+            const metadata = event.metadata, client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
+            const actor = analyticsActor(metadata), country = analyticsText(metadata.location?.country), platform = analyticsText(client.platform || client.app_name || client.name), device = analyticsText(client.device_uuid || client.device_name);
+            if (actor) users.add(actor); if (device) devices.add(device);
+            add(countries, country); add(platforms, platform); add(eventTypes, analyticsText(metadata.action || metadata.type || metadata.category || metadata.object_type || event.eventType));
+            if (event.eventType !== 'signinattempts') continue;
+            add(byUser, actor); add(byCountry, country); add(byPlatform, platform); add(byType, analyticsText(metadata.type || metadata.category));
+            const result = analyticsResult(metadata), date = new Date(event.timestamp);
+            if (result) { classified += 1; if (result === 'successful') successful += 1; else failed += 1; }
+            if (!Number.isNaN(date.getTime())) { add(byHour, `${String(date.getHours()).padStart(2, '0')}:00`); const bucket = date.toISOString().slice(0, 10), point = timeline.get(bucket) || { bucket, total: 0, successful: 0, failed: 0 }; point.total += 1; if (result) point[result] += 1; timeline.set(bucket, point); }
+        }
+        const location = metadata => [metadata.location?.city, metadata.location?.region, metadata.location?.country].map(analyticsText).filter(Boolean).join(', ') || null;
+        const recentSignIns = signIns.slice(0, 50).map(event => ({ timestamp: event.timestamp, user: analyticsActor(event.metadata) || null, result: analyticsResult(event.metadata) || null, eventType: analyticsText(event.metadata.type || event.metadata.category) || null, platform: analyticsText(event.metadata.client?.platform || event.metadata.client?.app_name || event.metadata.client?.name) || null, location: location(event.metadata) }));
+        const recentAudits = audits.slice(0, 50).map(event => ({ timestamp: event.timestamp, actor: analyticsActor(event.metadata) || null, action: analyticsText(event.metadata.action) || null, objectType: analyticsText(event.metadata.object_type) || null, objectId: analyticsText(event.metadata.object_uuid) || null, location: location(event.metadata) }));
+        return { success: true, analytics: { range: { startAt: start.toISOString(), endAt: end.toISOString() }, metrics: { totalSignIns: signIns.length, ...(classified ? { successfulSignIns: successful, failedSignIns: failed } : {}), totalAuditEvents: audits.length, itemUsageEvents: itemUsages.length, ...(users.size ? { activeUsers: users.size } : {}), ...(devices.size ? { uniqueDevices: devices.size } : {}), totalEvents: events.length }, signIns: { total: signIns.length, ...(classified ? { successful, failed } : {}), timeline: [...timeline.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)), byUser: analyticsBuckets(byUser), byCountry: analyticsBuckets(byCountry), byPlatform: analyticsBuckets(byPlatform), byType: analyticsBuckets(byType), byHour: analyticsBuckets(byHour, 24), recent: recentSignIns }, audit: { total: audits.length, recent: recentAudits }, summaries: { countries: analyticsBuckets(countries), platforms: analyticsBuckets(platforms), eventTypes: analyticsBuckets(eventTypes) } }, integration: states.map(row => ({ eventType: row.EventType, lastSuccessfulSyncAt: row.LastSuccessfulSyncAt || null, lastAttemptedSyncAt: row.UpdatedAt || null, status: row.SyncStatus || null, hasCursor: Boolean(row.LastProcessedCursor), lastError: row.LastError || null })) };
+    }
+
     async function syncCompany(companyId) {
         const numericCompanyId = Number(companyId);
         if (!Number.isInteger(numericCompanyId) || numericCompanyId <= 0) {
@@ -362,7 +420,7 @@ function createOnePasswordEventsService({ pool, getSecret, logger = console, pos
         }
     }
 
-    return { ensureSchema, syncCompany };
+    return { ensureSchema, syncCompany, getCompanyAnalytics };
 }
 
 module.exports = {

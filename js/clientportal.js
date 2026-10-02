@@ -791,16 +791,8 @@ const mockProjects = [
         name: "Credential Security", 
         type: "Password & Credential Management",
         status: "active",
-        risks: { critical: 1, high: 1, medium: 1 },
-        securityScore: 85,
-        uptime: 98.5,
         lastUpdate: "2 days ago",
         icon: "fas fa-key",
-        cardMetrics: [
-            { label: "Weak-password data", value: "Not reported", icon: "fas fa-exclamation-triangle" },
-            { label: "Reuse data", value: "Not reported", icon: "fas fa-sync-alt" }
-        ],
-        cardFooter: "1Password event metadata only"
     },
     {
         id: 1,
@@ -1046,7 +1038,10 @@ let latestDevicesCardData = null;
 let latestEmailCardData = null;
 let latestNetworkSecurityData = null;
 let isNetworkSecurityLocked = false;
-let isCredentialSecurityLocked = false;
+let onePasswordEventsData = null;
+let onePasswordEventsRequest = null;
+let onePasswordEventsFetchState = 'idle';
+let onePasswordEventsLastError = '';
 let projectGridHasRendered = false;
 
 function toBooleanMfa(value) {
@@ -10892,6 +10887,7 @@ function displayCurrentProject() {
     } else {
         renderSidePeekCards();
     }
+    updateCredentialSecurityCardSummary(onePasswordEventsFetchState, onePasswordEventsData);
     projectGridHasRendered = true;
     
     document.getElementById('project-current').textContent = currentProjectIndex + 1;
@@ -10940,21 +10936,15 @@ function renderSidePeekCards() {
             sidePeekPrev.classList.add('credential-security-peek');
             sidePeekPrev.classList.remove('no-interaction');
             let credentialSecurityHovered = false;
-            let credentialSecurityClickOpen = false;
+            let credentialSecurityLit = false;
 
             const syncCredentialSecurityCardState = () => {
-                sidePeekPrevCard.classList.toggle('credential-security-dimmed', isCredentialSecurityLocked);
-                sidePeekPrevCard.classList.toggle('credential-security-active', !isCredentialSecurityLocked);
+                sidePeekPrevCard.classList.toggle('credential-security-dimmed', !credentialSecurityLit);
+                sidePeekPrevCard.classList.toggle('credential-security-active', credentialSecurityLit);
                 sidePeekPrevCard.classList.toggle(
                     'expanded-left',
-                    !isCredentialSecurityLocked && (credentialSecurityHovered || credentialSecurityClickOpen)
+                    credentialSecurityHovered || credentialSecurityLit
                 );
-                const badge = sidePeekPrevCard.querySelector('.project-status-badge');
-                if (badge) {
-                    badge.classList.toggle('status-inactive', isCredentialSecurityLocked);
-                    badge.classList.toggle('status-active', !isCredentialSecurityLocked);
-                    badge.textContent = isCredentialSecurityLocked ? 'Inactive' : 'Active';
-                }
             };
 
             sidePeekPrev.onmouseenter = () => {
@@ -10964,7 +10954,6 @@ function renderSidePeekCards() {
 
             sidePeekPrev.onmouseleave = () => {
                 credentialSecurityHovered = false;
-                credentialSecurityClickOpen = false;
                 syncCredentialSecurityCardState();
             };
 
@@ -10974,9 +10963,9 @@ function renderSidePeekCards() {
                 }
                 e.preventDefault();
                 e.stopPropagation();
-                isCredentialSecurityLocked = !isCredentialSecurityLocked;
-                credentialSecurityClickOpen = !isCredentialSecurityLocked;
+                credentialSecurityLit = true;
                 syncCredentialSecurityCardState();
+                fetchOnePasswordEvents();
             };
 
             syncCredentialSecurityCardState();
@@ -11033,6 +11022,9 @@ function renderSidePeekCards() {
     sidePeekPrev.classList.toggle('is-empty', !prevProject);
     sidePeekNext.classList.toggle('is-empty', !nextProject);
 
+    if (prevProject?.id === 9) {
+        updateCredentialSecurityCardSummary(onePasswordEventsFetchState, onePasswordEventsData);
+    }
     syncSidePeekCardSizing();
 }
 
@@ -11835,7 +11827,10 @@ function renderOnePasswordEventError(content, message) {
         </button>
     `;
     content.querySelector('[data-credential-events-error]').textContent = message;
-    content.querySelector('[data-credential-events-retry]')?.addEventListener('click', fetchOnePasswordEvents);
+    content.querySelector('[data-credential-events-retry]')?.addEventListener(
+        'click',
+        () => fetchOnePasswordEvents({ force: true })
+    );
 }
 
 function renderSunbirdCredentialSecurityDashboard(data) {
@@ -11862,10 +11857,8 @@ function renderSunbirdCredentialSecurityDashboard(data) {
                 const state = stateByFeed.get(feed.key);
                 const hasCount = sync?.processedEvents !== undefined && sync?.processedEvents !== null &&
                     String(sync.processedEvents).trim() !== '' &&
-                    Number.isFinite(Number(sync.processedEvents));
-                const count = hasCount
-                    ? String(Number(sync.processedEvents))
-                    : 'Not reported';
+                    Number.isSafeInteger(Number(sync.processedEvents)) && Number(sync.processedEvents) >= 0;
+                const count = hasCount ? String(Number(sync.processedEvents)) : 'Not reported';
                 const status = getOnePasswordEventText(state?.status || sync?.status) || 'Not reported';
                 const statusClass = status.toLowerCase().replace(/[^a-z0-9_-]/g, '');
                 return `
@@ -11913,21 +11906,126 @@ function renderSunbirdCredentialSecurityDashboard(data) {
     `;
 }
 
-async function fetchOnePasswordEvents() {
+function updateCredentialSecurityCardSummary(state, data) {
+    const cards = document.querySelectorAll('.project-card[data-project-id="9"]');
+    if (!cards.length) return;
+    const syncByFeed = new Map((Array.isArray(data?.sync) ? data.sync : []).map(feed => [feed?.eventType, feed]));
+    const stateByFeed = new Map((Array.isArray(data?.state) ? data.state : []).map(feed => [feed?.eventType, feed]));
+    cards.forEach(card => {
+        ONEPASSWORD_EVENT_FEEDS.forEach(feed => {
+            const value = card.querySelector(`[data-onepassword-count="${feed.key}"]`);
+            if (!value) return;
+            if (state === 'loading') {
+                value.textContent = '…';
+                return;
+            }
+            if (state === 'error') {
+                value.textContent = '—';
+                return;
+            }
+
+            const count = syncByFeed.get(feed.key)?.processedEvents;
+            const hasCount = count !== undefined && count !== null && String(count).trim() !== '';
+            value.textContent = hasCount && Number.isSafeInteger(Number(count)) && Number(count) >= 0
+                ? String(Number(count))
+                : 'Not reported';
+        });
+
+        const note = card.querySelector('[data-onepassword-card-status]');
+        if (!note) return;
+        if (state === 'loading') {
+            note.textContent = 'Syncing 1Password events…';
+            note.removeAttribute('title');
+            return;
+        }
+        if (state === 'error') {
+            note.textContent = 'Sync unavailable · Retry in dashboard';
+            note.removeAttribute('title');
+            return;
+        }
+        if (state !== 'success' || !data) {
+            note.textContent = 'Sync not requested';
+            note.removeAttribute('title');
+            return;
+        }
+
+        const statuses = ONEPASSWORD_EVENT_FEEDS
+            .map(feed => getOnePasswordEventText(stateByFeed.get(feed.key)?.status || syncByFeed.get(feed.key)?.status))
+            .filter(Boolean);
+        const uniqueStatuses = [...new Set(statuses)];
+        note.textContent = uniqueStatuses.length === 1
+            ? `Status: ${uniqueStatuses[0]}`
+            : uniqueStatuses.length
+                ? 'Status: Mixed'
+                : 'Status: Not reported';
+        const successfulDates = (Array.isArray(data.state) ? data.state : [])
+            .map(feed => feed?.lastSuccessfulSyncAt ? new Date(feed.lastSuccessfulSyncAt) : null)
+            .filter(date => date && !Number.isNaN(date.getTime()));
+        if (successfulDates.length) {
+            const latestDate = new Date(Math.max(...successfulDates.map(date => date.getTime())));
+            note.title = `Last successful sync: ${formatOnePasswordEventDate(latestDate)}`;
+        } else {
+            note.removeAttribute('title');
+        }
+    });
+}
+
+function fetchOnePasswordEvents({ force = false } = {}) {
     const content = document.getElementById('sunbird-credential-security-content');
-    if (!content) return;
+    if (onePasswordEventsRequest) {
+        if (content) {
+            content.innerHTML = `
+                <div class="credential-events-loading" role="status">
+                    <span class="credential-events-spinner" aria-hidden="true"></span>
+                    <span>Loading 1Password event activity…</span>
+                </div>
+            `;
+        }
+        return onePasswordEventsRequest;
+    }
+    if (!force && onePasswordEventsFetchState === 'error') {
+        updateCredentialSecurityCardSummary('error', null);
+        if (content) renderOnePasswordEventError(content, onePasswordEventsLastError);
+        return Promise.resolve(null);
+    }
+    if (!force && onePasswordEventsData) {
+        updateCredentialSecurityCardSummary('success', onePasswordEventsData);
+        if (content) renderSunbirdCredentialSecurityDashboard(onePasswordEventsData);
+        return Promise.resolve(onePasswordEventsData);
+    }
 
-    content.innerHTML = `
-        <div class="credential-events-loading" role="status">
-            <span class="credential-events-spinner" aria-hidden="true"></span>
-            <span>Loading 1Password event activity…</span>
-        </div>
-    `;
+    onePasswordEventsFetchState = 'loading';
+    updateCredentialSecurityCardSummary('loading', null);
+    if (content) {
+        content.innerHTML = `
+            <div class="credential-events-loading" role="status">
+                <span class="credential-events-spinner" aria-hidden="true"></span>
+                <span>Loading 1Password event activity…</span>
+            </div>
+        `;
+    }
 
-    const authToken = localStorage.getItem('authToken');
+    onePasswordEventsRequest = syncOnePasswordEventsFromApi();
+    const request = onePasswordEventsRequest;
+    return request.finally(() => {
+        if (onePasswordEventsRequest === request) onePasswordEventsRequest = null;
+    });
+}
+
+async function syncOnePasswordEventsFromApi() {
+    let authToken = '';
+    try {
+        authToken = localStorage.getItem('authToken') || '';
+    } catch (_) {
+        authToken = '';
+    }
     if (!authToken) {
-        renderOnePasswordEventError(content, 'Sign in to view Credential Security events.');
-        return;
+        onePasswordEventsFetchState = 'error';
+        onePasswordEventsLastError = 'Sign in to view Credential Security events.';
+        updateCredentialSecurityCardSummary('error', null);
+        const content = document.getElementById('sunbird-credential-security-content');
+        if (content?.isConnected) renderOnePasswordEventError(content, onePasswordEventsLastError);
+        return null;
     }
 
     try {
@@ -11941,16 +12039,29 @@ async function fetchOnePasswordEvents() {
         });
         const data = await response.json().catch(() => null);
         if (!response.ok || !data?.success) {
-            const message = typeof data?.message === 'string' ? data.message.slice(0, 240) : '';
-            renderOnePasswordEventError(
-                content,
-                message || 'Unable to retrieve 1Password events right now. Please try again.'
-            );
-            return;
+            onePasswordEventsFetchState = 'error';
+            onePasswordEventsLastError = response.status === 401 || response.status === 403
+                ? 'Your session may have expired. Sign in again and retry.'
+                : 'Unable to retrieve 1Password events right now. Please try again.';
+            updateCredentialSecurityCardSummary('error', null);
+            const content = document.getElementById('sunbird-credential-security-content');
+            if (content?.isConnected) renderOnePasswordEventError(content, onePasswordEventsLastError);
+            return null;
         }
-        renderSunbirdCredentialSecurityDashboard(data);
+        onePasswordEventsData = data;
+        onePasswordEventsFetchState = 'success';
+        onePasswordEventsLastError = '';
+        updateCredentialSecurityCardSummary('success', data);
+        const content = document.getElementById('sunbird-credential-security-content');
+        if (content?.isConnected) renderSunbirdCredentialSecurityDashboard(data);
+        return data;
     } catch (_) {
-        renderOnePasswordEventError(content, 'Unable to retrieve 1Password events right now. Please try again.');
+        onePasswordEventsFetchState = 'error';
+        onePasswordEventsLastError = 'Unable to retrieve 1Password events right now. Please try again.';
+        updateCredentialSecurityCardSummary('error', null);
+        const content = document.getElementById('sunbird-credential-security-content');
+        if (content?.isConnected) renderOnePasswordEventError(content, onePasswordEventsLastError);
+        return null;
     }
 }
 
@@ -12741,7 +12852,11 @@ function createProjectCard(project) {
     card.setAttribute('data-project-id', project.id);
     setNonSunbirdBlurGate(card, shouldBlurGateForNonSunbird() && NON_SUNBIRD_BLUR_PROJECT_IDS.includes(Number(project.id)));
     
-    const risksCount = project.risks.critical + project.risks.high + project.risks.medium;
+    const projectRisks = project.risks || {};
+    const criticalRisks = Number(projectRisks.critical) || 0;
+    const highRisks = Number(projectRisks.high) || 0;
+    const mediumRisks = Number(projectRisks.medium) || 0;
+    const risksCount = criticalRisks + highRisks + mediumRisks;
     const networkSecurityCtaHTML = project.id === 10
         ? `<div class="network-security-card-footer">
                 <div class="network-security-card-cta" data-network-security-cta="true" role="button" tabindex="0" aria-label="Open full Network Security dashboard">
@@ -12756,36 +12871,39 @@ function createProjectCard(project) {
     const networkSecurityPanelHTML = project.id === 10 ? renderNetworkSecurityCardPanel(project) : '';
     const credentialSecurityOnePasswordHTML = project.id === 9
         ? `<div class="credential-security-onepassword">
-                <div class="credential-security-onepassword-header">
-                    <span class="credential-security-onepassword-brand">
-                        <img src="Images/1password.webp" alt="" aria-hidden="true">
-                        <span>1Password Tenant</span>
-                    </span>
-                    <button class="credential-security-onepassword-button" type="button" data-onepassword-open aria-label="Open Credential Security Events dashboard">
-                        Open
-                    </button>
-                </div>
                 <div class="credential-security-feed-summary" aria-label="1Password event feeds">
-                    <span>Feeds</span>
-                    <span>Sign-ins · Item usage · Audit events</span>
+                    ${ONEPASSWORD_EVENT_FEEDS.map(feed => `
+                        <div class="credential-security-feed-metric">
+                            <strong data-onepassword-count="${feed.key}">Not reported</strong>
+                            <span>${feed.label}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="credential-security-feed-caption">Events processed this sync</div>
+                <div class="credential-security-card-status" data-onepassword-card-status aria-live="polite">Sync not requested</div>
+                <div class="credential-security-card-footer">
+                    <button class="credential-security-onepassword-button" type="button" data-onepassword-open aria-label="Open Credential Security Events dashboard">Open</button>
+                    <span class="credential-security-onepassword-brand" aria-label="1Password">
+                        <img src="Images/1password.webp" alt="1Password logo">
+                    </span>
                 </div>
            </div>`
         : '';
     
     const isSummaryCard = isSummaryProjectCard(project);
-    const metrics = isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []);
+    const metrics = project.id === 9 ? [] : (isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []));
     const statusMeta = getSummaryCardStatusMeta(project);
     const isInactiveProject = String(project.status || '').toLowerCase() === 'inactive';
     const riskDotClass = project.id === 9
         ? 'unreported'
         : isInactiveProject
         ? 'critical'
-        : project.risks.critical > 0 ? 'critical' : project.risks.high > 0 ? 'high' : (project.risks.medium > 0 ? 'medium' : 'success');
+        : criticalRisks > 0 ? 'critical' : highRisks > 0 ? 'high' : (mediumRisks > 0 ? 'medium' : 'success');
     const riskDotTitle = project.id === 9
         ? 'Credential risk data not reported'
         : isInactiveProject
         ? 'Inactive'
-        : project.risks.critical > 0 ? project.risks.critical + ' Critical' : project.risks.high > 0 ? project.risks.high + ' High' : (project.risks.medium > 0 ? project.risks.medium + ' Medium' : 'No Risks detected');
+        : criticalRisks > 0 ? criticalRisks + ' Critical' : highRisks > 0 ? highRisks + ' High' : (mediumRisks > 0 ? mediumRisks + ' Medium' : 'No Risks detected');
 
     // Build metrics section from cardMetrics array
     let metricsHTML = '';
@@ -12815,6 +12933,15 @@ function createProjectCard(project) {
             `;
         }).join('');
     }
+    const projectInfoHTML = project.id === 9 ? '' : `<div class="project-info">${metricsHTML}</div>`;
+    const projectRisksHTML = project.id === 9 ? '' : `
+        <div class="project-risks">
+            <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
+            <div class="risk-indicator">
+                <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
+            </div>
+        </div>
+    `;
     
     card.innerHTML = `
         <div class="project-card-header">
@@ -12826,21 +12953,14 @@ function createProjectCard(project) {
                 <p class="project-type">${project.type}</p>
             </div>
             <span class="project-status-badge status-${project.status.toLowerCase()}">
-                ${project.id === 9 ? 'Active' : project.status}
+                ${project.id === 9 ? 'ACTIVE' : project.status}
             </span>
 
         </div>
-        <div class="project-info">
-            ${metricsHTML}
-        </div>
+        ${projectInfoHTML}
         ${networkSecurityPanelHTML}
         ${credentialSecurityOnePasswordHTML}
-        <div class="project-risks">
-            <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
-            <div class="risk-indicator">
-                <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
-            </div>
-        </div>
+        ${projectRisksHTML}
         ${networkSecurityCtaHTML}
     `;
 
