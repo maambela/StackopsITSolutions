@@ -5176,9 +5176,24 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 .credential-security-onepassword-button { min-height: 30px; padding: 6px 10px; border-radius: 7px; color: rgba(255, 255, 255, 0.92); font-size: 0.76rem; }
 .credential-security-onepassword-brand img { width: 20px; height: 20px; }
 
-.project-card[data-project-id="9"].credential-security-status-success { border-color: rgba(74, 222, 128, 0.46); box-shadow: 0 8px 22px rgba(22, 101, 52, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
-.project-card[data-project-id="9"].credential-security-status-warning { border-color: rgba(251, 146, 60, 0.5); box-shadow: 0 8px 22px rgba(154, 52, 18, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
-.project-card[data-project-id="9"].credential-security-status-error { border-color: rgba(248, 113, 113, 0.64); background: linear-gradient(132deg, rgba(248, 113, 113, 0.19), rgba(67, 12, 20, 0.34)); box-shadow: 0 8px 26px rgba(127, 29, 29, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.28); }
+.project-card[data-project-id="9"].credential-security-status-success,
+.project-card[data-project-id="9"].credential-security-status-warning,
+.project-card[data-project-id="9"].credential-security-status-error,
+.project-card[data-project-id="9"].credential-security-status-neutral {
+  border-color: rgba(255, 255, 255, 0.38);
+  box-shadow:
+    0 6px 18px rgba(255, 255, 255, 0.3),
+    inset 0 0.5px 1px rgba(255, 255, 255, 0.45),
+    inset 0 -0.5px 1px rgba(0, 0, 0, 0.08);
+}
+
+.side-peek-card .project-card[data-project-id="9"] {
+  border-color: rgba(255, 255, 255, 0.38);
+  box-shadow:
+    0 6px 18px rgba(255, 255, 255, 0.3),
+    inset 0 0.5px 1px rgba(255, 255, 255, 0.45),
+    inset 0 -0.5px 1px rgba(0, 0, 0, 0.08) !important;
+}
 
 .side-peek-nav-left.credential-security-peek { top: calc(50% - 110px); }
 .side-peek-nav-left.credential-security-peek .side-peek-card { height: 220px; }
@@ -5186,21 +5201,21 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 .side-peek-card .project-card[data-project-id="9"] .project-card-header { gap: 8px; }
 .side-peek-card .project-card[data-project-id="9"] .project-icon { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
 .side-peek-card .project-card[data-project-id="9"] .project-icon img { width: 15px; height: 15px; }
-.side-peek-card .project-card[data-project-id="9"] .project-title h3 { font-size: 0.74rem; line-height: 1.12; }
-.side-peek-card .project-card[data-project-id="9"] .project-type { margin-top: 1px; font-size: 0.61rem; line-height: 1.15; }
-.side-peek-card .project-card[data-project-id="9"] .project-status-badge { padding: 3px 6px; font-size: 0.52rem; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-onepassword { gap: 5px; }
+.side-peek-card .project-card[data-project-id="9"] .project-title h3 { font-size: 0.8rem; line-height: 1.12; }
+.side-peek-card .project-card[data-project-id="9"] .project-type { margin-top: 1px; font-size: 0.66rem; line-height: 1.15; }
+.side-peek-card .project-card[data-project-id="9"] .project-status-badge { padding: 3px 6px; font-size: 0.56rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-onepassword { gap: 6px; padding-top: 8px; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-feed-summary { gap: 4px; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric { min-height: 24px; padding: 4px 5px; gap: 4px; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric i { font-size: 0.57rem; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric span { font-size: 0.57rem; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric strong { font-size: 0.65rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric i { font-size: 0.68rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric span { font-size: 0.66rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric strong { font-size: 0.72rem; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-feed-metric:nth-child(n + 5) { display: none; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-summary-prompt { font-size: 0.62rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-summary-prompt { font-size: 0.68rem; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-card-detail,
-.side-peek-card .project-card[data-project-id="9"] .credential-security-card-status { font-size: 0.58rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-card-status { font-size: 0.64rem; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-card-footer { min-height: 25px; padding-top: 4px; }
-.side-peek-card .project-card[data-project-id="9"] .credential-security-onepassword-button { min-height: 25px; padding: 5px 8px; font-size: 0.65rem; }
+.side-peek-card .project-card[data-project-id="9"] .credential-security-onepassword-button { min-height: 25px; padding: 5px 8px; font-size: 0.7rem; }
 .side-peek-card .project-card[data-project-id="9"] .credential-security-onepassword-brand img { width: 17px; height: 17px; }
 
 @media (max-width: 1050px) {
