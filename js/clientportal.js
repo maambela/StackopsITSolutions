@@ -12500,6 +12500,22 @@ function createProjectCard(project) {
            </div>`
         : '';
     const networkSecurityPanelHTML = project.id === 10 ? renderNetworkSecurityCardPanel(project) : '';
+    const credentialSecurityOnePasswordHTML = project.id === 9
+        ? `<div class="credential-security-onepassword">
+                <span class="credential-security-onepassword-brand">
+                    <img src="Images/1password.webp" alt="" aria-hidden="true">
+                    <span>1Password Tenant</span>
+                </span>
+                <button class="credential-security-onepassword-button" type="button" data-onepassword-sync aria-expanded="false">
+                    <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
+                    <span>View 1Password Activity</span>
+                </button>
+                <div class="credential-security-onepassword-activity" data-onepassword-activity role="status" aria-live="polite" hidden>
+                    <p data-onepassword-status></p>
+                    <ul data-onepassword-events></ul>
+                </div>
+           </div>`
+        : '';
     
     const isSummaryCard = isSummaryProjectCard(project);
     const metrics = isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []);
@@ -12565,8 +12581,18 @@ function createProjectCard(project) {
                 <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
             </div>
         </div>
+        ${credentialSecurityOnePasswordHTML}
         ${networkSecurityCtaHTML}
     `;
+
+    const onePasswordButton = card.querySelector('[data-onepassword-sync]');
+    if (onePasswordButton) {
+        onePasswordButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            loadOnePasswordActivity(card);
+        });
+    }
 
     const networkSecurityCta = card.querySelector('[data-network-security-cta]');
     if (networkSecurityCta) {
@@ -12584,6 +12610,81 @@ function createProjectCard(project) {
     }
     
     return card;
+}
+
+async function loadOnePasswordActivity(card) {
+    const button = card.querySelector('[data-onepassword-sync]');
+    const activity = card.querySelector('[data-onepassword-activity]');
+    const status = card.querySelector('[data-onepassword-status]');
+    const eventsList = card.querySelector('[data-onepassword-events]');
+    const authToken = localStorage.getItem('authToken');
+    if (!button || !activity || !status || !eventsList) return;
+
+    if (!authToken) {
+        activity.hidden = false;
+        status.textContent = 'Sign in to view 1Password activity.';
+        return;
+    }
+
+    button.disabled = true;
+    button.setAttribute('aria-expanded', 'true');
+    button.querySelector('span').textContent = 'Loading activity...';
+    activity.hidden = false;
+    status.textContent = 'Retrieving 1Password activity...';
+    eventsList.replaceChildren();
+
+    try {
+        const response = await fetch('/api/sunbird/onepassword/sync', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) {
+            throw new Error(data?.message || 'Unable to retrieve 1Password activity right now. Please try again later.');
+        }
+
+        const syncSummary = (Array.isArray(data.sync) ? data.sync : [])
+            .map(feed => {
+                const label = {
+                    signinattempts: 'Sign-ins',
+                    itemusages: 'Item usage',
+                    auditevents: 'Audit events'
+                }[feed.eventType] || 'Events';
+                return `${label}: ${Number(feed.processedEvents) || 0}`;
+            })
+            .join(' · ');
+        const records = Array.isArray(data.events) ? data.events : [];
+        status.textContent = `${syncSummary || 'Activity sync complete.'}${records.length ? ` · ${records.length} recent events` : ' · No events returned'}`;
+
+        records.slice(0, 12).forEach(record => {
+            const metadata = record?.metadata && typeof record.metadata === 'object' ? record.metadata : {};
+            const typeLabel = {
+                signinattempts: 'Sign-in',
+                itemusages: 'Item usage',
+                auditevents: 'Audit event'
+            }[record.eventType] || '1Password event';
+            const detail = metadata.action || metadata.type || metadata.category || typeLabel;
+            const actor = metadata.target_user || metadata.actor_details || metadata.user || {};
+            const actorLabel = actor.name || actor.email || '';
+            const item = document.createElement('li');
+            const title = document.createElement('strong');
+            const time = document.createElement('time');
+            title.textContent = actorLabel ? `${typeLabel}: ${actorLabel} · ${detail}` : `${typeLabel}: ${detail}`;
+            const eventTime = Date.parse(record.timestamp || '');
+            time.textContent = Number.isNaN(eventTime) ? '' : new Date(eventTime).toLocaleString();
+            item.append(title, time);
+            eventsList.appendChild(item);
+        });
+    } catch (error) {
+        status.textContent = error.message || 'Unable to retrieve 1Password activity right now. Please try again later.';
+    } finally {
+        button.disabled = false;
+        button.querySelector('span').textContent = 'View 1Password Activity';
+    }
 }
 
 function buildProjectPreviewModel(project) {

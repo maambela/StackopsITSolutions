@@ -61,6 +61,8 @@ const { createStackCTRLIntelligenceRouter } = require('./routes/stackctrl-intell
 const { createAdminIntelligenceRouter } = require('./routes/admin-intelligence');
 const { createPowerBIReportingService } = require('./services/powerbi-reporting');
 const { createPowerBIReportingRouter } = require('./routes/powerbi-reporting');
+const { createOnePasswordEventsService } = require('./services/onepassword-events');
+const { createOnePasswordEventsRouter } = require('./routes/onepassword-events');
 
 // invoice payment endpoints 
 require("dotenv").config();
@@ -16685,6 +16687,10 @@ const stackCTRLIntelligenceService = createStackCTRLIntelligenceService({
     azureOpenAI: azureOpenAIService,
     refreshSource: refreshStackCTRLIntelligenceSource
 });
+const onePasswordEventsService = createOnePasswordEventsService({ pool, getSecret });
+onePasswordEventsService.ensureSchema().catch(error => {
+    console.error(`[1Password Events] Schema initialization failed (${error.code || 'database_error'}).`);
+});
 const stackCTRLIntelligenceScheduler = createStackCTRLIntelligenceScheduler({
     pool,
     intelligenceService: stackCTRLIntelligenceService
@@ -16791,6 +16797,11 @@ app.use('/api/stackctrl/intelligence', createStackCTRLIntelligenceRouter({
     intelligenceService: stackCTRLIntelligenceService,
     schedulerService: stackCTRLIntelligenceScheduler,
     automationService: stackCTRLIntelligenceAutomation
+}));
+app.use('/api/sunbird/onepassword', createOnePasswordEventsRouter({
+    authenticateToken,
+    getAccessContextByUser,
+    onePasswordEventsService
 }));
 app.use('/api/admin/intelligence', createAdminIntelligenceRouter({
     authenticateToken,

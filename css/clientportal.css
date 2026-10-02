@@ -4079,6 +4079,111 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   border-radius: 8px;
 }
 
+.credential-security-onepassword {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.credential-security-onepassword-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.credential-security-onepassword-brand img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.credential-security-onepassword-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.84);
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.credential-security-onepassword-button:hover,
+.credential-security-onepassword-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.credential-security-onepassword-button:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.credential-security-onepassword-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.credential-security-onepassword-activity {
+  max-height: 190px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.68rem;
+}
+
+.credential-security-onepassword-activity[hidden] {
+  display: none;
+}
+
+.credential-security-onepassword-activity p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.credential-security-onepassword-activity ul {
+  display: grid;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credential-security-onepassword-activity li {
+  display: grid;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-wrap: anywhere;
+}
+
+.credential-security-onepassword-activity li strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 400;
+}
+
+.credential-security-onepassword-activity time {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.62rem;
+}
+
 .cloudflare-badge.network-security-brand-square {
   width: 58px;
   min-height: 50px;
@@ -12843,6 +12948,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 
   body.sunbird-client-portal .network-security-card-footer {
     margin-top: 0;
+  }
+
+  body.sunbird-client-portal .credential-security-onepassword-button {
+    min-height: 40px;
   }
 
   body.sunbird-client-portal .project-preview-section.visible {
