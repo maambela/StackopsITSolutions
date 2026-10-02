@@ -3198,11 +3198,13 @@ body.client-portal-page {
   filter: saturate(0.72);
 }
 
-.side-peek-card.credential-security-dimmed .project-card,
-.side-peek-card.credential-security-dimmed .credential-security-onepassword,
-.side-peek-card.credential-security-dimmed .credential-security-onepassword-button,
-.side-peek-card.credential-security-dimmed .credential-security-onepassword-activity {
+.side-peek-card.credential-security-dimmed .project-card {
   pointer-events: none;
+}
+
+.side-peek-card.credential-security-active .credential-security-onepassword,
+.side-peek-card.credential-security-dimmed .credential-security-onepassword {
+  pointer-events: auto;
 }
 
 .side-peek-card .project-card {
@@ -3479,12 +3481,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   pointer-events: auto;
 }
 
-.side-peek-card.credential-security-active,
-.side-peek-card.credential-security-dimmed {
-  height: 130px !important;
-  max-height: 130px !important;
-}
-
 .side-peek-nav.credential-security-overlay-open {
   z-index: 1000;
 }
@@ -3496,12 +3492,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .side-peek-nav.credential-security-overlay-open .side-peek-card {
   z-index: 1000;
-}
-
-.side-peek-nav:hover .side-peek-card.credential-security-active:not(.credential-security-dimmed),
-.side-peek-card.credential-security-active:not(.credential-security-dimmed) {
-  opacity: 1;
-  filter: none;
 }
 
 .side-peek-nav:hover .side-peek-card.credential-security-dimmed,
