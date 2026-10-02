@@ -4978,12 +4978,20 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   gap: 6px;
   justify-content: flex-start;
   padding: 10px 10px 16px;
-  border: none;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px) saturate(130%);
-  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  border: 3px solid rgba(255, 128, 30, 0.9);
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.04)
+  );
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.25),
+    inset 0 1px 2px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.15),
+    0 0 18px rgba(255, 128, 30, 0.4);
+  backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
+  -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
   box-sizing: border-box;
   overflow: hidden;
   z-index: 5;
@@ -4994,7 +5002,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   font-size: 1.4rem;
   font-weight: 200;
   color: white;
-  text-align: left;
+  text-align: center;
   background: transparent;
   border-bottom: none;
   border-radius: 16px 16px 0 0;
