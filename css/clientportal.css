@@ -4968,9 +4968,9 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   position: absolute;
   top: 0;
   left: calc(
-    -1 * (var(--sunbird-menu-width, 310px) + var(--sunbird-menu-left-gap, 25px))
+    -1 * (var(--sunbird-menu-width, 280px) + var(--sunbird-menu-left-gap, 25px))
   );
-  width: var(--sunbird-menu-width, 310px);
+  width: var(--sunbird-menu-width, 280px);
   height: auto;
   min-height: 0;
   display: flex;
@@ -4978,7 +4978,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   gap: 6px;
   justify-content: flex-start;
   padding: 10px 10px 16px;
-  border: 3px solid rgba(255, 128, 30, 0.9);
+  border: 2px solid rgba(255, 128, 30, 0.9);
   border-radius: 12px;
   background: linear-gradient(
     135deg,
@@ -4988,8 +4988,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   box-shadow:
     0 12px 40px rgba(0, 0, 0, 0.25),
     inset 0 1px 2px rgba(255, 255, 255, 0.5),
-    inset 0 -1px 2px rgba(0, 0, 0, 0.15),
-    0 0 18px rgba(255, 128, 30, 0.4);
+    inset 0 -1px 2px rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
   -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.15);
   box-sizing: border-box;
