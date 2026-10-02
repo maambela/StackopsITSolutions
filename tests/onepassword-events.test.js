@@ -17,7 +17,7 @@ function createMemoryPool() {
             return [state ? [{ ...state }] : [], []];
         }
 
-        if (sql.includes('SELECT EventType, LastSuccessfulSyncAt')) {
+        if (sql.includes('SELECT EventType, LastSuccessfulSyncAt') || sql.includes('SELECT EventType, LastProcessedCursor, LastSuccessfulSyncAt')) {
             const rows = [...states.values()]
                 .filter(row => row.CompanyID === params[0])
                 .map(row => ({ ...row }));
@@ -25,10 +25,14 @@ function createMemoryPool() {
         }
 
         if (sql.includes('SELECT EventType, EventTimestamp, MetadataJson')) {
-            const rows = [...events.values()]
+            const hasRange = params.length >= 3;
+            const startAt = hasRange ? new Date(String(params[1]).replace(' ', 'T')) : null;
+            const endAt = hasRange ? new Date(String(params[2]).replace(' ', 'T')) : null;
+            const matchingRows = [...events.values()]
                 .filter(row => row.CompanyID === params[0])
-                .sort((a, b) => String(b.EventTimestamp || '').localeCompare(String(a.EventTimestamp || '')))
-                .slice(0, Number(params[1]))
+                .filter(row => !hasRange || (new Date(row.EventTimestamp) >= startAt && new Date(row.EventTimestamp) < endAt))
+                .sort((a, b) => String(b.EventTimestamp || '').localeCompare(String(a.EventTimestamp || '')));
+            const rows = (hasRange ? matchingRows : matchingRows.slice(0, Number(params[1])))
                 .map(row => ({ ...row }));
             return [rows, []];
         }
@@ -329,6 +333,36 @@ test('1Password sync maps upstream errors to safe client messages and retains an
             assert.equal(pool.states.get(`${index + 1}:signinattempts`).LastProcessedCursor, entry.cursor);
         }
     }
+});
+
+test('1Password analytics derives an audit timeline and only reports explicit sign-in results', async () => {
+    const pool = createMemoryPool();
+    const service = createOnePasswordEventsService({ pool, getSecret: async () => 'unit-test-token', logger: { warn() {}, error() {} }, post: async () => ({}) });
+    const addEvent = (key, eventType, timestamp, metadata) => pool.events.set(key, {
+        CompanyID: 44,
+        EventType: eventType,
+        EventTimestamp: timestamp,
+        MetadataJson: JSON.stringify({ timestamp, ...metadata })
+    });
+
+    addEvent('signin-success', 'signinattempts', '2026-09-29T08:00:00.000Z', { category: 'credentials_ok', actor_details: { name: 'Ava' } });
+    addEvent('signin-failed', 'signinattempts', '2026-09-30T08:00:00.000Z', { category: 'login_failed', actor_details: { name: 'Ava' } });
+    addEvent('signin-unclassified', 'signinattempts', '2026-09-30T09:00:00.000Z', { category: 'new_signin_signal' });
+    addEvent('audit-first', 'auditevents', '2026-09-29T10:00:00.000Z', { action: 'item_updated' });
+    addEvent('audit-second', 'auditevents', '2026-09-30T10:00:00.000Z', { action: 'item_created' });
+
+    const result = await service.getCompanyAnalytics(44, {
+        startAt: '2026-09-28T00:00:00.000Z',
+        endAt: '2026-10-01T00:00:00.000Z'
+    });
+
+    assert.equal(result.analytics.metrics.totalSignIns, 3);
+    assert.equal(result.analytics.metrics.successfulSignIns, 1);
+    assert.equal(result.analytics.metrics.failedSignIns, 1);
+    assert.deepEqual(result.analytics.audit.timeline, [
+        { bucket: '2026-09-29', total: 1 },
+        { bucket: '2026-09-30', total: 1 }
+    ]);
 });
 
 test('1Password sync route requires a mapped Sunbird tenant and prevents response caching', async () => {
