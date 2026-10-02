@@ -164,6 +164,7 @@ function restoreDashboardViewHTML() {
             dashboardView.querySelector('#sunbird-backup-dashboard') ||
             dashboardView.querySelector('#sunbird-applications-dashboard') ||
             dashboardView.querySelector('#sunbird-network-security-dashboard') ||
+            dashboardView.querySelector('#sunbird-credential-security-dashboard') ||
             dashboardView.querySelector('#sunbird-reports-dashboard')
         )
     ) {
@@ -215,6 +216,11 @@ function openDashboard(project) {
         return;
     }
 
+    if (Number(project.id) === 9 && isSunbirdUser()) {
+        openSunbirdCredentialSecurityDashboard();
+        return;
+    }
+
     if ((Number(project.id) === 10 || project.isNetworkSecurityCard === true) && isSunbirdUser()) {
         openSunbirdNetworkSecurityDashboard();
         return;
@@ -228,6 +234,7 @@ function openDashboard(project) {
     document.getElementById('dashboard-view')?.classList.remove('sunbird-backup-active');
     document.getElementById('dashboard-view')?.classList.remove('sunbird-applications-active');
     document.getElementById('dashboard-view')?.classList.remove('sunbird-network-security-active');
+    document.getElementById('dashboard-view')?.classList.remove('sunbird-credential-security-active');
     
     // Get dashboard type with fallback
     const dashboardType = project.dashboardType || "Security"; // RULE 18: Fallback config
@@ -603,6 +610,7 @@ function goBackToProjects() {
         dashboardView.classList.remove('sunbird-backup-active');
         dashboardView.classList.remove('sunbird-applications-active');
         dashboardView.classList.remove('sunbird-reports-active');
+        dashboardView.classList.remove('sunbird-credential-security-active');
     }
     
     // Destroy charts
@@ -789,10 +797,10 @@ const mockProjects = [
         lastUpdate: "2 days ago",
         icon: "fas fa-key",
         cardMetrics: [
-            { label: "Weak Passwords", value: ": 12", icon: "fas fa-exclamation-triangle" },
-            { label: "Reused Passwords", value: ": 8", icon: "fas fa-sync-alt" }
+            { label: "Weak-password data", value: "Not reported", icon: "fas fa-exclamation-triangle" },
+            { label: "Reuse data", value: "Not reported", icon: "fas fa-sync-alt" }
         ],
-        cardFooter: "High-risk credentials detected"
+        cardFooter: "1Password event metadata only"
     },
     {
         id: 1,
@@ -10914,7 +10922,8 @@ function renderSidePeekCards() {
 
     if (!sidePeekPrevCard || !sidePeekNextCard || !sidePeekPrev || !sidePeekNext) return;
 
-    clearOnePasswordActivityPlacement(sidePeekPrev);
+    sidePeekPrev.classList.remove('credential-security-peek');
+    sidePeekPrev.style.removeProperty('--credential-security-peek-width');
     sidePeekPrevCard.innerHTML = '';
     sidePeekNextCard.innerHTML = '';
 
@@ -10928,6 +10937,7 @@ function renderSidePeekCards() {
 
         // Credential Security Card (ID 9) logic
         if (prevProject.id === 9) {
+            sidePeekPrev.classList.add('credential-security-peek');
             sidePeekPrev.classList.remove('no-interaction');
             let credentialSecurityHovered = false;
             let credentialSecurityClickOpen = false;
@@ -10959,7 +10969,7 @@ function renderSidePeekCards() {
             };
 
             sidePeekPrev.onclick = (e) => {
-                if (e.target.closest('[data-onepassword-sync]')) {
+                if (e.target.closest('[data-onepassword-open]')) {
                     return;
                 }
                 e.preventDefault();
@@ -11039,6 +11049,21 @@ function syncSidePeekCardSizing() {
     // Match side cards to main project card size.
     shell.style.setProperty('--side-peek-card-width', `${Math.round(mainCardWidth)}px`);
     shell.style.setProperty('--side-peek-card-height', `${Math.round(mainCardHeight)}px`);
+
+    const credentialPeek = document.getElementById('side-peek-prev');
+    if (credentialPeek?.classList.contains('credential-security-peek')) {
+        const shellRect = shell.getBoundingClientRect();
+        const scale = shell.offsetWidth ? shellRect.width / shell.offsetWidth : 1;
+        const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+        const leftSpaceCss = scale > 0 ? (shellRect.left - 12) / scale - 18 : 0;
+        const viewportSpaceCss = scale > 0 ? (viewportWidth - 24) / scale - 18 : 0;
+        const availableWidth = Math.max(0, Math.min(leftSpaceCss, viewportSpaceCss));
+        const credentialPeekWidth = Math.max(0, Math.min(mainCardWidth + 68, availableWidth));
+        credentialPeek.style.setProperty(
+            '--credential-security-peek-width',
+            `${Math.floor(credentialPeekWidth)}px`
+        );
+    }
 
     const supportCard = document.getElementById('support-card');
     if (supportCard) {
@@ -11744,6 +11769,216 @@ function renderSunbirdNetworkSecurityShell() {
     `;
 }
 
+const ONEPASSWORD_EVENT_FEEDS = [
+    { key: 'signinattempts', label: 'Sign-ins' },
+    { key: 'itemusages', label: 'Item usage' },
+    { key: 'auditevents', label: 'Audit events' }
+];
+
+function formatOnePasswordEventDate(value) {
+    if (!value) return 'Time unavailable';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Time unavailable' : date.toLocaleString();
+}
+
+function getOnePasswordEventText(value) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return String(value).slice(0, 160);
+    }
+    return '';
+}
+
+function getOnePasswordEventActor(metadata) {
+    const actor = metadata?.target_user || metadata?.actor_details || metadata?.user;
+    if (typeof actor === 'string') return getOnePasswordEventText(actor) || 'Not available';
+    if (!actor || typeof actor !== 'object') return 'Not available';
+    return getOnePasswordEventText(actor.name || actor.email || actor.uuid) || 'Not available';
+}
+
+function getOnePasswordEventContext(metadata) {
+    const client = metadata?.client && typeof metadata.client === 'object' ? metadata.client : {};
+    const location = metadata?.location && typeof metadata.location === 'object' ? metadata.location : {};
+    const parts = [
+        metadata?.object_type,
+        client.device_name,
+        client.ip || client.ip_address,
+        [location.city, location.region, location.country].filter(Boolean).join(', ')
+    ].map(getOnePasswordEventText).filter(Boolean);
+    return parts.join(' · ') || 'No additional metadata';
+}
+
+function renderSunbirdCredentialSecurityShell() {
+    return `
+        <section class="sunbird-network-security-dashboard sunbird-credential-security-dashboard" id="sunbird-credential-security-dashboard">
+            <div class="sunbird-id-header">
+                <button id="sunbird-credential-security-back" class="sunbird-id-back-btn" type="button">
+                    <span class="sunbird-id-back-icon" aria-hidden="true">&larr;</span><span>Back</span>
+                </button>
+                <div><h2>Credential Security</h2><p>1Password event activity across sign-ins, item usage, and audit events.</p></div>
+                <div class="credential-events-brand" aria-label="1Password Tenant">
+                    <img src="Images/1password.webp" alt="" aria-hidden="true"><span>1Password</span>
+                </div>
+            </div>
+            <div id="sunbird-credential-security-content" class="credential-events-content" aria-live="polite"></div>
+        </section>
+    `;
+}
+
+function renderOnePasswordEventError(content, message) {
+    content.innerHTML = `
+        <div class="network-dashboard-error" role="alert">
+            <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+            <span data-credential-events-error></span>
+        </div>
+        <button class="credential-events-retry" type="button" data-credential-events-retry>
+            <i class="fas fa-rotate-right" aria-hidden="true"></i> Try again
+        </button>
+    `;
+    content.querySelector('[data-credential-events-error]').textContent = message;
+    content.querySelector('[data-credential-events-retry]')?.addEventListener('click', fetchOnePasswordEvents);
+}
+
+function renderSunbirdCredentialSecurityDashboard(data) {
+    const content = document.getElementById('sunbird-credential-security-content');
+    if (!content) return;
+
+    const syncEntries = Array.isArray(data?.sync) ? data.sync : [];
+    const stateEntries = Array.isArray(data?.state) ? data.state : [];
+    const syncByFeed = new Map(syncEntries.map(feed => [feed?.eventType, feed]));
+    const stateByFeed = new Map(stateEntries.map(state => [state?.eventType, state]));
+    const eventRecords = Array.isArray(data?.events) ? data.events : [];
+    const records = eventRecords.slice(0, 30);
+    const successfulSyncDates = stateEntries
+        .map(state => state?.lastSuccessfulSyncAt ? new Date(state.lastSuccessfulSyncAt) : null)
+        .filter(date => date && !Number.isNaN(date.getTime()));
+    const latestSuccessfulSync = successfulSyncDates.length
+        ? formatOnePasswordEventDate(new Date(Math.max(...successfulSyncDates.map(date => date.getTime()))))
+        : 'No successful sync recorded';
+
+    content.innerHTML = `
+        <div class="credential-events-summary">
+            ${ONEPASSWORD_EVENT_FEEDS.map(feed => {
+                const sync = syncByFeed.get(feed.key);
+                const state = stateByFeed.get(feed.key);
+                const hasCount = sync?.processedEvents !== undefined && sync?.processedEvents !== null &&
+                    String(sync.processedEvents).trim() !== '' &&
+                    Number.isFinite(Number(sync.processedEvents));
+                const count = hasCount
+                    ? String(Number(sync.processedEvents))
+                    : 'Not reported';
+                const status = getOnePasswordEventText(state?.status || sync?.status) || 'Not reported';
+                const statusClass = status.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+                return `
+                    <article class="network-dashboard-panel credential-events-feed">
+                        <span>${escapeIdentityText(feed.label)}</span>
+                        <strong>${escapeIdentityText(count)}</strong>
+                        <em>processed this sync</em>
+                        <small class="credential-events-status credential-events-status-${statusClass}">${escapeIdentityText(status)}</small>
+                    </article>
+                `;
+            }).join('')}
+        </div>
+        <div class="credential-events-sync-note">
+            <i class="fas fa-clock" aria-hidden="true"></i>
+            <span>Last successful sync</span>
+            <strong>${escapeIdentityText(latestSuccessfulSync)}</strong>
+        </div>
+        <article class="network-dashboard-panel credential-events-recent">
+            <div class="network-evidence-section-title">
+                <h3>Recent events</h3>
+                <span>Showing ${records.length} of ${eventRecords.length} returned</span>
+            </div>
+            <div class="network-dashboard-table-wrap">
+                <table class="network-dashboard-table">
+                    <thead><tr><th>Time</th><th>Feed</th><th>Event</th><th>Actor</th><th>Context</th></tr></thead>
+                    <tbody>
+                        ${records.length ? records.map(record => {
+                            const metadata = record?.metadata && typeof record.metadata === 'object' ? record.metadata : {};
+                            const feedLabel = ONEPASSWORD_EVENT_FEEDS.find(feed => feed.key === record?.eventType)?.label || '1Password event';
+                            const detail = getOnePasswordEventText(metadata.action || metadata.type || metadata.category || metadata.object_type) || feedLabel;
+                            return `
+                                <tr>
+                                    <td>${escapeIdentityText(formatOnePasswordEventDate(record?.timestamp || metadata.timestamp))}</td>
+                                    <td>${escapeIdentityText(feedLabel)}</td>
+                                    <td>${escapeIdentityText(detail)}</td>
+                                    <td>${escapeIdentityText(getOnePasswordEventActor(metadata))}</td>
+                                    <td>${escapeIdentityText(getOnePasswordEventContext(metadata))}</td>
+                                </tr>
+                            `;
+                        }).join('') : '<tr><td colspan="5" class="sunbird-empty-row">No recent events were returned by 1Password.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    `;
+}
+
+async function fetchOnePasswordEvents() {
+    const content = document.getElementById('sunbird-credential-security-content');
+    if (!content) return;
+
+    content.innerHTML = `
+        <div class="credential-events-loading" role="status">
+            <span class="credential-events-spinner" aria-hidden="true"></span>
+            <span>Loading 1Password event activity…</span>
+        </div>
+    `;
+
+    const authToken = localStorage.getItem('authToken');
+    if (!authToken) {
+        renderOnePasswordEventError(content, 'Sign in to view Credential Security events.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/sunbird/onepassword/sync', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) {
+            const message = typeof data?.message === 'string' ? data.message.slice(0, 240) : '';
+            renderOnePasswordEventError(
+                content,
+                message || 'Unable to retrieve 1Password events right now. Please try again.'
+            );
+            return;
+        }
+        renderSunbirdCredentialSecurityDashboard(data);
+    } catch (_) {
+        renderOnePasswordEventError(content, 'Unable to retrieve 1Password events right now. Please try again.');
+    }
+}
+
+function openSunbirdCredentialSecurityDashboard() {
+    const dashboardView = document.getElementById('dashboard-view');
+    const projectsView = document.getElementById('projects-view');
+    if (!dashboardView) return;
+    if (projectsView) projectsView.style.display = 'none';
+    dashboardView.style.display = 'block';
+    dashboardView.style.visibility = 'visible';
+    dashboardView.style.opacity = '1';
+    [
+        'sunbird-identity-active',
+        'sunbird-device-active',
+        'sunbird-email-active',
+        'sunbird-security-active',
+        'sunbird-backup-active',
+        'sunbird-applications-active',
+        'sunbird-network-security-active',
+        'sunbird-reports-active'
+    ].forEach(className => dashboardView.classList.remove(className));
+    dashboardView.classList.add('sunbird-credential-security-active');
+    captureDashboardViewHTML();
+    dashboardView.innerHTML = renderSunbirdCredentialSecurityShell();
+    document.getElementById('sunbird-credential-security-back')?.addEventListener('click', goBackToProjects);
+    fetchOnePasswordEvents();
+}
+
 function getNetworkRows(items, columns, emptyText) {
     const safeItems = Array.isArray(items) ? items : [];
     if (!safeItems.length) return `<tr><td colspan="${columns.length}" class="sunbird-empty-row">${escapeIdentityText(emptyText)}</td></tr>`;
@@ -12433,6 +12668,7 @@ function showProjectPreview(project) {
     previewSection.classList.add('visible');
 
     const previewModel = buildProjectPreviewModel(project);
+    const previewBreakdownHeading = Number(project.id) === 9 ? 'Event feeds' : 'Risk Breakdown';
     const topMetricsHTML = previewModel.topMetrics.map(metric => `
         <div class="preview-stat-item">
             <div class="preview-stat-icon ${metric.tone || 'info'}">
@@ -12471,7 +12707,7 @@ function showProjectPreview(project) {
             </div>
 
             <div class="preview-row preview-row-risk">
-                <h4><i class="fas fa-chart-bar"></i> Risk Breakdown</h4>
+                <h4><i class="fas fa-chart-bar"></i> ${previewBreakdownHeading}</h4>
                 <div class="risk-breakdown">
                     ${riskBreakdownHTML}
                 </div>
@@ -12479,7 +12715,7 @@ function showProjectPreview(project) {
 
             <div class="preview-row preview-row-insights">
                 <div class="preview-insight-line">${previewModel.keyInsight}</div>
-                <div class="preview-mini-feed">${feedHTML || '<div class="preview-feed-item"><i class="fas fa-check-circle"></i><span>Live activity is stable</span></div>'}</div>
+                <div class="preview-mini-feed">${feedHTML || (Number(project.id) === 9 ? '' : '<div class="preview-feed-item"><i class="fas fa-check-circle"></i><span>Live activity is stable</span></div>')}</div>
             </div>
 
             <div class="glow-wrap">
@@ -12525,13 +12761,13 @@ function createProjectCard(project) {
                         <img src="Images/1password.webp" alt="" aria-hidden="true">
                         <span>1Password Tenant</span>
                     </span>
-                    <button class="credential-security-onepassword-button" type="button" data-onepassword-sync aria-expanded="false">
+                    <button class="credential-security-onepassword-button" type="button" data-onepassword-open aria-label="Open Credential Security Events dashboard">
                         Open
                     </button>
                 </div>
-                <div class="credential-security-onepassword-activity" data-onepassword-activity role="status" aria-live="polite" hidden>
-                    <p data-onepassword-status></p>
-                    <ul data-onepassword-events></ul>
+                <div class="credential-security-feed-summary" aria-label="1Password event feeds">
+                    <span>Feeds</span>
+                    <span>Sign-ins · Item usage · Audit events</span>
                 </div>
            </div>`
         : '';
@@ -12540,10 +12776,14 @@ function createProjectCard(project) {
     const metrics = isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []);
     const statusMeta = getSummaryCardStatusMeta(project);
     const isInactiveProject = String(project.status || '').toLowerCase() === 'inactive';
-    const riskDotClass = isInactiveProject
+    const riskDotClass = project.id === 9
+        ? 'unreported'
+        : isInactiveProject
         ? 'critical'
         : project.risks.critical > 0 ? 'critical' : project.risks.high > 0 ? 'high' : (project.risks.medium > 0 ? 'medium' : 'success');
-    const riskDotTitle = isInactiveProject
+    const riskDotTitle = project.id === 9
+        ? 'Credential risk data not reported'
+        : isInactiveProject
         ? 'Inactive'
         : project.risks.critical > 0 ? project.risks.critical + ' Critical' : project.risks.high > 0 ? project.risks.high + ' High' : (project.risks.medium > 0 ? project.risks.medium + ' Medium' : 'No Risks detected');
 
@@ -12568,7 +12808,7 @@ function createProjectCard(project) {
                 <div class="project-info-item">
                     <i class="${metric.icon}"></i>
                     <div class="metric-content-wrap">
-                        <span class="metric-label-text">${metric.label}</span>
+                        <span class="metric-label-text ${project.id === 9 ? 'metric-label-no-colon' : ''}">${metric.label}</span>
                         <span class="metric-value-text">${toMetricValue(metric.value)}</span>
                     </div>
                 </div>
@@ -12594,22 +12834,22 @@ function createProjectCard(project) {
             ${metricsHTML}
         </div>
         ${networkSecurityPanelHTML}
+        ${credentialSecurityOnePasswordHTML}
         <div class="project-risks">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
             <div class="risk-indicator">
                 <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
             </div>
         </div>
-        ${credentialSecurityOnePasswordHTML}
         ${networkSecurityCtaHTML}
     `;
 
-    const onePasswordButton = card.querySelector('[data-onepassword-sync]');
-    if (onePasswordButton) {
-        onePasswordButton.addEventListener('click', event => {
+    const onePasswordOpen = card.querySelector('[data-onepassword-open]');
+    if (onePasswordOpen) {
+        onePasswordOpen.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            loadOnePasswordActivity(card);
+            openDashboard(project);
         });
     }
 
@@ -12631,139 +12871,22 @@ function createProjectCard(project) {
     return card;
 }
 
-function clearOnePasswordActivityPlacement(nav) {
-    if (!nav) return;
-    nav._credentialSecurityOverlayCleanup?.();
-    delete nav._credentialSecurityOverlayCleanup;
-    nav.classList.remove('credential-security-overlay-open');
-}
-
-function positionOnePasswordActivity(card, activity) {
-    const nav = card.closest('.side-peek-nav');
-    if (!nav || !activity) return;
-
-    clearOnePasswordActivityPlacement(nav);
-    nav.classList.add('credential-security-overlay-open');
-
-    const updatePlacement = () => {
-        if (!activity.isConnected || activity.hidden) return;
-
-        const rect = card.getBoundingClientRect();
-        const viewport = window.visualViewport;
-        const viewportTop = viewport?.offsetTop || 0;
-        const viewportBottom = viewportTop + (viewport?.height || document.documentElement.clientHeight || window.innerHeight);
-        const edgePadding = 8;
-        const gap = 7;
-        const below = Math.max(0, viewportBottom - edgePadding - rect.bottom - gap);
-        const above = Math.max(0, rect.top - viewportTop - edgePadding - gap);
-        const preferredHeight = Math.min(190, viewportBottom - viewportTop - edgePadding * 2);
-        const placeAbove = below < preferredHeight && above > below;
-        const availableHeight = placeAbove ? above : below;
-
-        activity.classList.toggle('is-above', placeAbove);
-        activity.style.maxHeight = `${availableHeight}px`;
-    };
-
-    updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    window.visualViewport?.addEventListener('resize', updatePlacement);
-    window.visualViewport?.addEventListener('scroll', updatePlacement);
-    nav._credentialSecurityOverlayCleanup = () => {
-        window.removeEventListener('resize', updatePlacement);
-        window.removeEventListener('scroll', updatePlacement, true);
-        window.visualViewport?.removeEventListener('resize', updatePlacement);
-        window.visualViewport?.removeEventListener('scroll', updatePlacement);
-    };
-}
-
-async function loadOnePasswordActivity(card) {
-    const button = card.querySelector('[data-onepassword-sync]');
-    const activity = card.querySelector('[data-onepassword-activity]');
-    const status = card.querySelector('[data-onepassword-status]');
-    const eventsList = card.querySelector('[data-onepassword-events]');
-    const authToken = localStorage.getItem('authToken');
-    if (!button || !activity || !status || !eventsList) return;
-
-    const isOpen = button.getAttribute('aria-expanded') !== 'true';
-    button.setAttribute('aria-expanded', String(isOpen));
-    activity.hidden = !isOpen;
-    if (isOpen) {
-        positionOnePasswordActivity(card, activity);
-    } else {
-        clearOnePasswordActivityPlacement(card.closest('.side-peek-nav'));
-        activity.classList.remove('is-above');
-        activity.style.removeProperty('max-height');
-    }
-    if (!isOpen) return;
-    if (activity.dataset.loaded === 'true' || button.disabled) return;
-
-    if (!authToken) {
-        status.textContent = 'Sign in to view 1Password activity.';
-        return;
-    }
-
-    button.disabled = true;
-    button.textContent = 'Open';
-    status.textContent = 'Retrieving 1Password activity...';
-    eventsList.replaceChildren();
-
-    try {
-        const response = await fetch('/api/sunbird/onepassword/sync', {
-            method: 'POST',
-            cache: 'no-store',
-            headers: {
-                Authorization: `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data?.success) {
-            throw new Error(data?.message || 'Unable to retrieve 1Password activity right now. Please try again later.');
-        }
-
-        const syncSummary = (Array.isArray(data.sync) ? data.sync : [])
-            .map(feed => {
-                const label = {
-                    signinattempts: 'Sign-ins',
-                    itemusages: 'Item usage',
-                    auditevents: 'Audit events'
-                }[feed.eventType] || 'Events';
-                return `${label}: ${Number(feed.processedEvents) || 0}`;
-            })
-            .join(' · ');
-        const records = Array.isArray(data.events) ? data.events : [];
-        status.textContent = `${syncSummary || 'Activity sync complete.'}${records.length ? ` · ${records.length} recent events` : ' · No events returned'}`;
-        activity.dataset.loaded = 'true';
-
-        records.slice(0, 12).forEach(record => {
-            const metadata = record?.metadata && typeof record.metadata === 'object' ? record.metadata : {};
-            const typeLabel = {
-                signinattempts: 'Sign-in',
-                itemusages: 'Item usage',
-                auditevents: 'Audit event'
-            }[record.eventType] || '1Password event';
-            const detail = metadata.action || metadata.type || metadata.category || typeLabel;
-            const actor = metadata.target_user || metadata.actor_details || metadata.user || {};
-            const actorLabel = actor.name || actor.email || '';
-            const item = document.createElement('li');
-            const title = document.createElement('strong');
-            const time = document.createElement('time');
-            title.textContent = actorLabel ? `${typeLabel}: ${actorLabel} · ${detail}` : `${typeLabel}: ${detail}`;
-            const eventTime = Date.parse(record.timestamp || '');
-            time.textContent = Number.isNaN(eventTime) ? '' : new Date(eventTime).toLocaleString();
-            item.append(title, time);
-            eventsList.appendChild(item);
-        });
-    } catch (error) {
-        status.textContent = error.message || 'Unable to retrieve 1Password activity right now. Please try again later.';
-    } finally {
-        button.disabled = false;
-        button.textContent = 'Open';
-    }
-}
-
 function buildProjectPreviewModel(project) {
+    if (Number(project.id) === 9) {
+        return {
+            topMetrics: [
+                { label: 'Weak-password data', value: 'Not reported', icon: 'fas fa-exclamation-triangle', tone: 'warning' },
+                { label: 'Reuse data', value: 'Not reported', icon: 'fas fa-sync-alt', tone: 'info' }
+            ],
+            riskBreakdown: [
+                { label: 'Sign-ins', value: '1Password feed', tone: 'info' },
+                { label: 'Item usage', value: '1Password feed', tone: 'info' },
+                { label: 'Audit events', value: '1Password feed', tone: 'info' }
+            ],
+            keyInsight: '1Password event metadata only; credential-risk findings are not reported.',
+            miniFeed: []
+        };
+    }
     if (project.isIdentityCard) return buildIdentityPreviewModel(project);
     if (project.isDevicesCard) return buildDevicesPreviewModel(project);
     if (project.isEmailSecurityCard) return buildEmailPreviewModel(project);

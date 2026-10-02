@@ -3163,6 +3163,11 @@ body.client-portal-page {
   );
 }
 
+.side-peek-nav-left.credential-security-peek {
+  width: var(--credential-security-peek-width, calc(var(--side-peek-card-width) + 68px));
+  left: calc(-1 * (var(--credential-security-peek-width, calc(var(--side-peek-card-width) + 68px)) + 18px));
+}
+
 .side-peek-nav-right {
   right: calc(
     -1 * (min(var(--side-peek-card-width), var(--side-peek-max-width)) + 18px)
@@ -3476,22 +3481,8 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 }
 
 .side-peek-card.expanded-left .credential-security-onepassword,
-.side-peek-card.expanded-left .credential-security-onepassword-button,
-.side-peek-card.expanded-left .credential-security-onepassword-activity {
+.side-peek-card.expanded-left .credential-security-onepassword-button {
   pointer-events: auto;
-}
-
-.side-peek-nav.credential-security-overlay-open {
-  z-index: 1000;
-}
-
-#side-peek-prev.credential-security-overlay-open #side-peek-prev-card,
-#side-peek-prev.credential-security-overlay-open #side-peek-prev-card .project-card {
-  overflow: visible;
-}
-
-.side-peek-nav.credential-security-overlay-open .side-peek-card {
-  z-index: 1000;
 }
 
 .side-peek-nav:hover .side-peek-card.credential-security-dimmed,
@@ -3854,6 +3845,10 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   margin-left: 2px;
 }
 
+.project-card[data-project-id="9"] .metric-label-no-colon::after {
+  content: none;
+}
+
 .metric-label-text {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.72);
@@ -4076,8 +4071,8 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .credential-security-onepassword {
   display: grid;
-  gap: 7px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 4px;
   position: relative;
   z-index: 2;
   pointer-events: auto;
@@ -4147,68 +4142,54 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   cursor: wait;
 }
 
-.credential-security-onepassword-activity {
-  max-height: 190px;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 0.68rem;
-  pointer-events: auto;
+.credential-security-feed-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.62rem;
+  line-height: 1.2;
 }
 
-#side-peek-prev-card .credential-security-onepassword-activity {
-  position: absolute;
-  top: calc(100% + 7px);
-  left: 0;
-  z-index: 1001;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 0;
-  max-height: 190px;
-  overflow-y: auto;
-}
-
-#side-peek-prev-card .credential-security-onepassword-activity.is-above {
-  top: auto;
-  bottom: calc(100% + 7px);
-}
-
-.credential-security-onepassword-activity[hidden] {
-  display: none;
-}
-
-.credential-security-onepassword-activity p {
-  margin: 0;
-  line-height: 1.4;
-}
-
-.credential-security-onepassword-activity ul {
-  display: grid;
-  gap: 6px;
-  margin: 7px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.credential-security-onepassword-activity li {
-  display: grid;
-  gap: 2px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  overflow-wrap: anywhere;
-}
-
-.credential-security-onepassword-activity li strong {
-  color: rgba(255, 255, 255, 0.9);
+.credential-security-feed-summary span:first-child {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.82);
   font-weight: 400;
 }
 
-.credential-security-onepassword-activity time {
-  color: rgba(255, 255, 255, 0.55);
+.credential-security-feed-summary span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-peek-card .credential-security-onepassword-header {
+  gap: 6px;
+}
+
+.side-peek-card .credential-security-onepassword-brand {
+  font-size: 0.57rem;
+}
+
+.side-peek-card .credential-security-onepassword-brand img {
+  width: 13px;
+  height: 13px;
+}
+
+.side-peek-card .credential-security-onepassword-button {
+  min-height: 24px;
+  padding: 4px 8px;
   font-size: 0.62rem;
+}
+
+.side-peek-card .credential-security-feed-summary {
+  font-size: 0.55rem;
+}
+
+.side-peek-card .project-card[data-project-id="9"] .project-risks {
+  padding-top: 6px;
 }
 
 .cloudflare-badge.network-security-brand-square {
@@ -4439,6 +4420,182 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   min-height: 100vh;
   padding: 0 clamp(20px, 3vw, 34px) clamp(20px, 3vw, 34px);
   color: #e5eefb;
+}
+
+.sunbird-credential-security-dashboard {
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0 clamp(20px, 3vw, 34px) clamp(20px, 3vw, 34px);
+  color: #e5eefb;
+}
+
+.sunbird-credential-security-dashboard .sunbird-id-header {
+  min-height: 58px;
+}
+
+.credential-events-brand {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
+}
+
+.credential-events-brand img {
+  width: 23px;
+  height: 23px;
+  object-fit: contain;
+}
+
+.credential-events-content {
+  display: grid;
+  gap: 14px;
+}
+
+.credential-events-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.credential-events-feed {
+  display: flex;
+  min-height: 110px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  padding: 14px 16px;
+}
+
+.credential-events-feed > span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.82rem;
+}
+
+.credential-events-feed > strong {
+  color: #ffffff;
+  font-size: 1.5rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.credential-events-feed > em {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.credential-events-status {
+  width: fit-content;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.67rem;
+  text-transform: capitalize;
+}
+
+.credential-events-status-complete,
+.credential-events-status-success {
+  border-color: rgba(74, 222, 128, 0.28);
+  color: #86efac;
+}
+
+.credential-events-status-failed,
+.credential-events-status-error {
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #fca5a5;
+}
+
+.credential-events-sync-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.78rem;
+}
+
+.credential-events-sync-note i {
+  color: #93c5fd;
+}
+
+.credential-events-sync-note strong {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 300;
+  text-align: right;
+}
+
+.credential-events-recent {
+  min-width: 0;
+  padding: 14px;
+}
+
+.credential-events-recent .network-evidence-section-title {
+  margin-bottom: 10px;
+}
+
+.credential-events-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.88rem;
+}
+
+.credential-events-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  border-top-color: #93c5fd;
+  border-radius: 50%;
+  animation: credentialEventsSpin 0.8s linear infinite;
+}
+
+@keyframes credentialEventsSpin {
+  to { transform: rotate(360deg); }
+}
+
+.credential-events-retry {
+  width: fit-content;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.credential-events-retry:hover,
+.credential-events-retry:focus-visible {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.credential-events-retry:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.78);
+  outline-offset: 2px;
 }
 
 .cloudflare-badge {
@@ -6904,6 +7061,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 
 .risk-dot.success {
   background: var(--success);
+}
+
+.risk-dot.unreported {
+  background: rgba(203, 213, 225, 0.72);
 }
 
 /* DASHBOARD VIEW */
@@ -12295,6 +12456,50 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 @media (max-width: 640px) {
   .sunbird-network-security-dashboard {
     padding: 0 10px 18px;
+  }
+
+  .sunbird-credential-security-dashboard {
+    padding: 0 10px 18px;
+  }
+
+  .sunbird-credential-security-dashboard .sunbird-id-header {
+    min-height: 92px;
+    padding: 46px 0 0;
+    text-align: left;
+  }
+
+  .sunbird-credential-security-dashboard .sunbird-id-header h2,
+  .sunbird-credential-security-dashboard .sunbird-id-header p {
+    text-align: left;
+  }
+
+  .sunbird-credential-security-dashboard .sunbird-id-back-btn,
+  .credential-events-brand {
+    top: 4px;
+  }
+
+  .credential-events-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .credential-events-feed {
+    min-height: 88px;
+    padding: 12px 14px;
+  }
+
+  .credential-events-sync-note {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .credential-events-sync-note strong {
+    flex-basis: 100%;
+    margin-left: 26px;
+    text-align: left;
+  }
+
+  .credential-events-recent {
+    padding: 10px;
   }
 
   .network-dashboard-tabs {
