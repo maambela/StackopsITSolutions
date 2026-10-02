@@ -3458,8 +3458,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 /* Expanded state for Credential Security (left) card */
 .side-peek-card.expanded-left {
-  width: calc(100% + 10px);
-  margin-left: -10px;
   opacity: 1;
   filter: saturate(1) blur(0);
   background: rgba(255, 255, 255, 0.08);
@@ -3472,50 +3470,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 }
 
 .side-peek-card.expanded-left .project-card {
-  opacity: 1 !important;
-  filter: none !important;
-  background: transparent !important;
-  padding: 10px !important;
-  gap: 8px !important;
-  text-align: left !important;
   pointer-events: auto;
-}
-
-.side-peek-card.expanded-left .project-card-header {
-  justify-content: flex-start !important;
-  text-align: left !important;
-}
-
-.side-peek-card.expanded-left .project-icon {
-  width: 24px !important;
-  height: 24px !important;
-  min-width: 24px !important;
-  min-height: 24px !important;
-}
-
-.side-peek-card.expanded-left .project-icon i {
-  font-size: 0.8rem !important;
-}
-
-.side-peek-card.expanded-left .project-title h3 {
-  font-size: 0.75rem !important;
-  text-align: left !important;
-}
-
-.side-peek-card.expanded-left .project-type {
-  font-size: 0.65rem !important;
-  text-align: left !important;
-}
-
-.side-peek-card.expanded-left .project-info-item {
-  font-size: 0.62rem !important;
-  gap: 5px !important;
-  justify-content: flex-start !important;
-}
-
-.side-peek-card.expanded-left .project-status-badge {
-  font-size: 0.55rem !important;
-  padding: 2px 6px !important;
 }
 
 .side-peek-card.expanded-left .credential-security-onepassword,
@@ -3524,17 +3479,23 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   pointer-events: auto;
 }
 
-.side-peek-card.credential-security-active:not(.expanded-left),
+.side-peek-card.credential-security-active,
 .side-peek-card.credential-security-dimmed {
-  height: 130px;
-  max-height: 130px;
-  overflow: hidden;
+  height: 130px !important;
+  max-height: 130px !important;
 }
 
-.side-peek-card.credential-security-active.expanded-left {
-  height: min(430px, calc(100vh - 32px));
-  max-height: 430px;
-  overflow: hidden;
+.side-peek-nav.credential-security-overlay-open {
+  z-index: 1000;
+}
+
+#side-peek-prev.credential-security-overlay-open #side-peek-prev-card,
+#side-peek-prev.credential-security-overlay-open #side-peek-prev-card .project-card {
+  overflow: visible;
+}
+
+.side-peek-nav.credential-security-overlay-open .side-peek-card {
+  z-index: 1000;
 }
 
 .side-peek-nav:hover .side-peek-card.credential-security-active:not(.credential-security-dimmed),
@@ -4208,8 +4169,21 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   pointer-events: auto;
 }
 
-.side-peek-card.expanded-left .credential-security-onepassword-activity {
-  max-height: 180px;
+#side-peek-prev-card .credential-security-onepassword-activity {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 1001;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+#side-peek-prev-card .credential-security-onepassword-activity.is-above {
+  top: auto;
+  bottom: calc(100% + 7px);
 }
 
 .credential-security-onepassword-activity[hidden] {

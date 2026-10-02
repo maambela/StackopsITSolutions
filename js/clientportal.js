@@ -10914,6 +10914,7 @@ function renderSidePeekCards() {
 
     if (!sidePeekPrevCard || !sidePeekNextCard || !sidePeekPrev || !sidePeekNext) return;
 
+    clearOnePasswordActivityPlacement(sidePeekPrev);
     sidePeekPrevCard.innerHTML = '';
     sidePeekNextCard.innerHTML = '';
 
@@ -12630,6 +12631,52 @@ function createProjectCard(project) {
     return card;
 }
 
+function clearOnePasswordActivityPlacement(nav) {
+    if (!nav) return;
+    nav._credentialSecurityOverlayCleanup?.();
+    delete nav._credentialSecurityOverlayCleanup;
+    nav.classList.remove('credential-security-overlay-open');
+}
+
+function positionOnePasswordActivity(card, activity) {
+    const nav = card.closest('.side-peek-nav');
+    if (!nav || !activity) return;
+
+    clearOnePasswordActivityPlacement(nav);
+    nav.classList.add('credential-security-overlay-open');
+
+    const updatePlacement = () => {
+        if (!activity.isConnected || activity.hidden) return;
+
+        const rect = card.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportBottom = viewportTop + (viewport?.height || document.documentElement.clientHeight || window.innerHeight);
+        const edgePadding = 8;
+        const gap = 7;
+        const below = Math.max(0, viewportBottom - edgePadding - rect.bottom - gap);
+        const above = Math.max(0, rect.top - viewportTop - edgePadding - gap);
+        const preferredHeight = Math.min(190, viewportBottom - viewportTop - edgePadding * 2);
+        const placeAbove = below < preferredHeight && above > below;
+        const availableHeight = placeAbove ? above : below;
+
+        activity.classList.toggle('is-above', placeAbove);
+        activity.style.maxHeight = `${availableHeight}px`;
+    };
+
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, true);
+    window.visualViewport?.addEventListener('resize', updatePlacement);
+    window.visualViewport?.addEventListener('scroll', updatePlacement);
+    nav._credentialSecurityOverlayCleanup = () => {
+        window.removeEventListener('resize', updatePlacement);
+        window.removeEventListener('scroll', updatePlacement, true);
+        window.visualViewport?.removeEventListener('resize', updatePlacement);
+        window.visualViewport?.removeEventListener('scroll', updatePlacement);
+    };
+}
+
 async function loadOnePasswordActivity(card) {
     const button = card.querySelector('[data-onepassword-sync]');
     const activity = card.querySelector('[data-onepassword-activity]');
@@ -12641,6 +12688,13 @@ async function loadOnePasswordActivity(card) {
     const isOpen = button.getAttribute('aria-expanded') !== 'true';
     button.setAttribute('aria-expanded', String(isOpen));
     activity.hidden = !isOpen;
+    if (isOpen) {
+        positionOnePasswordActivity(card, activity);
+    } else {
+        clearOnePasswordActivityPlacement(card.closest('.side-peek-nav'));
+        activity.classList.remove('is-above');
+        activity.style.removeProperty('max-height');
+    }
     if (!isOpen) return;
     if (activity.dataset.loaded === 'true' || button.disabled) return;
 
