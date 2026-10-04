@@ -10784,6 +10784,9 @@ function initializeProjectsList() {
     const token = localStorage.getItem('authToken');
     const isLoggedIn = sessionStorage.getItem('isLoggedIn') === 'true';
     if (token && isLoggedIn) {
+        if (isSunbirdUser() && document.querySelector('.project-card[data-project-id="9"]')) {
+            fetchOnePasswordEvents();
+        }
         fetchDuoStats();
         fetchIdentityAccessData();
         fetchApplicationsData(); 
