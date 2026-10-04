@@ -376,6 +376,58 @@ test('1Password analytics derives an audit timeline and only reports explicit si
     ]);
 });
 
+test('1Password analytics projects every recent failure and unique active actor across feeds', async () => {
+    const pool = createMemoryPool();
+    const service = createOnePasswordEventsService({ pool, getSecret: async () => 'unit-test-token', logger: { warn() {}, error() {} }, post: async () => ({}) });
+    const addEvent = (key, eventType, timestamp, metadata) => pool.events.set(key, {
+        CompanyID: 44,
+        EventType: eventType,
+        EventTimestamp: timestamp,
+        MetadataJson: JSON.stringify({ timestamp, ...metadata })
+    });
+    const actorName = index => `Actor ${String(index + 1).padStart(2, '0')}`;
+
+    for (let index = 0; index < 55; index += 1) {
+        const actor = actorName(index % 18);
+        addEvent(`success-${index}`, 'signinattempts', new Date(Date.UTC(2026, 8, 20, 0, index)).toISOString(), {
+            category: 'credentials_ok',
+            actor_details: { name: actor }
+        });
+    }
+    for (let index = 0; index < 5; index += 1) {
+        addEvent(`failure-${index}`, 'signinattempts', new Date(Date.UTC(2026, 8, 10, 0, index)).toISOString(), {
+            category: 'login_failed',
+            actor_details: { name: actorName(index) }
+        });
+    }
+    for (let index = 0; index < 18; index += 1) {
+        const actor = { name: actorName(index) };
+        addEvent(`item-${index}`, 'itemusages', new Date(Date.UTC(2026, 8, 21, 0, index)).toISOString(), { actor_details: actor });
+        addEvent(`audit-${index}`, 'auditevents', new Date(Date.UTC(2026, 8, 22, 0, index)).toISOString(), { actor_details: actor, action: 'item_updated' });
+    }
+
+    const result = await service.getCompanyAnalytics(44, {
+        startAt: '2026-09-01T00:00:00.000Z',
+        endAt: '2026-10-01T00:00:00.000Z'
+    });
+    const { analytics } = result;
+
+    assert.equal(analytics.metrics.failedSignIns, 5);
+    assert.equal(analytics.signIns.recent.length, 50);
+    assert.equal(analytics.signIns.recent.some(event => event.result === 'failed'), false);
+    assert.equal(analytics.signIns.failedRecent.length, 5);
+    assert.equal(analytics.signIns.failedRecentTotal, 5);
+    assert.ok(analytics.signIns.failedRecent.every(event => event.result === 'failed'));
+
+    assert.equal(analytics.metrics.activeUsers, 18);
+    assert.equal(analytics.activeUserActorsTotal, 18);
+    assert.equal(analytics.activeUserActors.length, analytics.metrics.activeUsers);
+    assert.equal(new Set(analytics.activeUserActors.map(actor => actor.actor)).size, 18);
+    const firstActor = analytics.activeUserActors.find(actor => actor.actor === actorName(0));
+    assert.equal(firstActor.eventCount, 7);
+    assert.deepEqual(firstActor.feeds.map(feed => feed.eventType).sort(), ['auditevents', 'itemusages', 'signinattempts']);
+});
+
 test('1Password sync route requires a mapped Sunbird tenant and prevents response caching', async () => {
     let serviceCalls = 0;
     const router = createOnePasswordEventsRouter({

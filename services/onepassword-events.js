@@ -342,13 +342,23 @@ function createOnePasswordEventsService({ pool, getSecret, logger = console, pos
         const signIns = events.filter(event => event.eventType === 'signinattempts');
         const audits = events.filter(event => event.eventType === 'auditevents');
         const itemUsages = events.filter(event => event.eventType === 'itemusages');
-        const users = new Set(), devices = new Set(), countries = new Map(), platforms = new Map(), eventTypes = new Map(), byUser = new Map(), byCountry = new Map(), byPlatform = new Map(), byType = new Map(), byHour = new Map(), timeline = new Map(), auditTimeline = new Map();
+        const users = new Set(), actorActivity = new Map(), devices = new Set(), countries = new Map(), platforms = new Map(), eventTypes = new Map(), byUser = new Map(), byCountry = new Map(), byPlatform = new Map(), byType = new Map(), byHour = new Map(), timeline = new Map(), auditTimeline = new Map();
         const add = (map, value) => { if (value) map.set(value, (map.get(value) || 0) + 1); };
         let successful = 0, failed = 0, classified = 0;
         for (const event of events) {
             const metadata = event.metadata, client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
             const actor = analyticsActor(metadata), country = analyticsText(metadata.location?.country), platform = analyticsText(client.platform || client.app_name || client.name), device = analyticsText(client.device_uuid || client.device_name);
-            if (actor) users.add(actor); if (device) devices.add(device);
+            if (actor) {
+                users.add(actor);
+                const activity = actorActivity.get(actor) || { actor, lastSeen: null, eventCount: 0, feeds: new Map() };
+                activity.eventCount += 1;
+                const eventDate = new Date(event.timestamp);
+                const previousDate = activity.lastSeen ? new Date(activity.lastSeen) : null;
+                if (!activity.lastSeen || (!Number.isNaN(eventDate.getTime()) && (Number.isNaN(previousDate.getTime()) || eventDate > previousDate))) activity.lastSeen = event.timestamp;
+                activity.feeds.set(event.eventType, (activity.feeds.get(event.eventType) || 0) + 1);
+                actorActivity.set(actor, activity);
+            }
+            if (device) devices.add(device);
             add(countries, country); add(platforms, platform); add(eventTypes, analyticsText(metadata.action || metadata.type || metadata.category || metadata.object_type || event.eventType));
             const result = analyticsResult(metadata), date = new Date(event.timestamp);
             if (event.eventType === 'auditevents' && !Number.isNaN(date.getTime())) add(auditTimeline, date.toISOString().slice(0, 10));
@@ -358,9 +368,28 @@ function createOnePasswordEventsService({ pool, getSecret, logger = console, pos
             if (!Number.isNaN(date.getTime())) { add(byHour, `${String(date.getHours()).padStart(2, '0')}:00`); const bucket = date.toISOString().slice(0, 10), point = timeline.get(bucket) || { bucket, total: 0, successful: 0, failed: 0 }; point.total += 1; if (result) point[result] += 1; timeline.set(bucket, point); }
         }
         const location = metadata => [metadata.location?.city, metadata.location?.region, metadata.location?.country].map(analyticsText).filter(Boolean).join(', ') || null;
-        const recentSignIns = signIns.slice(0, 50).map(event => ({ timestamp: event.timestamp, user: analyticsActor(event.metadata) || null, result: analyticsResult(event.metadata) || null, eventType: analyticsText(event.metadata.type || event.metadata.category) || null, platform: analyticsText(event.metadata.client?.platform || event.metadata.client?.app_name || event.metadata.client?.name) || null, location: location(event.metadata) }));
+        const toSignInRecord = (event, includeCountry = false) => ({
+            timestamp: event.timestamp,
+            user: analyticsActor(event.metadata) || null,
+            result: analyticsResult(event.metadata) || null,
+            eventType: analyticsText(event.metadata.type || event.metadata.category) || null,
+            platform: analyticsText(event.metadata.client?.platform || event.metadata.client?.app_name || event.metadata.client?.name) || null,
+            location: location(event.metadata),
+            ...(includeCountry ? { country: analyticsText(event.metadata.location?.country) || null } : {})
+        });
+        const recentSignIns = signIns.slice(0, 50).map(event => toSignInRecord(event));
+        const failedRecent = signIns.filter(event => analyticsResult(event.metadata) === 'failed').slice(0, 50).map(event => toSignInRecord(event, true));
+        const activeUserActors = [...actorActivity.values()]
+            .sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')) || a.actor.localeCompare(b.actor))
+            .slice(0, 200)
+            .map(activity => ({
+                actor: activity.actor,
+                lastSeen: activity.lastSeen,
+                eventCount: activity.eventCount,
+                feeds: [...activity.feeds.entries()].map(([eventType, count]) => ({ eventType, count }))
+            }));
         const recentAudits = audits.slice(0, 50).map(event => ({ timestamp: event.timestamp, actor: analyticsActor(event.metadata) || null, action: analyticsText(event.metadata.action) || null, objectType: analyticsText(event.metadata.object_type) || null, objectId: analyticsText(event.metadata.object_uuid) || null, location: location(event.metadata) }));
-        return { success: true, analytics: { range: { startAt: start.toISOString(), endAt: end.toISOString() }, metrics: { totalSignIns: signIns.length, ...(classified ? { successfulSignIns: successful, failedSignIns: failed } : {}), totalAuditEvents: audits.length, itemUsageEvents: itemUsages.length, ...(users.size ? { activeUsers: users.size } : {}), ...(devices.size ? { uniqueDevices: devices.size } : {}), totalEvents: events.length }, signIns: { total: signIns.length, ...(classified ? { successful, failed } : {}), timeline: [...timeline.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)), byUser: analyticsBuckets(byUser), byCountry: analyticsBuckets(byCountry), byPlatform: analyticsBuckets(byPlatform), byType: analyticsBuckets(byType), byHour: analyticsBuckets(byHour, 24), recent: recentSignIns }, audit: { total: audits.length, timeline: analyticsBuckets(auditTimeline, MAX_ANALYTICS_RANGE_DAYS + 1).map(point => ({ bucket: point.label, total: point.count })).sort((a, b) => a.bucket.localeCompare(b.bucket)), recent: recentAudits }, summaries: { countries: analyticsBuckets(countries), platforms: analyticsBuckets(platforms), eventTypes: analyticsBuckets(eventTypes) } }, integration: states.map(row => ({ eventType: row.EventType, lastSuccessfulSyncAt: row.LastSuccessfulSyncAt || null, lastAttemptedSyncAt: row.UpdatedAt || null, status: row.SyncStatus || null, hasCursor: Boolean(row.LastProcessedCursor), lastError: row.LastError || null })) };
+        return { success: true, analytics: { range: { startAt: start.toISOString(), endAt: end.toISOString() }, metrics: { totalSignIns: signIns.length, ...(classified ? { successfulSignIns: successful, failedSignIns: failed } : {}), totalAuditEvents: audits.length, itemUsageEvents: itemUsages.length, ...(users.size ? { activeUsers: users.size } : {}), ...(devices.size ? { uniqueDevices: devices.size } : {}), totalEvents: events.length }, activeUserActors, activeUserActorsTotal: users.size, signIns: { total: signIns.length, ...(classified ? { successful, failed, failedRecentTotal: failed } : {}), timeline: [...timeline.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)), byUser: analyticsBuckets(byUser), byCountry: analyticsBuckets(byCountry), byPlatform: analyticsBuckets(byPlatform), byType: analyticsBuckets(byType), byHour: analyticsBuckets(byHour, 24), recent: recentSignIns, failedRecent }, audit: { total: audits.length, timeline: analyticsBuckets(auditTimeline, MAX_ANALYTICS_RANGE_DAYS + 1).map(point => ({ bucket: point.label, total: point.count })).sort((a, b) => a.bucket.localeCompare(b.bucket)), recent: recentAudits }, summaries: { countries: analyticsBuckets(countries), platforms: analyticsBuckets(platforms), eventTypes: analyticsBuckets(eventTypes) } }, integration: states.map(row => ({ eventType: row.EventType, lastSuccessfulSyncAt: row.LastSuccessfulSyncAt || null, lastAttemptedSyncAt: row.UpdatedAt || null, status: row.SyncStatus || null, hasCursor: Boolean(row.LastProcessedCursor), lastError: row.LastError || null })) };
     }
 
     async function syncCompany(companyId) {

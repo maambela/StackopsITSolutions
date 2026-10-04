@@ -11768,6 +11768,20 @@ function formatOnePasswordEventDate(value) {
     return Number.isNaN(date.getTime()) ? 'Time unavailable' : date.toLocaleString();
 }
 
+function formatOnePasswordAnalyticsPeriod(range) {
+    if (!range?.startAt || !range?.endAt) return 'the selected analytics period';
+    const customRange = onePasswordAnalyticsPeriod === 'custom' ? onePasswordAnalyticsCustomRange : null;
+    if (customRange?.startAt && customRange?.endAt) {
+        const start = new Date(customRange.startAt);
+        const inclusiveEnd = new Date(customRange.endAt);
+        inclusiveEnd.setTime(inclusiveEnd.getTime() - 1);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(inclusiveEnd.getTime())) {
+            return `${start.toISOString().slice(0, 10)} – ${inclusiveEnd.toISOString().slice(0, 10)}`;
+        }
+    }
+    return `${formatOnePasswordEventDate(range.startAt)} – ${formatOnePasswordEventDate(range.endAt)}`;
+}
+
 function getOnePasswordEventText(value) {
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
         return String(value).slice(0, 160);
@@ -11801,27 +11815,28 @@ function getCredentialEvidenceEvents(data, filter = {}) {
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
     const eventTypes = Array.isArray(filter.eventTypes) ? filter.eventTypes : null;
     const eventType = typeof filter.eventType === 'string' ? filter.eventType : '';
+    const isActiveUsersProjection = filter.projection === 'activeUserActors';
     const useAnalyticsFailureProjection = eventType === 'signinattempts'
         && filter.result === 'failed'
-        && Array.isArray(data?.analytics?.signIns?.recent);
-    const sourceEvents = useAnalyticsFailureProjection
-        ? data.analytics.signIns.recent
-            .filter(event => event?.result === 'failed')
-            .map(event => ({
-                eventType: 'signinattempts',
-                timestamp: event.timestamp,
-                metadata: {
-                    category: 'failed',
-                    type: event.eventType || 'failed',
-                    actor_details: event.user,
-                    client: event.platform ? { platform: event.platform } : {},
-                    location: event.location ? { country: event.location } : {}
-                }
-            }))
-        : (Array.isArray(data?.events) ? data.events : []);
+        && Array.isArray(data?.analytics?.signIns?.failedRecent);
+    const sourceEvents = isActiveUsersProjection
+        ? (Array.isArray(data?.analytics?.activeUserActors) ? data.analytics.activeUserActors : [])
+        : useAnalyticsFailureProjection
+            ? data.analytics.signIns.failedRecent
+            : (Array.isArray(data?.events) ? data.events : []);
     const normalized = value => getOnePasswordEventText(value).trim().toLocaleLowerCase();
     const actorFor = metadata => normalized(getOnePasswordEventActor(metadata));
     const matchesDimension = (event, dimension, expected) => {
+        if (useAnalyticsFailureProjection) {
+            const actual = {
+                user: normalized(event.user),
+                country: normalized(event.country),
+                platform: normalized(event.platform),
+                type: normalized(event.eventType),
+                event: normalized(event.eventType)
+            }[dimension];
+            return actual !== undefined && actual === normalized(expected);
+        }
         const metadata = event.metadata || {};
         const client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
         const actual = {
@@ -11836,6 +11851,14 @@ function getCredentialEvidenceEvents(data, filter = {}) {
 
     return sourceEvents.filter(event => {
         if (!event || typeof event !== 'object') return false;
+        if (isActiveUsersProjection) return true;
+        if (useAnalyticsFailureProjection) {
+            const timestamp = new Date(event.timestamp);
+            if (Number.isNaN(timestamp.getTime())) return false;
+            if (eventTypes && !eventTypes.includes('signinattempts')) return false;
+            if (filter.day && timestamp.toISOString().slice(0, 10) !== filter.day) return false;
+            return !filter.dimension || matchesDimension(event, filter.dimension, filter.value);
+        }
         const timestamp = new Date(event.timestamp);
         if (Number.isNaN(timestamp.getTime()) || timestamp < start || timestamp >= end) return false;
         if (eventType && event.eventType !== eventType) return false;
@@ -11874,29 +11897,46 @@ function renderCredentialEvidenceEventPreview(event) {
     return `<div class="credential-evidence-sample"><strong>${escapeIdentityText(getCredentialEvidenceFeedLabel(event.eventType))} · ${escapeIdentityText(getCredentialEvidenceAction(event))}</strong><span>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))} · ${escapeIdentityText(getOnePasswordEventActor(metadata))}</span>${context ? `<small>${escapeIdentityText(context)}</small>` : ''}</div>`;
 }
 
+function renderCredentialEvidenceSignInPreview(event) {
+    return `<div class="credential-evidence-sample"><strong>Sign-ins · ${escapeIdentityText(event.eventType || 'failed')}</strong><span>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))} · ${escapeIdentityText(event.user || 'Not available')}</span>${event.platform || event.location ? `<small>${escapeIdentityText([event.platform, event.location].filter(Boolean).join(' · '))}</small>` : ''}</div>`;
+}
+
+function renderCredentialEvidenceActorPreview(actor) {
+    const feeds = (actor.feeds || []).map(feed => `${getCredentialEvidenceFeedLabel(feed.eventType)}: ${feed.count}`).join(' · ');
+    return `<div class="credential-evidence-sample"><strong>${escapeIdentityText(actor.actor)}</strong><span>Last seen ${escapeIdentityText(formatOnePasswordEventDate(actor.lastSeen))} · ${escapeIdentityText(actor.eventCount)} event${actor.eventCount === 1 ? '' : 's'}</span>${feeds ? `<small>${escapeIdentityText(feeds)}</small>` : ''}</div>`;
+}
+
 function renderCredentialEvidenceHost(data, filter, label, triggerContent, className = '', position = '') {
     if (!Array.isArray(data?.events)) return triggerContent;
     const previewId = `credential-evidence-preview-${++credentialEvidencePreviewId}`;
     const evidence = getCredentialEvidenceEvents(data, filter);
-    const samples = evidence.slice(0, 2).map(renderCredentialEvidenceEventPreview).join('');
+    const isActiveUsersContext = filter.projection === 'activeUserActors';
     const hasAnalyticsFailureProjection = filter.eventType === 'signinattempts'
         && filter.result === 'failed'
-        && Array.isArray(data.analytics?.signIns?.recent);
-    const isActiveUsersContext = label === 'Active Users';
+        && Array.isArray(data.analytics?.signIns?.failedRecent);
+    const previewLimit = isActiveUsersContext || hasAnalyticsFailureProjection ? 5 : 2;
+    const previewCount = Math.min(evidence.length, previewLimit);
+    const samples = evidence.slice(0, previewLimit).map(event => isActiveUsersContext
+        ? renderCredentialEvidenceActorPreview(event)
+        : hasAnalyticsFailureProjection ? renderCredentialEvidenceSignInPreview(event) : renderCredentialEvidenceEventPreview(event)).join('');
+    const activeActorsTotal = Number(data.analytics?.activeUserActorsTotal ?? data.analytics?.metrics?.activeUsers ?? 0);
+    const failedTotal = Number(data.analytics?.signIns?.failedRecentTotal ?? data.analytics?.metrics?.failedSignIns ?? 0);
+    const activeActorsTruncated = activeActorsTotal > (data.analytics?.activeUserActors?.length || 0);
+    const failedRecordsTruncated = failedTotal > (data.analytics?.signIns?.failedRecent?.length || 0);
     const message = isActiveUsersContext
         ? evidence.length
-            ? `Sample context only: showing ${evidence.length} event${evidence.length === 1 ? '' : 's'} from the newest loaded feed sample. Active Users is a distinct-actor aggregate across stored feeds; this is not a complete roster or count proof.`
-            : 'No matching events in the newest loaded feed sample. Active Users is a distinct-actor aggregate across stored feeds; this sample is not a complete roster or count proof.'
+            ? `The roster contains ${evidence.length} of ${activeActorsTotal} distinct actors counted by Active Users${activeActorsTruncated ? ' (capped at 200 actors)' : ''}; previewing ${previewCount} of ${evidence.length}.`
+            : 'No identified actors are present in the selected period.'
         : hasAnalyticsFailureProjection
             ? evidence.length
-                ? `Showing ${evidence.length} failed sign-in record${evidence.length === 1 ? '' : 's'} from the bounded recent sign-in projection for this selected period (up to 50 records). Older failures may also contribute to the KPI.`
-                : 'No failed sign-ins appear in the bounded recent sign-in projection (up to 50 records) for this selected period. Older failures may still contribute to the KPI.'
+                ? `The projection contains ${evidence.length}${filter.day || filter.dimension ? ' matching' : ` of ${failedTotal}`} failed sign-in record${evidence.length === 1 ? '' : 's'}${failedRecordsTruncated ? ' (capped at 50; more failures contribute to the KPI)' : ''}; previewing ${previewCount} of ${evidence.length}.`
+                : 'No failed sign-ins match this selection in the selected period.'
             : evidence.length
                 ? `${evidence.length} matching loaded event${evidence.length === 1 ? '' : 's'} in this analytics window. The sync sample may not include every event counted in analytics.`
                 : 'No matching records in the recently loaded event sample. Analytics may include older stored events.';
     const filterJson = escapeIdentityText(JSON.stringify(filter));
     const hostClasses = ['credential-evidence-host', className].filter(Boolean).join(' ');
-    return `<div class="${hostClasses}" data-credential-evidence-host ${position ? `style="${position}"` : ''}><button type="button" class="credential-evidence-trigger" data-credential-evidence-trigger data-evidence-filter="${filterJson}" aria-controls="${previewId}" aria-describedby="${previewId}-summary" aria-label="${escapeIdentityText(`${label}: preview loaded event evidence`)}" aria-expanded="false">${triggerContent}</button><div id="${previewId}" class="credential-evidence-preview" role="group" aria-label="${escapeIdentityText(`${label} evidence preview`)}"><p id="${previewId}-summary">${escapeIdentityText(message)}</p><div class="credential-evidence-samples">${samples || '<em>No loaded records to preview.</em>'}</div><div class="credential-evidence-actions"><button type="button" data-credential-evidence-open data-evidence-filter="${filterJson}" data-evidence-label="${escapeIdentityText(label)}">View full evidence</button><button type="button" data-credential-evidence-close>Close preview</button></div></div></div>`;
+    return `<div class="${hostClasses}" data-credential-evidence-host ${position ? `style="${position}"` : ''}><button type="button" class="credential-evidence-trigger" data-credential-evidence-trigger data-evidence-filter="${filterJson}" aria-controls="${previewId}" aria-describedby="${previewId}-summary" aria-label="${escapeIdentityText(`${label}: preview evidence`)}" aria-expanded="false">${triggerContent}</button><div id="${previewId}" class="credential-evidence-preview" role="group" aria-label="${escapeIdentityText(`${label} evidence preview`)}"><p id="${previewId}-summary">${escapeIdentityText(message)}</p><div class="credential-evidence-samples">${samples || '<em>No loaded records to preview.</em>'}</div><div class="credential-evidence-actions"><button type="button" data-credential-evidence-open data-evidence-filter="${filterJson}" data-evidence-label="${escapeIdentityText(label)}">View full evidence</button><button type="button" data-credential-evidence-close>Close preview</button></div></div></div>`;
 }
 
 function renderCredentialEvidenceEvent(event) {
@@ -11909,6 +11949,15 @@ function renderCredentialEvidenceEvent(event) {
     ].map(getOnePasswordEventText).filter(Boolean).join(' · ');
     const eventDescription = getOnePasswordEventText(metadata.type || metadata.category || metadata.object_type) || getCredentialEvidenceFeedLabel(event.eventType);
     return `<article class="credential-evidence-event"><div><strong>${escapeIdentityText(getCredentialEvidenceFeedLabel(event.eventType))}</strong><time>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))}</time></div><dl><dt>Actor</dt><dd>${escapeIdentityText(getOnePasswordEventActor(metadata))}</dd><dt>Event</dt><dd>${escapeIdentityText(eventDescription)}</dd><dt>Action</dt><dd>${escapeIdentityText(getCredentialEvidenceAction(event))}</dd>${context ? `<dt>Context</dt><dd>${escapeIdentityText(context)}</dd>` : ''}</dl></article>`;
+}
+
+function renderCredentialEvidenceSignInRecord(event) {
+    return `<article class="credential-evidence-event"><div><strong>Sign-in · ${escapeIdentityText(event.result || 'failed')}</strong><time>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))}</time></div><dl><dt>Actor</dt><dd>${escapeIdentityText(event.user || 'Not available')}</dd><dt>Result</dt><dd>${escapeIdentityText(event.result || 'failed')}</dd><dt>Event type</dt><dd>${escapeIdentityText(event.eventType || 'Not reported')}</dd>${event.platform ? `<dt>Platform</dt><dd>${escapeIdentityText(event.platform)}</dd>` : ''}${event.location ? `<dt>Location</dt><dd>${escapeIdentityText(event.location)}</dd>` : ''}</dl></article>`;
+}
+
+function renderCredentialEvidenceActor(actor) {
+    const feeds = (actor.feeds || []).map(feed => `${getCredentialEvidenceFeedLabel(feed.eventType)} (${feed.count})`).join(', ');
+    return `<article class="credential-evidence-event"><div><strong>${escapeIdentityText(actor.actor)}</strong><time>Last seen ${escapeIdentityText(formatOnePasswordEventDate(actor.lastSeen))}</time></div><dl><dt>Events counted</dt><dd>${escapeIdentityText(actor.eventCount)}</dd>${feeds ? `<dt>Feeds</dt><dd>${escapeIdentityText(feeds)}</dd>` : ''}</dl></article>`;
 }
 
 function closeCredentialEvidenceModal(content, restoreFocus = true) {
@@ -11928,27 +11977,36 @@ function openCredentialEvidenceModal(filter = {}, label = '') {
     const requestedType = filter.eventType || '';
     const activeFilter = { ...filter };
     const events = getCredentialEvidenceEvents(data, activeFilter);
+    const isActiveUsersProjection = activeFilter.projection === 'activeUserActors';
     const hasAnalyticsFailureProjection = activeFilter.eventType === 'signinattempts'
         && activeFilter.result === 'failed'
-        && Array.isArray(data.analytics?.signIns?.recent);
+        && Array.isArray(data.analytics?.signIns?.failedRecent);
+    const failedTotal = Number(data.analytics?.signIns?.failedRecentTotal ?? data.analytics?.metrics?.failedSignIns ?? 0);
+    const activeActorsTotal = Number(data.analytics?.activeUserActorsTotal ?? data.analytics?.metrics?.activeUsers ?? 0);
+    const activeActorsTruncated = activeActorsTotal > (data.analytics?.activeUserActors?.length || 0);
+    const failedRecordsTruncated = failedTotal > (data.analytics?.signIns?.failedRecent?.length || 0);
     const range = data.analytics?.range || {};
-    const periodText = range.startAt && range.endAt
-        ? `${formatOnePasswordEventDate(range.startAt)} – ${formatOnePasswordEventDate(range.endAt)}`
-        : 'the selected analytics period';
+    const periodText = formatOnePasswordAnalyticsPeriod(range);
     const modal = document.createElement('div');
     modal.className = 'credential-evidence-modal';
     modal.dataset.credentialEvidenceModal = '';
     modal.dataset.evidenceFilter = JSON.stringify(activeFilter);
     const filterTitle = label || (requestedType ? getCredentialEvidenceFeedLabel(requestedType) : 'All event feeds');
     const description = hasAnalyticsFailureProjection
-        ? `${events.length} failed sign-in record${events.length === 1 ? '' : 's'} appear in the bounded recent sign-in projection for ${escapeIdentityText(periodText)} (up to 50 records). Older failed sign-ins may contribute to the analytics total.`
-        : label === 'Active Users'
-            ? `Loaded event sample context for ${escapeIdentityText(periodText)}. Active Users is a distinct-actor aggregate across all stored feeds; this list is not a complete roster or proof of the aggregate.`
+        ? `Showing ${events.length}${activeFilter.day || activeFilter.dimension ? ' matching' : ` of ${failedTotal}`} failed sign-in record${events.length === 1 ? '' : 's'} for ${escapeIdentityText(periodText)}${failedRecordsTruncated ? ' (projection capped at 50; additional failures contribute to the total)' : '.'}`
+        : isActiveUsersProjection
+            ? `Showing ${events.length} of ${activeActorsTotal} distinct identified actors counted by Active Users for ${escapeIdentityText(periodText)}${activeActorsTruncated ? ' (roster capped at 200 actors).' : '; the roster matches the KPI count.'}`
             : `${events.length} loaded event${events.length === 1 ? '' : 's'} match this filter for ${escapeIdentityText(periodText)}. The sync response contains a recent sample, so this list is not a complete event-by-event breakdown of analytics totals.`;
     const emptyMessage = hasAnalyticsFailureProjection
-        ? 'No failed records are available in the bounded recent sign-in projection for this period.'
+        ? 'No failed records match this selection in the selected period.'
+        : isActiveUsersProjection
+            ? 'No identified actors are present in the selected period.'
         : 'No loaded events match this filter for the selected period.';
-    modal.innerHTML = `<div class="credential-evidence-backdrop" data-credential-evidence-backdrop></div><section class="credential-evidence-panel" role="dialog" aria-modal="true" aria-labelledby="credential-evidence-title" aria-describedby="credential-evidence-description" tabindex="-1"><header class="credential-evidence-header"><div><span class="credential-eyebrow">${hasAnalyticsFailureProjection ? 'ANALYTICS EVIDENCE SAMPLE' : '1PASSWORD EVENT RECORDS'}</span><h3 id="credential-evidence-title">${escapeIdentityText(filterTitle)}</h3><p id="credential-evidence-description">${description}</p></div><button type="button" class="credential-evidence-modal-close" data-credential-evidence-backdrop aria-label="Close event evidence">Close</button></header><div class="credential-evidence-controls"><label for="credential-evidence-feed">Event feed</label><select id="credential-evidence-feed" data-credential-evidence-feed><option value="">All event feeds</option>${ONEPASSWORD_EVENT_FEEDS.map(feed => `<option value="${feed.key}" ${requestedType === feed.key ? 'selected' : ''}>${escapeIdentityText(feed.label)}</option>`).join('')}</select></div><div class="credential-evidence-list">${events.length ? events.map(renderCredentialEvidenceEvent).join('') : `<p class="credential-evidence-empty">${escapeIdentityText(emptyMessage)}</p>`}</div></section>`;
+    const renderedEvents = events.map(event => isActiveUsersProjection
+        ? renderCredentialEvidenceActor(event)
+        : hasAnalyticsFailureProjection ? renderCredentialEvidenceSignInRecord(event) : renderCredentialEvidenceEvent(event)).join('');
+    const feedControl = isActiveUsersProjection ? '' : `<div class="credential-evidence-controls"><label for="credential-evidence-feed">Event feed</label><select id="credential-evidence-feed" data-credential-evidence-feed><option value="">All event feeds</option>${ONEPASSWORD_EVENT_FEEDS.map(feed => `<option value="${feed.key}" ${requestedType === feed.key ? 'selected' : ''}>${escapeIdentityText(feed.label)}</option>`).join('')}</select></div>`;
+    modal.innerHTML = `<div class="credential-evidence-backdrop" data-credential-evidence-backdrop></div><section class="credential-evidence-panel" role="dialog" aria-modal="true" aria-labelledby="credential-evidence-title" aria-describedby="credential-evidence-description" tabindex="-1"><header class="credential-evidence-header"><div><span class="credential-eyebrow">${isActiveUsersProjection ? 'DISTINCT ACTOR ROSTER' : hasAnalyticsFailureProjection ? 'FAILED SIGN-IN PROJECTION' : '1PASSWORD EVENT RECORDS'}</span><h3 id="credential-evidence-title">${escapeIdentityText(filterTitle)}</h3><p id="credential-evidence-description">${description}</p></div><button type="button" class="credential-evidence-modal-close" data-credential-evidence-backdrop aria-label="Close event evidence">Close</button></header>${feedControl}<div class="credential-evidence-list">${events.length ? renderedEvents : `<p class="credential-evidence-empty">${escapeIdentityText(emptyMessage)}</p>`}</div></section>`;
     content.appendChild(modal);
     modal.querySelector('.credential-evidence-modal-close')?.focus();
 }
@@ -12244,7 +12302,7 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         'Failed Sign-ins': { eventType: 'signinattempts', result: 'failed' },
         'Total Audit Events': { eventType: 'auditevents' },
         'Item Usage Events': { eventType: 'itemusages' },
-        'Active Users': {},
+        'Active Users': { projection: 'activeUserActors' },
         'Events in Period': {}
     };
     const signinRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.user)}</td><td>${event.result ? `<span class="credential-result credential-result-${esc(event.result)}">${esc(event.result)}</span>` : 'Not reported'}</td><td>${esc(event.eventType)}</td><td>${esc(event.platform)}</td><td>${esc(event.location)}</td></tr>`;
@@ -12252,22 +12310,24 @@ function renderSunbirdCredentialSecurityDashboard(data) {
     const hasSignInTimeline = Array.isArray(signIns.timeline) && signIns.timeline.length;
     const hasAuditTimeline = Array.isArray(audit.timeline) && audit.timeline.length;
     const customRange = onePasswordAnalyticsCustomRange || {};
-    const toDateInput = value => {
+    const toDateInput = (value, exclusiveEnd = false) => {
         const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+        if (Number.isNaN(date.getTime())) return '';
+        if (exclusiveEnd) date.setUTCDate(date.getUTCDate() - 1);
+        return date.toISOString().slice(0, 10);
     };
     content.innerHTML = `
-      <section class="credential-analytics-toolbar" aria-label="Analytics period"><div><span class="credential-eyebrow">ANALYTICS WINDOW</span><strong>${esc(analytics.range?.startAt ? `${formatOnePasswordEventDate(analytics.range.startAt)} – ${formatOnePasswordEventDate(analytics.range.endAt)}` : 'Selected period')}</strong></div><label>Period <select data-credential-period><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label><div class="credential-custom-range ${onePasswordAnalyticsPeriod === 'custom' ? '' : 'is-hidden'}" data-custom-range><label>From <input type="date" data-range-start></label><label>To <input type="date" data-range-end></label><button type="button" data-range-apply>Apply</button></div><button type="button" class="credential-evidence-browse" data-credential-evidence-open data-evidence-filter="{}" data-evidence-label="All event feeds">Browse loaded event evidence</button></section>
+      <section class="credential-analytics-toolbar" aria-label="Analytics period"><div><span class="credential-eyebrow">ANALYTICS WINDOW</span><strong>${esc(analytics.range?.startAt ? formatOnePasswordAnalyticsPeriod(analytics.range) : 'Selected period')}</strong></div><label>Period <select data-credential-period><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label><div class="credential-custom-range ${onePasswordAnalyticsPeriod === 'custom' ? '' : 'is-hidden'}" data-custom-range><label>From <input type="date" data-range-start></label><label>To <input type="date" data-range-end></label><button type="button" data-range-apply>Apply</button></div><button type="button" class="credential-evidence-browse" data-credential-evidence-open data-evidence-filter="{}" data-evidence-label="All event feeds">Browse loaded event evidence</button></section>
       <section class="credential-kpi-grid" aria-label="Credential Security KPIs">${kpis.map(([label, value, icon, tone]) => {
           const evidenceFilter = kpiEvidence[label];
           const valueContent = evidenceFilter
-              ? renderCredentialEvidenceHost(data, evidenceFilter, label, `<strong>${esc(value)}</strong><span class="credential-evidence-cue">${label === 'Active Users' ? 'Preview sample context' : 'Preview evidence'}</span>`, 'credential-evidence-kpi')
+              ? renderCredentialEvidenceHost(data, evidenceFilter, label, `<strong>${esc(value)}</strong><span class="credential-evidence-cue">${label === 'Active Users' ? 'View actor roster' : 'Preview evidence'}</span>`, 'credential-evidence-kpi')
               : `<strong>${esc(value)}</strong>`;
           return `<article class="credential-kpi credential-glass credential-glass-${tone}"><i class="${icon}" aria-hidden="true"></i><span>${esc(label)}</span>${valueContent}<small>Selected period</small></article>`;
       }).join('')}</section>
       ${(hasSignInTimeline || signIns.successful !== undefined) ? `<section class="credential-analytics-section credential-auth-overview"><div class="credential-section-title"><div><span>AUTHENTICATION ANALYTICS</span><h3>Sign-in activity</h3></div><p>Charts reflect retained 1Password event metadata only.</p></div><div class="credential-auth-hero">${hasSignInTimeline ? trendChart('Sign-ins over time', signIns.timeline, 'total', 'neutral', 'signinattempts') : ''}${resultDonut()}</div></section>` : ''}
       ${(signIns.byUser?.length || signIns.byCountry?.length || signIns.byPlatform?.length || signIns.byType?.length || signIns.byHour?.length) ? `<section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUTHENTICATION PATTERNS</span><h3>Where activity is happening</h3></div><p>Ranked records use actual event counts.</p></div><div class="credential-chart-grid">${rankedChart('By user', signIns.byUser, 'neutral', { eventType: 'signinattempts', dimension: 'user' })}${rankedChart('By country', signIns.byCountry, 'neutral', { eventType: 'signinattempts', dimension: 'country' })}${rankedChart('By platform', signIns.byPlatform, 'neutral', { eventType: 'signinattempts', dimension: 'platform' })}${rankedChart('By event type', signIns.byType, 'neutral', { eventType: 'signinattempts', dimension: 'type' })}${rankedChart('Activity by hour', signIns.byHour)}</div></section>` : ''}
-      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Explicitly classified records from the bounded recent sign-in projection (up to 50); older failures may contribute to the selected-period total.</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning', 'signinattempts')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins in the bounded recent projection for this period. Older failures may still contribute to the total.</td></tr>'}</tbody></table></div></div></section>` : ''}
+      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Showing ${esc(signIns.failedRecent?.length || 0)} of ${esc(signIns.failedRecentTotal ?? metrics.failedSignIns)} classified failures${Number(signIns.failedRecentTotal ?? metrics.failedSignIns) > (signIns.failedRecent?.length || 0) ? ' (projection capped at 50); older failures also contribute to the KPI.' : ' in the selected-period projection.'}</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning', 'signinattempts')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.failedRecent?.map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins in the selected-period projection.</td></tr>'}</tbody></table></div></div></section>` : ''}
       <section class="credential-analytics-section"><div class="credential-section-title"><div><span>RECENT AUTHENTICATION</span><h3>Authentication activity</h3></div><p>Actual 1Password sign-in records.</p></div><div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No sign-in events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
       <section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUDIT EVENTS</span><h3>Audit detail</h3></div><p>${audit.total !== undefined ? `${esc(audit.total)} audit events in the selected period.` : 'Audit totals are not available for this period.'}</p></div>${hasAuditTimeline ? `<div class="credential-audit-trend">${trendChart('Audit activity over time', audit.timeline, 'total', 'neutral', 'auditevents')}</div>` : ''}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object type</th><th>Object ID</th><th>Location</th></tr></thead><tbody>${audit.recent?.map(auditRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No audit events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
       ${metrics.itemUsageEvents === 0 ? '<div class="credential-empty-state"><i class="fas fa-key" aria-hidden="true"></i>No item usage events recorded for the selected period.</div>' : ''}
@@ -12277,7 +12337,7 @@ function renderSunbirdCredentialSecurityDashboard(data) {
     selector.value = onePasswordAnalyticsPeriod;
     selector.addEventListener('change', () => { onePasswordAnalyticsPeriod = selector.value; if (selector.value === 'custom') content.querySelector('[data-custom-range]')?.classList.remove('is-hidden'); else { onePasswordAnalyticsCustomRange = null; loadOnePasswordAnalytics(data); } });
     const start = content.querySelector('[data-range-start]'), end = content.querySelector('[data-range-end]');
-    if (start && end) { start.value = toDateInput(customRange.startAt || analytics.range?.startAt); end.value = toDateInput(customRange.endAt || analytics.range?.endAt); content.querySelector('[data-range-apply]')?.addEventListener('click', () => { if (start.value && end.value && start.value < end.value) { onePasswordAnalyticsPeriod = 'custom'; onePasswordAnalyticsCustomRange = { startAt: `${start.value}T00:00:00.000Z`, endAt: `${end.value}T23:59:59.999Z` }; loadOnePasswordAnalytics(data, onePasswordAnalyticsCustomRange); } }); }
+    if (start && end) { start.value = toDateInput(customRange.startAt || analytics.range?.startAt); end.value = customRange.endAt ? toDateInput(customRange.endAt, true) : toDateInput(analytics.range?.endAt); content.querySelector('[data-range-apply]')?.addEventListener('click', () => { if (start.value && end.value && start.value <= end.value) { const exclusiveEnd = new Date(`${end.value}T00:00:00.000Z`); exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1); onePasswordAnalyticsPeriod = 'custom'; onePasswordAnalyticsCustomRange = { startAt: `${start.value}T00:00:00.000Z`, endAt: exclusiveEnd.toISOString() }; loadOnePasswordAnalytics(data, onePasswordAnalyticsCustomRange); } }); }
 }
 
 function loadOnePasswordAnalytics(data, customRange) {
