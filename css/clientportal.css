@@ -16310,3 +16310,12 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .project-card[data-project-id="9"].credential-security-status-error .credential-security-feed-summary {
   border-color: rgba(239, 68, 68, 0.58);
 }
+
+.sunbird-credential-security-dashboard button,
+.sunbird-credential-security-dashboard .sunbird-id-back-btn {
+  border-radius: 30px;
+}
+
+.project-card[data-project-id="9"] [data-onepassword-open] {
+  border-radius: 30px;
+}

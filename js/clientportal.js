@@ -11801,6 +11801,24 @@ function getCredentialEvidenceEvents(data, filter = {}) {
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
     const eventTypes = Array.isArray(filter.eventTypes) ? filter.eventTypes : null;
     const eventType = typeof filter.eventType === 'string' ? filter.eventType : '';
+    const useAnalyticsFailureProjection = eventType === 'signinattempts'
+        && filter.result === 'failed'
+        && Array.isArray(data?.analytics?.signIns?.recent);
+    const sourceEvents = useAnalyticsFailureProjection
+        ? data.analytics.signIns.recent
+            .filter(event => event?.result === 'failed')
+            .map(event => ({
+                eventType: 'signinattempts',
+                timestamp: event.timestamp,
+                metadata: {
+                    category: 'failed',
+                    type: event.eventType || 'failed',
+                    actor_details: event.user,
+                    client: event.platform ? { platform: event.platform } : {},
+                    location: event.location ? { country: event.location } : {}
+                }
+            }))
+        : (Array.isArray(data?.events) ? data.events : []);
     const normalized = value => getOnePasswordEventText(value).trim().toLocaleLowerCase();
     const actorFor = metadata => normalized(getOnePasswordEventActor(metadata));
     const matchesDimension = (event, dimension, expected) => {
@@ -11816,7 +11834,7 @@ function getCredentialEvidenceEvents(data, filter = {}) {
         return actual !== undefined && actual === normalized(expected);
     };
 
-    return (Array.isArray(data?.events) ? data.events : []).filter(event => {
+    return sourceEvents.filter(event => {
         if (!event || typeof event !== 'object') return false;
         const timestamp = new Date(event.timestamp);
         if (Number.isNaN(timestamp.getTime()) || timestamp < start || timestamp >= end) return false;
@@ -11861,9 +11879,21 @@ function renderCredentialEvidenceHost(data, filter, label, triggerContent, class
     const previewId = `credential-evidence-preview-${++credentialEvidencePreviewId}`;
     const evidence = getCredentialEvidenceEvents(data, filter);
     const samples = evidence.slice(0, 2).map(renderCredentialEvidenceEventPreview).join('');
-    const message = evidence.length
-        ? `${evidence.length} matching loaded event${evidence.length === 1 ? '' : 's'} in this analytics window. The sync sample may not include every event counted in analytics.`
-        : 'No matching records in the recently loaded event sample. Analytics may include older stored events.';
+    const hasAnalyticsFailureProjection = filter.eventType === 'signinattempts'
+        && filter.result === 'failed'
+        && Array.isArray(data.analytics?.signIns?.recent);
+    const isActiveUsersContext = label === 'Active Users';
+    const message = isActiveUsersContext
+        ? evidence.length
+            ? `Sample context only: showing ${evidence.length} event${evidence.length === 1 ? '' : 's'} from the newest loaded feed sample. Active Users is a distinct-actor aggregate across stored feeds; this is not a complete roster or count proof.`
+            : 'No matching events in the newest loaded feed sample. Active Users is a distinct-actor aggregate across stored feeds; this sample is not a complete roster or count proof.'
+        : hasAnalyticsFailureProjection
+            ? evidence.length
+                ? `Showing ${evidence.length} failed sign-in record${evidence.length === 1 ? '' : 's'} from the bounded recent sign-in projection for this selected period (up to 50 records). Older failures may also contribute to the KPI.`
+                : 'No failed sign-ins appear in the bounded recent sign-in projection (up to 50 records) for this selected period. Older failures may still contribute to the KPI.'
+            : evidence.length
+                ? `${evidence.length} matching loaded event${evidence.length === 1 ? '' : 's'} in this analytics window. The sync sample may not include every event counted in analytics.`
+                : 'No matching records in the recently loaded event sample. Analytics may include older stored events.';
     const filterJson = escapeIdentityText(JSON.stringify(filter));
     const hostClasses = ['credential-evidence-host', className].filter(Boolean).join(' ');
     return `<div class="${hostClasses}" data-credential-evidence-host ${position ? `style="${position}"` : ''}><button type="button" class="credential-evidence-trigger" data-credential-evidence-trigger data-evidence-filter="${filterJson}" aria-controls="${previewId}" aria-describedby="${previewId}-summary" aria-label="${escapeIdentityText(`${label}: preview loaded event evidence`)}" aria-expanded="false">${triggerContent}</button><div id="${previewId}" class="credential-evidence-preview" role="group" aria-label="${escapeIdentityText(`${label} evidence preview`)}"><p id="${previewId}-summary">${escapeIdentityText(message)}</p><div class="credential-evidence-samples">${samples || '<em>No loaded records to preview.</em>'}</div><div class="credential-evidence-actions"><button type="button" data-credential-evidence-open data-evidence-filter="${filterJson}" data-evidence-label="${escapeIdentityText(label)}">View full evidence</button><button type="button" data-credential-evidence-close>Close preview</button></div></div></div>`;
@@ -11898,6 +11928,9 @@ function openCredentialEvidenceModal(filter = {}, label = '') {
     const requestedType = filter.eventType || '';
     const activeFilter = { ...filter };
     const events = getCredentialEvidenceEvents(data, activeFilter);
+    const hasAnalyticsFailureProjection = activeFilter.eventType === 'signinattempts'
+        && activeFilter.result === 'failed'
+        && Array.isArray(data.analytics?.signIns?.recent);
     const range = data.analytics?.range || {};
     const periodText = range.startAt && range.endAt
         ? `${formatOnePasswordEventDate(range.startAt)} – ${formatOnePasswordEventDate(range.endAt)}`
@@ -11907,7 +11940,15 @@ function openCredentialEvidenceModal(filter = {}, label = '') {
     modal.dataset.credentialEvidenceModal = '';
     modal.dataset.evidenceFilter = JSON.stringify(activeFilter);
     const filterTitle = label || (requestedType ? getCredentialEvidenceFeedLabel(requestedType) : 'All event feeds');
-    modal.innerHTML = `<div class="credential-evidence-backdrop" data-credential-evidence-backdrop></div><section class="credential-evidence-panel" role="dialog" aria-modal="true" aria-labelledby="credential-evidence-title" aria-describedby="credential-evidence-description" tabindex="-1"><header class="credential-evidence-header"><div><span class="credential-eyebrow">1PASSWORD EVENT RECORDS</span><h3 id="credential-evidence-title">${escapeIdentityText(filterTitle)}</h3><p id="credential-evidence-description">${events.length} loaded event${events.length === 1 ? '' : 's'} match this filter for ${escapeIdentityText(periodText)}. The sync response contains a recent sample, so this list is not a complete event-by-event breakdown of analytics totals.</p></div><button type="button" class="credential-evidence-modal-close" data-credential-evidence-backdrop aria-label="Close event evidence">Close</button></header><div class="credential-evidence-controls"><label for="credential-evidence-feed">Event feed</label><select id="credential-evidence-feed" data-credential-evidence-feed><option value="">All event feeds</option>${ONEPASSWORD_EVENT_FEEDS.map(feed => `<option value="${feed.key}" ${requestedType === feed.key ? 'selected' : ''}>${escapeIdentityText(feed.label)}</option>`).join('')}</select></div><div class="credential-evidence-list">${events.length ? events.map(renderCredentialEvidenceEvent).join('') : '<p class="credential-evidence-empty">No loaded events match this filter for the selected period.</p>'}</div></section>`;
+    const description = hasAnalyticsFailureProjection
+        ? `${events.length} failed sign-in record${events.length === 1 ? '' : 's'} appear in the bounded recent sign-in projection for ${escapeIdentityText(periodText)} (up to 50 records). Older failed sign-ins may contribute to the analytics total.`
+        : label === 'Active Users'
+            ? `Loaded event sample context for ${escapeIdentityText(periodText)}. Active Users is a distinct-actor aggregate across all stored feeds; this list is not a complete roster or proof of the aggregate.`
+            : `${events.length} loaded event${events.length === 1 ? '' : 's'} match this filter for ${escapeIdentityText(periodText)}. The sync response contains a recent sample, so this list is not a complete event-by-event breakdown of analytics totals.`;
+    const emptyMessage = hasAnalyticsFailureProjection
+        ? 'No failed records are available in the bounded recent sign-in projection for this period.'
+        : 'No loaded events match this filter for the selected period.';
+    modal.innerHTML = `<div class="credential-evidence-backdrop" data-credential-evidence-backdrop></div><section class="credential-evidence-panel" role="dialog" aria-modal="true" aria-labelledby="credential-evidence-title" aria-describedby="credential-evidence-description" tabindex="-1"><header class="credential-evidence-header"><div><span class="credential-eyebrow">${hasAnalyticsFailureProjection ? 'ANALYTICS EVIDENCE SAMPLE' : '1PASSWORD EVENT RECORDS'}</span><h3 id="credential-evidence-title">${escapeIdentityText(filterTitle)}</h3><p id="credential-evidence-description">${description}</p></div><button type="button" class="credential-evidence-modal-close" data-credential-evidence-backdrop aria-label="Close event evidence">Close</button></header><div class="credential-evidence-controls"><label for="credential-evidence-feed">Event feed</label><select id="credential-evidence-feed" data-credential-evidence-feed><option value="">All event feeds</option>${ONEPASSWORD_EVENT_FEEDS.map(feed => `<option value="${feed.key}" ${requestedType === feed.key ? 'selected' : ''}>${escapeIdentityText(feed.label)}</option>`).join('')}</select></div><div class="credential-evidence-list">${events.length ? events.map(renderCredentialEvidenceEvent).join('') : `<p class="credential-evidence-empty">${escapeIdentityText(emptyMessage)}</p>`}</div></section>`;
     content.appendChild(modal);
     modal.querySelector('.credential-evidence-modal-close')?.focus();
 }
@@ -12203,6 +12244,7 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         'Failed Sign-ins': { eventType: 'signinattempts', result: 'failed' },
         'Total Audit Events': { eventType: 'auditevents' },
         'Item Usage Events': { eventType: 'itemusages' },
+        'Active Users': {},
         'Events in Period': {}
     };
     const signinRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.user)}</td><td>${event.result ? `<span class="credential-result credential-result-${esc(event.result)}">${esc(event.result)}</span>` : 'Not reported'}</td><td>${esc(event.eventType)}</td><td>${esc(event.platform)}</td><td>${esc(event.location)}</td></tr>`;
@@ -12219,13 +12261,13 @@ function renderSunbirdCredentialSecurityDashboard(data) {
       <section class="credential-kpi-grid" aria-label="Credential Security KPIs">${kpis.map(([label, value, icon, tone]) => {
           const evidenceFilter = kpiEvidence[label];
           const valueContent = evidenceFilter
-              ? renderCredentialEvidenceHost(data, evidenceFilter, label, `<strong>${esc(value)}</strong><span class="credential-evidence-cue">Preview evidence</span>`, 'credential-evidence-kpi')
+              ? renderCredentialEvidenceHost(data, evidenceFilter, label, `<strong>${esc(value)}</strong><span class="credential-evidence-cue">${label === 'Active Users' ? 'Preview sample context' : 'Preview evidence'}</span>`, 'credential-evidence-kpi')
               : `<strong>${esc(value)}</strong>`;
           return `<article class="credential-kpi credential-glass credential-glass-${tone}"><i class="${icon}" aria-hidden="true"></i><span>${esc(label)}</span>${valueContent}<small>Selected period</small></article>`;
       }).join('')}</section>
       ${(hasSignInTimeline || signIns.successful !== undefined) ? `<section class="credential-analytics-section credential-auth-overview"><div class="credential-section-title"><div><span>AUTHENTICATION ANALYTICS</span><h3>Sign-in activity</h3></div><p>Charts reflect retained 1Password event metadata only.</p></div><div class="credential-auth-hero">${hasSignInTimeline ? trendChart('Sign-ins over time', signIns.timeline, 'total', 'neutral', 'signinattempts') : ''}${resultDonut()}</div></section>` : ''}
       ${(signIns.byUser?.length || signIns.byCountry?.length || signIns.byPlatform?.length || signIns.byType?.length || signIns.byHour?.length) ? `<section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUTHENTICATION PATTERNS</span><h3>Where activity is happening</h3></div><p>Ranked records use actual event counts.</p></div><div class="credential-chart-grid">${rankedChart('By user', signIns.byUser, 'neutral', { eventType: 'signinattempts', dimension: 'user' })}${rankedChart('By country', signIns.byCountry, 'neutral', { eventType: 'signinattempts', dimension: 'country' })}${rankedChart('By platform', signIns.byPlatform, 'neutral', { eventType: 'signinattempts', dimension: 'platform' })}${rankedChart('By event type', signIns.byType, 'neutral', { eventType: 'signinattempts', dimension: 'type' })}${rankedChart('Activity by hour', signIns.byHour)}</div></section>` : ''}
-      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Only explicitly classified failed attempts appear here.</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning', 'signinattempts')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins recorded for the selected period.</td></tr>'}</tbody></table></div></div></section>` : ''}
+      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Explicitly classified records from the bounded recent sign-in projection (up to 50); older failures may contribute to the selected-period total.</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning', 'signinattempts')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins in the bounded recent projection for this period. Older failures may still contribute to the total.</td></tr>'}</tbody></table></div></div></section>` : ''}
       <section class="credential-analytics-section"><div class="credential-section-title"><div><span>RECENT AUTHENTICATION</span><h3>Authentication activity</h3></div><p>Actual 1Password sign-in records.</p></div><div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No sign-in events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
       <section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUDIT EVENTS</span><h3>Audit detail</h3></div><p>${audit.total !== undefined ? `${esc(audit.total)} audit events in the selected period.` : 'Audit totals are not available for this period.'}</p></div>${hasAuditTimeline ? `<div class="credential-audit-trend">${trendChart('Audit activity over time', audit.timeline, 'total', 'neutral', 'auditevents')}</div>` : ''}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object type</th><th>Object ID</th><th>Location</th></tr></thead><tbody>${audit.recent?.map(auditRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No audit events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
       ${metrics.itemUsageEvents === 0 ? '<div class="credential-empty-state"><i class="fas fa-key" aria-hidden="true"></i>No item usage events recorded for the selected period.</div>' : ''}

@@ -13,6 +13,8 @@ const { Webhook } = require('svix');
 const SVGtoPDF = require('svg-to-pdfkit');
 const { ClientSecretCredential } = require('@azure/identity');
 const {
+    buildSecurityAlertNotificationKey,
+    getSecurityAlertSeverities,
     normalizeSeverity: normalizeWhatsAppSeverity,
     normalizeWhatsAppRecipient,
     sendSecurityAlert
@@ -2105,6 +2107,28 @@ async function ensureDatabaseSchema() {
                 UNIQUE KEY uq_security_events_payload_company (CompanyID),
                 FOREIGN KEY (CompanyID) REFERENCES Companies(ID)
             )
+        `);
+
+        // A durable ledger prevents an active Microsoft alert from being sent
+        // repeatedly when the dashboard refreshes or the service restarts.
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS WhatsAppSecurityAlertNotifications (
+                ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                NotificationKey VARCHAR(100) NOT NULL,
+                Recipient VARCHAR(32) NOT NULL,
+                AlertType VARCHAR(32) NOT NULL,
+                Severity VARCHAR(16) NOT NULL,
+                Issue VARCHAR(900) NOT NULL,
+                Status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                MetaMessageID VARCHAR(255) NULL,
+                ErrorMessage TEXT NULL,
+                SentAt DATETIME NULL,
+                CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (ID),
+                UNIQUE KEY uq_whatsapp_security_notification (NotificationKey),
+                KEY ix_whatsapp_security_notification_status (Status, CreatedAt)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         `);
 
         await pool.query(`
@@ -14549,9 +14573,6 @@ function cleanSecurityCollectionWarnings(warnings = [], { alerts = [], incidents
         });
 }
 
-const sentWhatsAppSecurityAlertKeys = new Set();
-const MAX_WHATSAPP_SECURITY_ALERT_KEYS = 500;
-
 async function readWhatsAppConfigValue(name, fallback = null) {
     if (process.env[name]) return process.env[name];
     return await getSecret(name) || fallback;
@@ -14575,7 +14596,8 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             apiVersion,
             templateName,
             templateLanguage,
-            limitValue
+            limitValue,
+            severityValue
         ] = await Promise.all([
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERTS_ENABLED', 'false'),
             readWhatsAppConfigValue('WHATSAPP_ACCESS_TOKEN'),
@@ -14584,7 +14606,8 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_GRAPH_VERSION', 'v25.0'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_alert'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20')
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
         ]);
 
         const enabled = String(enabledValue || 'false').toLowerCase() === 'true';
@@ -14595,8 +14618,9 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
 
         const recipient = normalizeWhatsAppRecipient(recipientValue);
         const limit = Math.max(1, Number(limitValue || 20));
+        const severities = getSecurityAlertSeverities(severityValue);
 
-        return { enabled, token, phoneNumberId, recipient, apiVersion, templateName, templateLanguage, limit };
+        return { enabled, token, phoneNumberId, recipient, apiVersion, templateName, templateLanguage, limit, severities };
     } catch (error) {
         console.warn('[security_alerts:whatsapp_config_error] Failed to read WhatsApp config, defaulting to disabled:', error.message);
         return { enabled: false };
@@ -14607,17 +14631,56 @@ function getWhatsAppSecurityAlertTime(item = {}) {
     return item.eventTime || item.timestamp || item.created || item.updated || item.createdDateTime || new Date().toISOString();
 }
 
-function getWhatsAppSecurityAlertKey(item = {}) {
-    const stableId = item.id || item.uid || item.alertId || item.incidentId;
-    if (stableId) return `${item.recordType || item.type || 'security'}:${stableId}`;
-    return `${item.recordType || item.type || 'security'}:${item.title || item.displayName || item.name}:${getWhatsAppSecurityAlertTime(item)}`;
+async function claimWhatsAppSecurityAlertNotification(alert, recipient) {
+    if (!pool) {
+        // Failing closed is intentional: without the ledger we cannot promise
+        // that a refresh or restart will not duplicate an alert.
+        return { claimed: false, status: 'skipped-ledger-unavailable' };
+    }
+
+    const notificationKey = buildSecurityAlertNotificationKey(alert, recipient);
+    const [insert] = await pool.query(
+        `INSERT IGNORE INTO WhatsAppSecurityAlertNotifications
+         (NotificationKey, Recipient, AlertType, Severity, Issue, Status)
+         VALUES (?, ?, ?, ?, ?, 'pending')`,
+        [
+            notificationKey,
+            recipient,
+            String(alert.recordType || alert.type || 'security').slice(0, 32),
+            normalizeWhatsAppSeverity(alert.severity),
+            String(alert.issue || alert.title || alert.displayName || alert.name || 'Security alert').slice(0, 900)
+        ]
+    );
+
+    if (insert.affectedRows === 1) return { claimed: true, notificationKey };
+
+    const [rows] = await pool.query(
+        'SELECT Status, MetaMessageID, CreatedAt FROM WhatsAppSecurityAlertNotifications WHERE NotificationKey = ? LIMIT 1',
+        [notificationKey]
+    );
+    return {
+        claimed: false,
+        notificationKey,
+        status: rows[0]?.Status || 'existing',
+        messageId: rows[0]?.MetaMessageID || null,
+        createdAt: rows[0]?.CreatedAt || null
+    };
 }
 
-function rememberWhatsAppSecurityAlertKey(key) {
-    sentWhatsAppSecurityAlertKeys.add(key);
-    if (sentWhatsAppSecurityAlertKeys.size <= MAX_WHATSAPP_SECURITY_ALERT_KEYS) return;
-    const firstKey = sentWhatsAppSecurityAlertKeys.values().next().value;
-    sentWhatsAppSecurityAlertKeys.delete(firstKey);
+async function completeWhatsAppSecurityAlertNotification(notificationKey, result = {}) {
+    if (!pool || !notificationKey) return;
+    await pool.query(
+        `UPDATE WhatsAppSecurityAlertNotifications
+         SET Status = ?, MetaMessageID = ?, ErrorMessage = ?, SentAt = CASE WHEN ? = 'sent' THEN NOW() ELSE SentAt END
+         WHERE NotificationKey = ?`,
+        [
+            result.status || 'failed',
+            result.messageId || null,
+            result.error ? String(result.error).slice(0, 4000) : null,
+            result.status || 'failed',
+            notificationKey
+        ]
+    );
 }
 
 function getWhatsAppSecurityAlertCandidates(payload = {}) {
@@ -14651,7 +14714,7 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
         throw new Error('WhatsApp credentials are missing. Configure WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.');
     }
 
-    const severities = new Set((options.severities || ['critical', 'high', 'medium', 'low']).map(normalizeWhatsAppSeverity));
+    const severities = new Set(getSecurityAlertSeverities(options.severities || config.severities));
     const limit = Math.max(1, Number(options.limit || config.limit || 20));
     const types = new Set((options.types || ['alert', 'incident']).map(type => String(type || '').toLowerCase()));
     const candidates = getWhatsAppSecurityAlertCandidates(payload)
@@ -14661,28 +14724,37 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
 
     const results = [];
     for (const alert of candidates) {
-        const key = getWhatsAppSecurityAlertKey(alert);
-        if (!options.force && sentWhatsAppSecurityAlertKeys.has(key)) {
-            results.push({ key, issue: alert.issue, severity: alert.severity, status: 'skipped-duplicate' });
+        const claim = await claimWhatsAppSecurityAlertNotification(alert, config.recipient);
+        if (!claim.claimed) {
+            results.push({
+                key: claim.notificationKey || null,
+                issue: alert.issue,
+                severity: alert.severity,
+                status: claim.status === 'skipped-ledger-unavailable' ? claim.status : 'skipped-duplicate',
+                previousStatus: claim.status || null,
+                messageId: claim.messageId || null
+            });
             continue;
         }
 
         try {
             const response = await sendSecurityAlert(alert, config);
-            rememberWhatsAppSecurityAlertKey(key);
+            const messageId = response.messages?.[0]?.id || null;
+            await completeWhatsAppSecurityAlertNotification(claim.notificationKey, { status: 'sent', messageId });
             results.push({
-                key,
+                key: claim.notificationKey,
                 issue: alert.issue,
                 severity: alert.severity,
                 status: 'sent',
                 recipient: response.recipient || config.recipient,
-                messageId: response.messages?.[0]?.id || null,
+                messageId,
                 response
             });
         } catch (error) {
             const detail = error.response?.data || error.message;
+            await completeWhatsAppSecurityAlertNotification(claim.notificationKey, { status: 'failed', error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
             console.error('[WhatsApp Security Alerts] Failed to send alert:', detail);
-            results.push({ key, issue: alert.issue, severity: alert.severity, status: 'failed', error: detail });
+            results.push({ key: claim.notificationKey, issue: alert.issue, severity: alert.severity, status: 'failed', error: detail });
         }
     }
 
@@ -15379,6 +15451,15 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
 app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
     let recipient = null;
     try {
+        const tenant = getTenantByEmail(req.user?.email);
+        if (!tenant || tenant.clientId !== 'sunbird') {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied',
+                message: 'This feature is only available for Sunbird client'
+            });
+        }
+
         const config = await getWhatsAppSecurityAlertConfig({ requireEnabled: false });
         if (!config.token || !config.phoneNumberId) {
             throw new Error("WhatsApp credentials are missing. Configure WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
@@ -15443,18 +15524,13 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
         }
 
         const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
-        const severities = String(req.body?.severities || req.query.severities || 'critical,high,medium,low')
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean);
+        const severities = getSecurityAlertSeverities(req.body?.severities || req.query.severities || 'critical,high,medium');
         const types = String(req.body?.types || req.query.types || 'alert,incident')
             .split(',')
             .map(item => item.trim())
             .filter(Boolean);
         const limit = Number(req.body?.limit || req.query.limit || process.env.WHATSAPP_SECURITY_ALERT_LIMIT || 20);
-        const force = String(req.body?.force || req.query.force || 'false').toLowerCase() === 'true';
         const result = await notifySecurityAlertsViaWhatsApp(payload, {
-            force,
             limit,
             severities,
             types

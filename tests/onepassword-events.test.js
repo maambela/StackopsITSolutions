@@ -359,6 +359,17 @@ test('1Password analytics derives an audit timeline and only reports explicit si
     assert.equal(result.analytics.metrics.totalSignIns, 3);
     assert.equal(result.analytics.metrics.successfulSignIns, 1);
     assert.equal(result.analytics.metrics.failedSignIns, 1);
+    assert.deepEqual(
+        result.analytics.signIns.recent.find(event => event.timestamp === '2026-09-30T08:00:00.000Z'),
+        {
+            timestamp: '2026-09-30T08:00:00.000Z',
+            user: 'Ava',
+            result: 'failed',
+            eventType: 'login_failed',
+            platform: null,
+            location: null
+        }
+    );
     assert.deepEqual(result.analytics.audit.timeline, [
         { bucket: '2026-09-29', total: 1 },
         { bucket: '2026-09-30', total: 1 }

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const crypto = require('crypto');
 
 const DEFAULT_COUNTRY_CODE = '27';
 const DEFAULT_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
@@ -16,6 +17,10 @@ const SEVERITY_LABELS = {
   low: '[LOW]'
 };
 
+// Low-risk events are intentionally excluded from WhatsApp notifications. They
+// remain visible in the security dashboard, but should not create alert noise.
+const DEFAULT_SECURITY_ALERT_SEVERITIES = Object.freeze(['critical', 'high', 'medium']);
+
 function normalizeSeverity(value) {
   const severity = String(value || 'medium').toLowerCase();
   if (severity === 'critical') return 'critical';
@@ -24,11 +29,37 @@ function normalizeSeverity(value) {
   return 'low';
 }
 
+function getSecurityAlertSeverities(value) {
+  const requested = String(value || DEFAULT_SECURITY_ALERT_SEVERITIES.join(','))
+    .split(',')
+    .map(item => normalizeSeverity(item.trim()));
+  const allowed = new Set(DEFAULT_SECURITY_ALERT_SEVERITIES);
+  const severities = [...new Set(requested.filter(severity => allowed.has(severity)))];
+  return severities.length ? severities : [...DEFAULT_SECURITY_ALERT_SEVERITIES];
+}
+
 function normalizeWhatsAppRecipient(value, defaultCountryCode = DEFAULT_COUNTRY_CODE) {
   const digits = String(value || DEFAULT_RECIPIENT).replace(/\D/g, '');
   if (!digits) return DEFAULT_RECIPIENT;
   if (digits.startsWith('0')) return `${defaultCountryCode}${digits.slice(1)}`;
   return digits;
+}
+
+function buildSecurityAlertNotificationKey(alert = {}, recipient = '') {
+  const recordType = String(alert.recordType || alert.type || 'security').toLowerCase();
+  const stableId = alert.id || alert.uid || alert.alertId || alert.incidentId;
+  const identity = stableId
+    ? `id:${String(stableId)}`
+    : JSON.stringify({
+      issue: alert.issue || alert.title || alert.displayName || alert.name || 'Security alert',
+      source: alert.source || alert.category || alert.vendor || '',
+      created: alert.eventTime || alert.created || alert.createdDateTime || alert.timestamp || ''
+    });
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(`${recordType}|${normalizeWhatsAppRecipient(recipient)}|${identity}`)
+    .digest('hex');
+  return `security-alert:${fingerprint}`;
 }
 
 function formatDateTime(value, timeZone = 'Africa/Johannesburg') {
@@ -222,8 +253,11 @@ async function sendSecurityAlert(alert, config) {
 }
 
 module.exports = {
+  DEFAULT_SECURITY_ALERT_SEVERITIES,
+  buildSecurityAlertNotificationKey,
   buildSecurityAlertMessage,
   formatDateTime,
+  getSecurityAlertSeverities,
   normalizeSeverity,
   normalizeWhatsAppRecipient,
   sendHelloWorldTest,
