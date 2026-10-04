@@ -1046,6 +1046,8 @@ let credentialSecurityLit = false;
 let onePasswordAnalyticsPeriod = '7';
 let onePasswordAnalyticsCustomRange = null;
 let onePasswordAnalyticsRequest = null;
+let credentialEvidenceReturnFocus = null;
+let credentialEvidencePreviewId = 0;
 let projectGridHasRendered = false;
 
 function toBooleanMfa(value) {
@@ -11792,6 +11794,287 @@ function getOnePasswordEventContext(metadata) {
     return parts.join(' · ') || 'No additional metadata';
 }
 
+function getCredentialEvidenceEvents(data, filter = {}) {
+    const analyticsRange = data?.analytics?.range || {};
+    const start = new Date(analyticsRange.startAt);
+    const end = new Date(analyticsRange.endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+    const eventTypes = Array.isArray(filter.eventTypes) ? filter.eventTypes : null;
+    const eventType = typeof filter.eventType === 'string' ? filter.eventType : '';
+    const normalized = value => getOnePasswordEventText(value).trim().toLocaleLowerCase();
+    const actorFor = metadata => normalized(getOnePasswordEventActor(metadata));
+    const matchesDimension = (event, dimension, expected) => {
+        const metadata = event.metadata || {};
+        const client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
+        const actual = {
+            user: actorFor(metadata),
+            country: normalized(metadata.location?.country),
+            platform: normalized(client.platform || client.app_name || client.name),
+            type: normalized(metadata.type || metadata.category),
+            event: normalized(metadata.action || metadata.type || metadata.category || metadata.object_type || event.eventType)
+        }[dimension];
+        return actual !== undefined && actual === normalized(expected);
+    };
+
+    return (Array.isArray(data?.events) ? data.events : []).filter(event => {
+        if (!event || typeof event !== 'object') return false;
+        const timestamp = new Date(event.timestamp);
+        if (Number.isNaN(timestamp.getTime()) || timestamp < start || timestamp >= end) return false;
+        if (eventType && event.eventType !== eventType) return false;
+        if (eventTypes && !eventTypes.includes(event.eventType)) return false;
+        const metadata = event.metadata || {};
+        if (filter.result) {
+            const classification = `${getOnePasswordEventText(metadata.category)} ${getOnePasswordEventText(metadata.type)}`.toLowerCase();
+            const result = /fail|denied|reject|invalid|error|blocked/.test(classification)
+                ? 'failed'
+                : /success|succeed|allow|approved|complete|credentials_ok/.test(classification) ? 'successful' : '';
+            if (result !== filter.result) return false;
+        }
+        if (filter.day && timestamp.toISOString().slice(0, 10) !== filter.day) return false;
+        if (filter.dimension && !matchesDimension(event, filter.dimension, filter.value)) return false;
+        return true;
+    });
+}
+
+function getCredentialEvidenceFeedLabel(eventType) {
+    return ONEPASSWORD_EVENT_FEEDS.find(feed => feed.key === eventType)?.label || '1Password event';
+}
+
+function getCredentialEvidenceAction(event) {
+    const metadata = event?.metadata || {};
+    return getOnePasswordEventText(metadata.action || metadata.category || metadata.type || metadata.object_type) || 'Activity recorded';
+}
+
+function renderCredentialEvidenceEventPreview(event) {
+    const metadata = event.metadata || {};
+    const client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
+    const location = metadata.location && typeof metadata.location === 'object' ? metadata.location : {};
+    const context = [
+        client.platform || client.app_name || client.name,
+        [location.city, location.region, location.country].filter(Boolean).join(', ')
+    ].map(getOnePasswordEventText).filter(Boolean).join(' · ');
+    return `<div class="credential-evidence-sample"><strong>${escapeIdentityText(getCredentialEvidenceFeedLabel(event.eventType))} · ${escapeIdentityText(getCredentialEvidenceAction(event))}</strong><span>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))} · ${escapeIdentityText(getOnePasswordEventActor(metadata))}</span>${context ? `<small>${escapeIdentityText(context)}</small>` : ''}</div>`;
+}
+
+function renderCredentialEvidenceHost(data, filter, label, triggerContent, className = '', position = '') {
+    if (!Array.isArray(data?.events)) return triggerContent;
+    const previewId = `credential-evidence-preview-${++credentialEvidencePreviewId}`;
+    const evidence = getCredentialEvidenceEvents(data, filter);
+    const samples = evidence.slice(0, 2).map(renderCredentialEvidenceEventPreview).join('');
+    const message = evidence.length
+        ? `${evidence.length} matching loaded event${evidence.length === 1 ? '' : 's'} in this analytics window. The sync sample may not include every event counted in analytics.`
+        : 'No matching records in the recently loaded event sample. Analytics may include older stored events.';
+    const filterJson = escapeIdentityText(JSON.stringify(filter));
+    const hostClasses = ['credential-evidence-host', className].filter(Boolean).join(' ');
+    return `<div class="${hostClasses}" data-credential-evidence-host ${position ? `style="${position}"` : ''}><button type="button" class="credential-evidence-trigger" data-credential-evidence-trigger data-evidence-filter="${filterJson}" aria-controls="${previewId}" aria-describedby="${previewId}-summary" aria-label="${escapeIdentityText(`${label}: preview loaded event evidence`)}" aria-expanded="false">${triggerContent}</button><div id="${previewId}" class="credential-evidence-preview" role="group" aria-label="${escapeIdentityText(`${label} evidence preview`)}"><p id="${previewId}-summary">${escapeIdentityText(message)}</p><div class="credential-evidence-samples">${samples || '<em>No loaded records to preview.</em>'}</div><div class="credential-evidence-actions"><button type="button" data-credential-evidence-open data-evidence-filter="${filterJson}" data-evidence-label="${escapeIdentityText(label)}">View full evidence</button><button type="button" data-credential-evidence-close>Close preview</button></div></div></div>`;
+}
+
+function renderCredentialEvidenceEvent(event) {
+    const metadata = event.metadata || {};
+    const client = metadata.client && typeof metadata.client === 'object' ? metadata.client : {};
+    const location = metadata.location && typeof metadata.location === 'object' ? metadata.location : {};
+    const context = [
+        client.platform || client.app_name || client.name,
+        [location.city, location.region, location.country].filter(Boolean).join(', ')
+    ].map(getOnePasswordEventText).filter(Boolean).join(' · ');
+    const eventDescription = getOnePasswordEventText(metadata.type || metadata.category || metadata.object_type) || getCredentialEvidenceFeedLabel(event.eventType);
+    return `<article class="credential-evidence-event"><div><strong>${escapeIdentityText(getCredentialEvidenceFeedLabel(event.eventType))}</strong><time>${escapeIdentityText(formatOnePasswordEventDate(event.timestamp))}</time></div><dl><dt>Actor</dt><dd>${escapeIdentityText(getOnePasswordEventActor(metadata))}</dd><dt>Event</dt><dd>${escapeIdentityText(eventDescription)}</dd><dt>Action</dt><dd>${escapeIdentityText(getCredentialEvidenceAction(event))}</dd>${context ? `<dt>Context</dt><dd>${escapeIdentityText(context)}</dd>` : ''}</dl></article>`;
+}
+
+function closeCredentialEvidenceModal(content, restoreFocus = true) {
+    content?.querySelector('[data-credential-evidence-modal]')?.remove();
+    if (restoreFocus) {
+        if (credentialEvidenceReturnFocus?.isConnected) credentialEvidenceReturnFocus.focus();
+        credentialEvidenceReturnFocus = null;
+    }
+}
+
+function openCredentialEvidenceModal(filter = {}, label = '') {
+    const content = document.getElementById('sunbird-credential-security-content');
+    const data = onePasswordEventsData;
+    if (!content || !Array.isArray(data?.events)) return;
+    if (!content.querySelector('[data-credential-evidence-modal]')) credentialEvidenceReturnFocus = document.activeElement;
+    closeCredentialEvidenceModal(content, false);
+    const requestedType = filter.eventType || '';
+    const activeFilter = { ...filter };
+    const events = getCredentialEvidenceEvents(data, activeFilter);
+    const range = data.analytics?.range || {};
+    const periodText = range.startAt && range.endAt
+        ? `${formatOnePasswordEventDate(range.startAt)} – ${formatOnePasswordEventDate(range.endAt)}`
+        : 'the selected analytics period';
+    const modal = document.createElement('div');
+    modal.className = 'credential-evidence-modal';
+    modal.dataset.credentialEvidenceModal = '';
+    modal.dataset.evidenceFilter = JSON.stringify(activeFilter);
+    const filterTitle = label || (requestedType ? getCredentialEvidenceFeedLabel(requestedType) : 'All event feeds');
+    modal.innerHTML = `<div class="credential-evidence-backdrop" data-credential-evidence-backdrop></div><section class="credential-evidence-panel" role="dialog" aria-modal="true" aria-labelledby="credential-evidence-title" aria-describedby="credential-evidence-description" tabindex="-1"><header class="credential-evidence-header"><div><span class="credential-eyebrow">1PASSWORD EVENT RECORDS</span><h3 id="credential-evidence-title">${escapeIdentityText(filterTitle)}</h3><p id="credential-evidence-description">${events.length} loaded event${events.length === 1 ? '' : 's'} match this filter for ${escapeIdentityText(periodText)}. The sync response contains a recent sample, so this list is not a complete event-by-event breakdown of analytics totals.</p></div><button type="button" class="credential-evidence-modal-close" data-credential-evidence-backdrop aria-label="Close event evidence">Close</button></header><div class="credential-evidence-controls"><label for="credential-evidence-feed">Event feed</label><select id="credential-evidence-feed" data-credential-evidence-feed><option value="">All event feeds</option>${ONEPASSWORD_EVENT_FEEDS.map(feed => `<option value="${feed.key}" ${requestedType === feed.key ? 'selected' : ''}>${escapeIdentityText(feed.label)}</option>`).join('')}</select></div><div class="credential-evidence-list">${events.length ? events.map(renderCredentialEvidenceEvent).join('') : '<p class="credential-evidence-empty">No loaded events match this filter for the selected period.</p>'}</div></section>`;
+    content.appendChild(modal);
+    modal.querySelector('.credential-evidence-modal-close')?.focus();
+}
+
+function bindCredentialEvidenceInteractions(content) {
+    if (content.dataset.credentialEvidenceBound) return;
+    content.dataset.credentialEvidenceBound = 'true';
+    const getPreviewForHost = host => host.dataset.credentialEvidencePreview
+        ? document.getElementById(host.dataset.credentialEvidencePreview)
+        : host.querySelector('.credential-evidence-preview');
+    const getHostForTarget = target => {
+        const host = target.closest?.('[data-credential-evidence-host]');
+        if (host) return host;
+        return target.closest?.('.credential-evidence-preview')?._credentialEvidenceHost || null;
+    };
+    const showPreview = host => {
+        host.classList.add('is-previewing');
+        host.closest('.credential-kpi, .credential-chart')?.classList.add('credential-evidence-elevated');
+        const preview = getPreviewForHost(host);
+        if (!preview) return;
+        host.dataset.credentialEvidencePreview = preview.id;
+        preview._credentialEvidenceHost = host;
+        if (preview.parentElement !== content) content.appendChild(preview);
+        preview.classList.add('is-open');
+        const rect = host.getBoundingClientRect();
+        if (!rect.width) return;
+        const width = Math.min(340, Math.max(220, window.innerWidth - 28));
+        const left = Math.max(14, Math.min(rect.left, window.innerWidth - width - 14));
+        const topLimit = Math.max(14, window.innerHeight - 14);
+        const height = Math.min(380, window.innerHeight - 28, Math.max(preview.scrollHeight, 150));
+        const below = rect.bottom + 8;
+        preview.style.left = `${left}px`;
+        preview.style.top = `${below + height <= topLimit ? below : Math.max(14, rect.top - height - 8)}px`;
+    };
+    const closePreviews = except => {
+        content.querySelectorAll('[data-credential-evidence-host].is-previewing, [data-credential-evidence-host].is-locked').forEach(host => {
+            if (host === except) return;
+            host.classList.remove('is-locked', 'is-previewing');
+            getPreviewForHost(host)?.classList.remove('is-open');
+            host.closest('.credential-evidence-elevated')?.classList.remove('credential-evidence-elevated');
+            host.querySelector('[data-credential-evidence-trigger]')?.setAttribute('aria-expanded', 'false');
+        });
+    };
+    const closeHost = host => {
+        host?.classList.remove('is-locked', 'is-previewing');
+        if (host) getPreviewForHost(host)?.classList.remove('is-open');
+        host?.closest('.credential-evidence-elevated')?.classList.remove('credential-evidence-elevated');
+        host?.querySelector('[data-credential-evidence-trigger]')?.setAttribute('aria-expanded', 'false');
+    };
+    content.addEventListener('pointerover', event => {
+        const trigger = event.target.closest('[data-credential-evidence-trigger]');
+        const host = trigger?.closest('[data-credential-evidence-host]');
+        if (!host || host.contains(event.relatedTarget)) return;
+        trigger.removeAttribute('data-evidence-dismissed');
+        closePreviews(host);
+        showPreview(host);
+        trigger.setAttribute('aria-expanded', 'true');
+    });
+    content.addEventListener('pointerout', event => {
+        const host = getHostForTarget(event.target);
+        const preview = host && getPreviewForHost(host);
+        const pointerRemains = host?.contains(event.relatedTarget) || preview?.contains(event.relatedTarget);
+        if (!host || pointerRemains || host.classList.contains('is-locked') || host.contains(document.activeElement) || preview?.contains(document.activeElement)) return;
+        host.classList.remove('is-previewing');
+        preview?.classList.remove('is-open');
+        host.closest('.credential-evidence-elevated')?.classList.remove('credential-evidence-elevated');
+        host.querySelector('[data-credential-evidence-trigger]')?.setAttribute('aria-expanded', 'false');
+    });
+    content.addEventListener('focusin', event => {
+        const trigger = event.target.closest('[data-credential-evidence-trigger]');
+        const host = trigger?.closest('[data-credential-evidence-host]');
+        if (!host || trigger.hasAttribute('data-evidence-dismissed')) return;
+        closePreviews(host);
+        showPreview(host);
+        trigger.setAttribute('aria-expanded', 'true');
+    });
+    content.addEventListener('focusout', event => {
+        const host = getHostForTarget(event.target);
+        const preview = host && getPreviewForHost(host);
+        if (!host || host.contains(event.relatedTarget) || preview?.contains(event.relatedTarget) || host.classList.contains('is-locked')) return;
+        host.classList.remove('is-previewing');
+        preview?.classList.remove('is-open');
+        host.closest('.credential-evidence-elevated')?.classList.remove('credential-evidence-elevated');
+        host.querySelector('[data-credential-evidence-trigger]')?.setAttribute('aria-expanded', 'false');
+    });
+    content.addEventListener('click', event => {
+        const closeModal = event.target.closest('[data-credential-evidence-backdrop]');
+        if (closeModal) {
+            closeCredentialEvidenceModal(content);
+            return;
+        }
+        const modalOpen = event.target.closest('[data-credential-evidence-open]');
+        if (modalOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            const host = getHostForTarget(modalOpen);
+            if (host) {
+                host.classList.add('is-locked', 'is-previewing');
+                host.closest('.credential-kpi, .credential-chart')?.classList.add('credential-evidence-elevated');
+                host.querySelector('[data-credential-evidence-trigger]')?.setAttribute('aria-expanded', 'true');
+            }
+            let filter = {};
+            try { filter = JSON.parse(modalOpen.dataset.evidenceFilter || '{}'); } catch (_) { /* ignore invalid UI state */ }
+            openCredentialEvidenceModal(filter, modalOpen.dataset.evidenceLabel || '');
+            return;
+        }
+        const closePreview = event.target.closest('[data-credential-evidence-close]');
+        if (closePreview) {
+            const host = getHostForTarget(closePreview);
+            closeHost(host);
+            host?.closest('.credential-evidence-elevated')?.classList.remove('credential-evidence-elevated');
+            const trigger = host?.querySelector('[data-credential-evidence-trigger]');
+            trigger?.setAttribute('data-evidence-dismissed', 'true');
+            trigger?.focus();
+            return;
+        }
+        if (event.target.closest('[data-credential-evidence-modal]')) return;
+        const trigger = event.target.closest('[data-credential-evidence-trigger]');
+        if (trigger) {
+            event.preventDefault();
+            const host = trigger.closest('[data-credential-evidence-host]');
+            trigger.removeAttribute('data-evidence-dismissed');
+            const shouldLock = !host?.classList.contains('is-locked');
+            closePreviews(host);
+            host?.classList.toggle('is-locked', shouldLock);
+            if (shouldLock) showPreview(host);
+            else host?.classList.remove('is-previewing');
+            host?.closest('.credential-kpi, .credential-chart')?.classList.toggle('credential-evidence-elevated', shouldLock);
+            trigger.setAttribute('aria-expanded', String(shouldLock));
+            return;
+        }
+        if (!getHostForTarget(event.target)) closePreviews(null);
+    });
+    content.addEventListener('change', event => {
+        const feedSelect = event.target.closest('[data-credential-evidence-feed]');
+        if (!feedSelect) return;
+        let previousFilter = {};
+        try { previousFilter = JSON.parse(feedSelect.closest('[data-credential-evidence-modal]')?.dataset.evidenceFilter || '{}'); } catch (_) { /* ignore invalid UI state */ }
+        const nextFilter = feedSelect.value ? { eventType: feedSelect.value } : {};
+        if (feedSelect.value === 'signinattempts' && previousFilter.result) nextFilter.result = previousFilter.result;
+        const previousLabel = feedSelect.value ? getCredentialEvidenceFeedLabel(feedSelect.value) : 'All event feeds';
+        openCredentialEvidenceModal(nextFilter, previousLabel);
+    });
+    content.addEventListener('keydown', event => {
+        const modal = content.querySelector('[data-credential-evidence-modal]');
+        if (modal && event.key === 'Escape') {
+            event.preventDefault();
+            closeCredentialEvidenceModal(content);
+            return;
+        }
+        if (modal && event.key === 'Tab') {
+            const focusable = [...modal.querySelectorAll('button, select')].filter(element => !element.disabled);
+            if (!focusable.length) return;
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+            return;
+        }
+        if (event.key === 'Escape') closePreviews(null);
+    });
+}
+
 function renderSunbirdCredentialSecurityShell() {
     return `
         <section class="sunbird-network-security-dashboard sunbird-credential-security-dashboard" id="sunbird-credential-security-dashboard">
@@ -11829,6 +12112,7 @@ function renderOnePasswordEventError(content, message) {
 function renderSunbirdCredentialSecurityDashboard(data) {
     const content = document.getElementById('sunbird-credential-security-content');
     if (!content) return;
+    bindCredentialEvidenceInteractions(content);
     const analytics = data?.analytics;
     if (!analytics) { content.innerHTML = '<div class="credential-events-loading" role="status"><span class="credential-events-spinner" aria-hidden="true"></span><span>Loading selected-period analytics…</span></div>'; return; }
     const metrics = analytics.metrics || {}, signIns = analytics.signIns || {}, audit = analytics.audit || {}, summaries = analytics.summaries || {}, integration = Array.isArray(data.integration) ? data.integration : [];
@@ -11842,17 +12126,19 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         if (/complete|success|connected|active|healthy/.test(status)) return 'success';
         return 'neutral';
     };
-    const rankedChart = (title, rows, tone = 'neutral') => {
+    const rankedChart = (title, rows, tone = 'neutral', evidenceFilter = null) => {
         const values = eventRows(rows);
         if (!values.length) return '';
         const maximum = Math.max(...values.map(row => count(row.count ?? row.total)), 1);
         return `<article class="credential-glass credential-chart credential-rank-chart credential-glass-${tone}"><div class="credential-panel-heading"><h3>${esc(title)}</h3><span>Actual events</span></div><ul class="credential-chart-bars" aria-label="${esc(title)}">${values.map(row => {
             const value = count(row.count ?? row.total);
             const label = row.label || row.bucket;
-            return `<li><span title="${esc(label)}">${esc(label)}</span><div class="credential-chart-track" aria-hidden="true"><i style="width:${value ? (value / maximum) * 100 : 0}%"></i></div><strong>${esc(value)}</strong></li>`;
+            const rowFilter = evidenceFilter ? { ...evidenceFilter, dimension: evidenceFilter.dimension, value: String(label) } : null;
+            const rowContent = `<span title="${esc(label)}">${esc(label)}</span><span class="credential-chart-track" aria-hidden="true"><i style="width:${value ? (value / maximum) * 100 : 0}%"></i></span><strong>${esc(value)}</strong>`;
+            return `<li>${rowFilter ? renderCredentialEvidenceHost(data, rowFilter, `${title}: ${label}`, rowContent, 'credential-evidence-rank-host') : rowContent}</li>`;
         }).join('')}</ul></article>`;
     };
-    const trendChart = (title, rows, field = 'total', tone = 'neutral') => {
+    const trendChart = (title, rows, field = 'total', tone = 'neutral', evidenceType = 'signinattempts') => {
         const values = Array.isArray(rows) ? rows.filter(row => row?.bucket && Number.isFinite(Number(row[field]))) : [];
         if (!values.length) return '';
         const chartValues = values.map(row => count(row[field]));
@@ -11868,14 +12154,26 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         const area = `${path} L${points[points.length - 1].x.toFixed(2)},${height - inset} L${points[0].x.toFixed(2)},${height - inset} Z`;
         const startLabel = esc(String(points[0].bucket).slice(0, 10));
         const endLabel = esc(String(points[points.length - 1].bucket).slice(0, 10));
-        return `<article class="credential-glass credential-chart credential-trend-card credential-glass-${tone}"><div class="credential-panel-heading"><div><h3>${esc(title)}</h3><span>Actual events by day</span></div><strong class="credential-chart-total">${esc(chartValues.reduce((total, value) => total + value, 0))}</strong></div><div class="credential-line-chart" role="img" aria-label="${esc(title)} trend with ${esc(chartValues.reduce((total, value) => total + value, 0))} actual events"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="credential-line-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".32"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><path class="credential-line-area" d="${area}"></path><path class="credential-line-path" d="${path}"></path>${points.map(point => `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3.1"><title>${esc(`${String(point.bucket).slice(0, 10)}: ${point.value}`)}</title></circle>`).join('')}</svg><div class="credential-line-labels"><span>${startLabel}</span><span>${endLabel}</span></div></div></article>`;
+        const evidencePoints = evidenceType ? points.map(point => {
+            const pointFilter = { eventType: evidenceType, day: String(point.bucket).slice(0, 10) };
+            if (field === 'failed') pointFilter.result = 'failed';
+            const pointContent = `<span class="credential-evidence-point-dot" aria-hidden="true"></span><span class="credential-visually-hidden">${esc(`${String(point.bucket).slice(0, 10)}: ${point.value} events`)}</span>`;
+            const left = `calc(${(point.x / width) * 100}% - 12px)`;
+            const top = `${(point.y / height) * 172 - 12}px`;
+            return renderCredentialEvidenceHost(data, pointFilter, `${title}: ${String(point.bucket).slice(0, 10)}`, pointContent, 'credential-evidence-chart-point', `left:${left};top:${top}`);
+        }).join('') : '';
+        return `<article class="credential-glass credential-chart credential-trend-card credential-glass-${tone}"><div class="credential-panel-heading"><div><h3>${esc(title)}</h3><span>Actual events by day</span></div><strong class="credential-chart-total">${esc(chartValues.reduce((total, value) => total + value, 0))}</strong></div><div class="credential-line-chart" role="group" aria-label="${esc(title)} trend with ${esc(chartValues.reduce((total, value) => total + value, 0))} actual events"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="credential-line-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".32"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><path class="credential-line-area" d="${area}"></path><path class="credential-line-path" d="${path}"></path>${points.map(point => `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3.1"><title>${esc(`${String(point.bucket).slice(0, 10)}: ${point.value}`)}</title></circle>`).join('')}</svg>${evidencePoints}<div class="credential-line-labels"><span>${startLabel}</span><span>${endLabel}</span></div></div></article>`;
     };
     const resultDonut = () => {
         if (signIns.successful === undefined || signIns.failed === undefined) return '';
         const successful = count(signIns.successful), failed = count(signIns.failed), total = successful + failed;
         if (!total) return '';
         const circumference = 289.03, successfulLength = circumference * (successful / total), failedLength = circumference - successfulLength;
-        return `<article class="credential-glass credential-result-donut"><div class="credential-panel-heading"><div><h3>Sign-in results</h3><span>Explicitly classified outcomes</span></div></div><div class="credential-donut-layout"><svg class="credential-donut" viewBox="0 0 112 112" role="img" aria-label="${esc(`${successful} successful and ${failed} failed sign-ins`)}"><circle class="credential-donut-base" cx="56" cy="56" r="46"></circle><circle class="credential-donut-success" cx="56" cy="56" r="46" stroke-dasharray="${successfulLength.toFixed(2)} ${circumference}" stroke-dashoffset="0"></circle>${failed ? `<circle class="credential-donut-warning" cx="56" cy="56" r="46" stroke-dasharray="${failedLength.toFixed(2)} ${circumference}" stroke-dashoffset="-${successfulLength.toFixed(2)}"></circle>` : ''}<text x="56" y="52" text-anchor="middle">${esc(total)}</text><text x="56" y="67" text-anchor="middle">classified</text></svg><ul class="credential-donut-legend"><li class="is-success"><span>Successful</span><strong>${esc(successful)}</strong></li><li class="is-warning"><span>Failed</span><strong>${esc(failed)}</strong></li></ul></div></article>`;
+        const successFilter = { eventType: 'signinattempts', result: 'successful' };
+        const failedFilter = { eventType: 'signinattempts', result: 'failed' };
+        const successLegend = renderCredentialEvidenceHost(data, successFilter, 'Successful sign-ins', `<span>Successful</span><strong>${esc(successful)}</strong>`, 'credential-evidence-donut-host');
+        const failedLegend = renderCredentialEvidenceHost(data, failedFilter, 'Failed sign-ins', `<span>Failed</span><strong>${esc(failed)}</strong>`, 'credential-evidence-donut-host');
+        return `<article class="credential-glass credential-result-donut"><div class="credential-panel-heading"><div><h3>Sign-in results</h3><span>Explicitly classified outcomes</span></div></div><div class="credential-donut-layout"><svg class="credential-donut" viewBox="0 0 112 112" role="img" aria-label="${esc(`${successful} successful and ${failed} failed sign-ins`)}"><circle class="credential-donut-base" cx="56" cy="56" r="46"></circle><circle class="credential-donut-success" cx="56" cy="56" r="46" stroke-dasharray="${successfulLength.toFixed(2)} ${circumference}" stroke-dashoffset="0"></circle>${failed ? `<circle class="credential-donut-warning" cx="56" cy="56" r="46" stroke-dasharray="${failedLength.toFixed(2)} ${circumference}" stroke-dashoffset="-${successfulLength.toFixed(2)}"></circle>` : ''}<text x="56" y="52" text-anchor="middle">${esc(total)}</text><text x="56" y="67" text-anchor="middle">classified</text></svg><ul class="credential-donut-legend"><li class="is-success">${successLegend}</li><li class="is-warning">${failedLegend}</li></ul></div></article>`;
     };
     const healthCards = integration.map(feed => {
         const tone = integrationTone(feed);
@@ -11899,6 +12197,14 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         ['Unique Devices', metrics.uniqueDevices, 'fas fa-laptop', 'neutral'],
         ['Events in Period', metrics.totalEvents, 'fas fa-wave-square', 'neutral']
     ].filter(([, value]) => value !== undefined && value !== null);
+    const kpiEvidence = {
+        'Total Sign-ins': { eventType: 'signinattempts' },
+        'Successful Sign-ins': { eventType: 'signinattempts', result: 'successful' },
+        'Failed Sign-ins': { eventType: 'signinattempts', result: 'failed' },
+        'Total Audit Events': { eventType: 'auditevents' },
+        'Item Usage Events': { eventType: 'itemusages' },
+        'Events in Period': {}
+    };
     const signinRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.user)}</td><td>${event.result ? `<span class="credential-result credential-result-${esc(event.result)}">${esc(event.result)}</span>` : 'Not reported'}</td><td>${esc(event.eventType)}</td><td>${esc(event.platform)}</td><td>${esc(event.location)}</td></tr>`;
     const auditRow = event => `<tr><td>${esc(formatOnePasswordEventDate(event.timestamp))}</td><td>${esc(event.actor)}</td><td>${esc(event.action)}</td><td>${esc(event.objectType)}</td><td>${esc(event.objectId)}</td><td>${esc(event.location)}</td></tr>`;
     const hasSignInTimeline = Array.isArray(signIns.timeline) && signIns.timeline.length;
@@ -11909,15 +12215,21 @@ function renderSunbirdCredentialSecurityDashboard(data) {
         return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
     };
     content.innerHTML = `
-      <section class="credential-analytics-toolbar" aria-label="Analytics period"><div><span class="credential-eyebrow">ANALYTICS WINDOW</span><strong>${esc(analytics.range?.startAt ? `${formatOnePasswordEventDate(analytics.range.startAt)} – ${formatOnePasswordEventDate(analytics.range.endAt)}` : 'Selected period')}</strong></div><label>Period <select data-credential-period><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label><div class="credential-custom-range ${onePasswordAnalyticsPeriod === 'custom' ? '' : 'is-hidden'}" data-custom-range><label>From <input type="date" data-range-start></label><label>To <input type="date" data-range-end></label><button type="button" data-range-apply>Apply</button></div></section>
-      <section class="credential-kpi-grid" aria-label="Credential Security KPIs">${kpis.map(([label, value, icon, tone]) => `<article class="credential-kpi credential-glass credential-glass-${tone}"><i class="${icon}" aria-hidden="true"></i><span>${esc(label)}</span><strong>${esc(value)}</strong><small>Selected period</small></article>`).join('')}</section>
-      ${(hasSignInTimeline || signIns.successful !== undefined) ? `<section class="credential-analytics-section credential-auth-overview"><div class="credential-section-title"><div><span>AUTHENTICATION ANALYTICS</span><h3>Sign-in activity</h3></div><p>Charts reflect retained 1Password event metadata only.</p></div><div class="credential-auth-hero">${hasSignInTimeline ? trendChart('Sign-ins over time', signIns.timeline) : ''}${resultDonut()}</div></section>` : ''}
-      ${(signIns.byUser?.length || signIns.byCountry?.length || signIns.byPlatform?.length || signIns.byType?.length || signIns.byHour?.length) ? `<section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUTHENTICATION PATTERNS</span><h3>Where activity is happening</h3></div><p>Ranked records use actual event counts.</p></div><div class="credential-chart-grid">${rankedChart('By user', signIns.byUser)}${rankedChart('By country', signIns.byCountry)}${rankedChart('By platform', signIns.byPlatform)}${rankedChart('By event type', signIns.byType)}${rankedChart('Activity by hour', signIns.byHour)}</div></section>` : ''}
-      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Only explicitly classified failed attempts appear here.</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins recorded for the selected period.</td></tr>'}</tbody></table></div></div></section>` : ''}
+      <section class="credential-analytics-toolbar" aria-label="Analytics period"><div><span class="credential-eyebrow">ANALYTICS WINDOW</span><strong>${esc(analytics.range?.startAt ? `${formatOnePasswordEventDate(analytics.range.startAt)} – ${formatOnePasswordEventDate(analytics.range.endAt)}` : 'Selected period')}</strong></div><label>Period <select data-credential-period><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label><div class="credential-custom-range ${onePasswordAnalyticsPeriod === 'custom' ? '' : 'is-hidden'}" data-custom-range><label>From <input type="date" data-range-start></label><label>To <input type="date" data-range-end></label><button type="button" data-range-apply>Apply</button></div><button type="button" class="credential-evidence-browse" data-credential-evidence-open data-evidence-filter="{}" data-evidence-label="All event feeds">Browse loaded event evidence</button></section>
+      <section class="credential-kpi-grid" aria-label="Credential Security KPIs">${kpis.map(([label, value, icon, tone]) => {
+          const evidenceFilter = kpiEvidence[label];
+          const valueContent = evidenceFilter
+              ? renderCredentialEvidenceHost(data, evidenceFilter, label, `<strong>${esc(value)}</strong><span class="credential-evidence-cue">Preview evidence</span>`, 'credential-evidence-kpi')
+              : `<strong>${esc(value)}</strong>`;
+          return `<article class="credential-kpi credential-glass credential-glass-${tone}"><i class="${icon}" aria-hidden="true"></i><span>${esc(label)}</span>${valueContent}<small>Selected period</small></article>`;
+      }).join('')}</section>
+      ${(hasSignInTimeline || signIns.successful !== undefined) ? `<section class="credential-analytics-section credential-auth-overview"><div class="credential-section-title"><div><span>AUTHENTICATION ANALYTICS</span><h3>Sign-in activity</h3></div><p>Charts reflect retained 1Password event metadata only.</p></div><div class="credential-auth-hero">${hasSignInTimeline ? trendChart('Sign-ins over time', signIns.timeline, 'total', 'neutral', 'signinattempts') : ''}${resultDonut()}</div></section>` : ''}
+      ${(signIns.byUser?.length || signIns.byCountry?.length || signIns.byPlatform?.length || signIns.byType?.length || signIns.byHour?.length) ? `<section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUTHENTICATION PATTERNS</span><h3>Where activity is happening</h3></div><p>Ranked records use actual event counts.</p></div><div class="credential-chart-grid">${rankedChart('By user', signIns.byUser, 'neutral', { eventType: 'signinattempts', dimension: 'user' })}${rankedChart('By country', signIns.byCountry, 'neutral', { eventType: 'signinattempts', dimension: 'country' })}${rankedChart('By platform', signIns.byPlatform, 'neutral', { eventType: 'signinattempts', dimension: 'platform' })}${rankedChart('By event type', signIns.byType, 'neutral', { eventType: 'signinattempts', dimension: 'type' })}${rankedChart('Activity by hour', signIns.byHour)}</div></section>` : ''}
+      ${metrics.failedSignIns !== undefined ? `<section class="credential-analytics-section credential-failed-section credential-glass credential-glass-warning"><div class="credential-section-title"><div><span>FAILED AUTHENTICATION</span><h3>Most recent failed attempts</h3></div><p>Only explicitly classified failed attempts appear here.</p></div><div class="credential-failed-layout">${trendChart('Failed attempts over time', (signIns.timeline || []).filter(point => count(point.failed)), 'failed', 'warning', 'signinattempts')}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.filter(event => event.result === 'failed').map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No failed sign-ins recorded for the selected period.</td></tr>'}</tbody></table></div></div></section>` : ''}
       <section class="credential-analytics-section"><div class="credential-section-title"><div><span>RECENT AUTHENTICATION</span><h3>Authentication activity</h3></div><p>Actual 1Password sign-in records.</p></div><div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Timestamp</th><th>User</th><th>Result</th><th>Event type</th><th>Platform</th><th>Location</th></tr></thead><tbody>${signIns.recent?.map(signinRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No sign-in events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
-      <section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUDIT EVENTS</span><h3>Audit detail</h3></div><p>${audit.total !== undefined ? `${esc(audit.total)} audit events in the selected period.` : 'Audit totals are not available for this period.'}</p></div>${hasAuditTimeline ? `<div class="credential-audit-trend">${trendChart('Audit activity over time', audit.timeline)}</div>` : ''}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object type</th><th>Object ID</th><th>Location</th></tr></thead><tbody>${audit.recent?.map(auditRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No audit events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
+      <section class="credential-analytics-section"><div class="credential-section-title"><div><span>AUDIT EVENTS</span><h3>Audit detail</h3></div><p>${audit.total !== undefined ? `${esc(audit.total)} audit events in the selected period.` : 'Audit totals are not available for this period.'}</p></div>${hasAuditTimeline ? `<div class="credential-audit-trend">${trendChart('Audit activity over time', audit.timeline, 'total', 'neutral', 'auditevents')}</div>` : ''}<div class="network-dashboard-table-wrap"><table class="network-dashboard-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object type</th><th>Object ID</th><th>Location</th></tr></thead><tbody>${audit.recent?.map(auditRow).join('') || '<tr><td colspan="6" class="sunbird-empty-row">No audit events recorded for the selected period.</td></tr>'}</tbody></table></div></section>
       ${metrics.itemUsageEvents === 0 ? '<div class="credential-empty-state"><i class="fas fa-key" aria-hidden="true"></i>No item usage events recorded for the selected period.</div>' : ''}
-      ${(summaries.countries?.length || summaries.platforms?.length || summaries.eventTypes?.length) ? `<section class="credential-summary-grid">${rankedChart('Geographic summary', summaries.countries)}${rankedChart('Client / platform summary', summaries.platforms)}${rankedChart('Event types', summaries.eventTypes)}</section>` : ''}
+      ${(summaries.countries?.length || summaries.platforms?.length || summaries.eventTypes?.length) ? `<section class="credential-summary-grid">${rankedChart('Geographic summary', summaries.countries, 'neutral', { dimension: 'country' })}${rankedChart('Client / platform summary', summaries.platforms, 'neutral', { dimension: 'platform' })}${rankedChart('Event types', summaries.eventTypes, 'neutral', { dimension: 'event' })}</section>` : ''}
       <section class="credential-health"><div class="credential-section-title"><div><span>INTEGRATION HEALTH</span><h3>1Password sync status</h3></div><p>Persisted integration state per feed.</p></div><div class="credential-health-grid">${healthCards || '<p class="sunbird-empty-row">Sync metadata is not available yet.</p>'}</div></section>`;
     const selector = content.querySelector('[data-credential-period]');
     selector.value = onePasswordAnalyticsPeriod;

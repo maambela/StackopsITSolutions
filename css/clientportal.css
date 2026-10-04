@@ -4712,7 +4712,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   background: rgba(17, 28, 43, 0.7);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.045);
 }
-.credential-kpi::after { content: ''; position: absolute; right: -24px; bottom: -40px; width: 96px; height: 96px; border: 1px solid rgba(103, 232, 249, 0.12); border-radius: 50%; }
 .credential-kpi i { color: #67e8f9; font-size: 0.82rem; }
 .credential-kpi span { display: block; margin-top: 10px; color: rgba(229, 238, 251, 0.62); font-size: 0.7rem; }
 .credential-kpi strong { display: block; margin-top: 2px; color: #f8fafc; font-size: 1.55rem; font-weight: 300; font-variant-numeric: tabular-nums; }
@@ -4919,15 +4918,6 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   padding: 15px;
 }
 
-.credential-kpi::after {
-  right: -27px;
-  bottom: -45px;
-  width: 105px;
-  height: 105px;
-  border-color: var(--credential-accent);
-  opacity: 0.3;
-}
-
 .credential-kpi i {
   color: var(--credential-accent);
   font-size: 0.9rem;
@@ -4946,6 +4936,283 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 }
 
 .credential-kpi small { color: var(--credential-faint); }
+
+.credential-evidence-host {
+  position: relative;
+  min-width: 0;
+}
+
+.credential-evidence-trigger {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.credential-evidence-trigger:focus-visible,
+.credential-evidence-actions button:focus-visible,
+.credential-evidence-browse:focus-visible,
+.credential-evidence-modal-close:focus-visible {
+  outline: 2px solid #a5f3fc;
+  outline-offset: 3px;
+}
+
+.credential-evidence-kpi { margin-top: 1px; }
+.credential-evidence-kpi .credential-evidence-trigger strong { margin-top: 2px; }
+.credential-evidence-kpi .credential-evidence-cue {
+  margin-top: 2px;
+  color: var(--credential-accent);
+  font-size: 0.63rem;
+}
+
+.credential-kpi.credential-evidence-elevated,
+.credential-chart.credential-evidence-elevated { z-index: 40; }
+
+.credential-evidence-preview {
+  position: fixed;
+  z-index: 80;
+  display: none;
+  gap: 9px;
+  width: min(340px, calc(100vw - 28px));
+  max-height: min(380px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(103, 232, 249, 0.36);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(13, 36, 53, 0.98), rgba(8, 14, 26, 0.98));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48), 0 0 20px rgba(34, 211, 238, 0.12);
+  color: var(--credential-white);
+}
+
+.credential-evidence-preview.is-open { display: grid; }
+.credential-evidence-preview > p {
+  margin: 0;
+  color: var(--credential-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.credential-evidence-samples,
+.credential-evidence-actions { display: grid; gap: 7px; }
+.credential-evidence-samples em { color: var(--credential-faint); font-size: 0.74rem; }
+.credential-evidence-sample {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 7px;
+  background: rgba(5, 13, 23, 0.6);
+  min-width: 0;
+}
+
+.credential-evidence-sample strong {
+  color: var(--credential-white);
+  font-size: 0.72rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.credential-evidence-sample span,
+.credential-evidence-sample small {
+  color: var(--credential-muted);
+  font-size: 0.67rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.credential-donut-legend li > .credential-evidence-donut-host { flex: 1; }
+.credential-evidence-donut-host .credential-evidence-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: inherit;
+  font-size: inherit;
+}
+
+.credential-evidence-donut-host .credential-evidence-trigger > span { margin: 0; color: inherit; font-size: inherit; }
+.credential-evidence-donut-host .credential-evidence-trigger > strong { margin-left: auto; color: var(--credential-white); font-size: 0.84rem; font-weight: 600; }
+
+.credential-evidence-actions { grid-template-columns: 1fr auto; align-items: center; }
+.credential-evidence-actions button,
+.credential-evidence-browse,
+.credential-evidence-modal-close {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid rgba(103, 232, 249, 0.35);
+  border-radius: 7px;
+  background: rgba(8, 47, 73, 0.62);
+  color: var(--credential-white);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.credential-evidence-actions button:hover,
+.credential-evidence-browse:hover,
+.credential-evidence-modal-close:hover { background: rgba(8, 70, 91, 0.8); }
+.credential-evidence-actions button:last-child { border-color: rgba(148, 163, 184, 0.24); background: rgba(15, 23, 42, 0.5); }
+.credential-evidence-browse { white-space: nowrap; }
+
+.credential-chart-bars li > .credential-evidence-rank-host {
+  grid-column: 1 / -1;
+}
+
+.credential-evidence-rank-host .credential-evidence-trigger {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.9fr) minmax(84px, 1.7fr) 38px;
+  align-items: center;
+  gap: 9px;
+  min-height: 26px;
+  padding: 2px 0;
+}
+
+.credential-evidence-rank-host .credential-evidence-trigger > span:first-child {
+  overflow: hidden;
+  color: var(--credential-muted);
+  font-size: 0.69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credential-evidence-rank-host .credential-evidence-trigger > strong {
+  color: var(--credential-white);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.credential-line-chart { position: relative; }
+.credential-line-chart::before { pointer-events: none; }
+.credential-evidence-chart-point {
+  position: absolute;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+}
+
+.credential-evidence-chart-point .credential-evidence-trigger {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.credential-evidence-point-dot {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--credential-accent);
+  border-radius: 50%;
+  background: #0b111b;
+  box-shadow: 0 0 0 5px rgba(103, 232, 249, 0.08);
+}
+
+.credential-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.credential-evidence-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+
+.credential-evidence-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.credential-evidence-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(780px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid rgba(103, 232, 249, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(14, 31, 47, 0.98), rgba(7, 13, 23, 0.98));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58);
+  color: var(--credential-white);
+}
+
+.credential-evidence-panel:focus { outline: none; }
+.credential-evidence-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.credential-evidence-header h3 { margin: 4px 0; font-size: 1.15rem; }
+.credential-evidence-header p { max-width: 70ch; margin: 0; color: var(--credential-muted); font-size: 0.75rem; line-height: 1.5; }
+.credential-evidence-modal-close { flex: none; }
+.credential-evidence-controls { display: flex; align-items: center; gap: 9px; padding: 12px 16px; }
+.credential-evidence-controls label { color: var(--credential-muted); font-size: 0.74rem; }
+.credential-evidence-controls select {
+  min-height: 34px;
+  padding: 5px 28px 5px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  background: rgba(2, 13, 25, 0.75);
+  color: var(--credential-white);
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.credential-evidence-list { display: grid; gap: 8px; overflow: auto; padding: 0 16px 16px; }
+.credential-evidence-event {
+  padding: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  background: rgba(5, 13, 23, 0.58);
+}
+
+.credential-evidence-event > div { display: flex; justify-content: space-between; gap: 12px; }
+.credential-evidence-event > div strong { color: var(--credential-accent); font-size: 0.77rem; }
+.credential-evidence-event time { color: var(--credential-muted); font-size: 0.68rem; text-align: right; }
+.credential-evidence-event dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 0; font-size: 0.72rem; }
+.credential-evidence-event dt { color: var(--credential-faint); }
+.credential-evidence-event dd { min-width: 0; margin: 0; color: var(--credential-white); overflow-wrap: anywhere; }
+.credential-evidence-empty { margin: 0; padding: 18px 10px; color: var(--credential-muted); text-align: center; }
+
+@media (max-width: 680px) {
+  .credential-analytics-toolbar > div:first-child { width: 100%; }
+  .credential-evidence-browse { width: 100%; }
+  .credential-evidence-header { flex-direction: column; }
+  .credential-evidence-modal-close { align-self: flex-end; }
+  .credential-evidence-actions { grid-template-columns: 1fr; }
+  .credential-evidence-rank-host .credential-evidence-trigger {
+    grid-template-columns: minmax(0, 0.85fr) minmax(50px, 1.2fr) 32px;
+    gap: 7px;
+  }
+  .credential-evidence-event > div { flex-direction: column; gap: 4px; }
+  .credential-evidence-event time { text-align: left; }
+}
 
 .credential-analytics-section,
 .credential-health {
@@ -15994,10 +16261,6 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     rgba(0, 0, 0, 0.42) 50%,
     rgba(255, 255, 255, 0) 100%
   );
-}
-
-.project-card[data-project-id="9"].credential-security-status-success {
-  border-color: rgba(34, 197, 94, 0.72);
 }
 
 .project-card[data-project-id="9"].credential-security-status-warning {
