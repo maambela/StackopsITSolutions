@@ -5230,11 +5230,20 @@ function renderSunbirdSecurityShell() {
             </section>
 
             <div class="sunbird-security-whatsapp-test">
-                <button id="sunbird-security-whatsapp-test-btn" class="sunbird-security-whatsapp-btn" type="button">
-                    <i class="fab fa-whatsapp" aria-hidden="true"></i>
-                    <span>Send security alert test</span>
-                </button>
-                <p id="sunbird-security-whatsapp-test-status" aria-live="polite"></p>
+                <div class="sunbird-security-whatsapp-test-action">
+                    <button id="sunbird-security-whatsapp-test-btn" class="sunbird-security-whatsapp-btn" type="button">
+                        <i class="fab fa-whatsapp" aria-hidden="true"></i>
+                        <span>Send security alert test</span>
+                    </button>
+                    <p id="sunbird-security-whatsapp-test-status" aria-live="polite"></p>
+                </div>
+                <div class="sunbird-security-whatsapp-test-action">
+                    <button id="sunbird-security-whatsapp-hello-world-btn" class="sunbird-security-whatsapp-btn" type="button">
+                        <i class="fab fa-whatsapp" aria-hidden="true"></i>
+                        <span>Test hello_world template</span>
+                    </button>
+                    <p id="sunbird-security-whatsapp-hello-world-status" aria-live="polite"></p>
+                </div>
             </div>
         </section>
         <div id="sunbird-security-evidence-modal" class="sunbird-id-modal" aria-hidden="true"></div>
@@ -5244,6 +5253,7 @@ function renderSunbirdSecurityShell() {
 function setupSunbirdSecurityDashboard() {
     document.getElementById('sunbird-security-back')?.addEventListener('click', goBackToProjects);
     document.getElementById('sunbird-security-whatsapp-test-btn')?.addEventListener('click', sendLatestSunbirdSecurityAlertToWhatsApp);
+    document.getElementById('sunbird-security-whatsapp-hello-world-btn')?.addEventListener('click', sendSunbirdWhatsAppHelloWorldTest);
     document.getElementById('sunbird-security-search')?.addEventListener('input', event => {
         sunbirdSecurityTableState.search = event.target.value;
         renderSunbirdSecurityTable();
@@ -5276,8 +5286,26 @@ function setupSunbirdSecurityDashboard() {
 }
 
 async function sendLatestSunbirdSecurityAlertToWhatsApp() {
-    const button = document.getElementById('sunbird-security-whatsapp-test-btn');
-    const status = document.getElementById('sunbird-security-whatsapp-test-status');
+    await sendSunbirdWhatsAppTest({
+        endpoint: '/api/whatsapp/test-hello',
+        buttonId: 'sunbird-security-whatsapp-test-btn',
+        statusId: 'sunbird-security-whatsapp-test-status',
+        loadingText: 'Sending security alert test...'
+    });
+}
+
+async function sendSunbirdWhatsAppHelloWorldTest() {
+    await sendSunbirdWhatsAppTest({
+        endpoint: '/api/whatsapp/test-hello-world',
+        buttonId: 'sunbird-security-whatsapp-hello-world-btn',
+        statusId: 'sunbird-security-whatsapp-hello-world-status',
+        loadingText: 'Sending hello_world test...'
+    });
+}
+
+async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingText }) {
+    const button = document.getElementById(buttonId);
+    const status = document.getElementById(statusId);
     const token = localStorage.getItem('authToken');
 
     if (!token) {
@@ -5293,12 +5321,12 @@ async function sendLatestSunbirdSecurityAlertToWhatsApp() {
         button.classList.add('is-loading');
     }
     if (status) {
-        status.textContent = 'Sending security alert test...';
+        status.textContent = loadingText;
         status.className = '';
     }
 
     try {
-        const response = await fetch('/api/whatsapp/test-hello', {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,

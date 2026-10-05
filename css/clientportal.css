@@ -12262,11 +12262,19 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 
 .sunbird-security-whatsapp-test {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 20px;
+  margin: 18px 0 4px;
+  padding-bottom: 8px;
+}
+
+.sunbird-security-whatsapp-test-action {
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  margin: 18px 0 4px;
-  padding-bottom: 8px;
 }
 
 .sunbird-security-whatsapp-btn {

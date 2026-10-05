@@ -17,6 +17,7 @@ const {
     getSecurityAlertSeverities,
     normalizeSeverity: normalizeWhatsAppSeverity,
     normalizeWhatsAppRecipient,
+    sendHelloWorldTest,
     sendSecurityAlert
 } = require('./services/whatsapp');
 const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');
@@ -15512,6 +15513,60 @@ app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
         res.status(error.response?.status || 500).json({
             success: false,
             error: "Failed to send WhatsApp security alert test",
+            message: error.response?.data?.error?.message || error.message,
+            details: error.response?.data || null,
+            recipient
+        });
+    }
+});
+
+/**
+ * Route: POST /api/whatsapp/test-hello-world
+ * Sends Meta's standard hello_world template to the configured test recipient.
+ */
+app.post("/api/whatsapp/test-hello-world", authenticateToken, async (req, res) => {
+    let recipient = null;
+    try {
+        const tenant = getTenantByEmail(req.user?.email);
+        if (!tenant || tenant.clientId !== 'sunbird') {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied',
+                message: 'This feature is only available for Sunbird client'
+            });
+        }
+
+        const config = await getWhatsAppSecurityAlertConfig({ requireEnabled: false });
+        if (!config.token || !config.phoneNumberId) {
+            throw new Error("WhatsApp credentials are missing. Configure WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.");
+        }
+
+        recipient = normalizeWhatsAppRecipient(config.recipient);
+        console.log(`[WhatsApp Hello World Test] Sending hello_world to ${recipient}`);
+
+        const response = await sendHelloWorldTest({ ...config, recipient });
+        const messageId = response.messages?.[0]?.id || null;
+        console.log("[WhatsApp Hello World Test] Meta accepted message", {
+            messageId,
+            recipient,
+            templateName: response.templateName,
+            templateLanguage: 'en_US'
+        });
+
+        res.json({
+            success: true,
+            recipient,
+            messageId,
+            templateName: response.templateName,
+            templateLanguage: 'en_US',
+            response
+        });
+    } catch (error) {
+        const detail = error.response?.data || error.message;
+        console.error("[WhatsApp Hello World Test] Failed", detail);
+        res.status(error.response?.status || 500).json({
+            success: false,
+            error: "Failed to send WhatsApp hello_world test",
             message: error.response?.data?.error?.message || error.message,
             details: error.response?.data || null,
             recipient

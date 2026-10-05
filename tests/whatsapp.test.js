@@ -6,6 +6,7 @@ const {
   buildSecurityAlertNotificationKey,
   getSecurityAlertSeverities,
   normalizeWhatsAppRecipient,
+  sendHelloWorldTest,
   sendSecurityAlert
 } = require('../services/whatsapp');
 
@@ -68,6 +69,32 @@ test('WhatsApp security alert template sends its configured image header and fiv
     });
     assert.equal(components[1].type, 'body');
     assert.equal(components[1].parameters.length, 5);
+  } finally {
+    axios.post = originalPost;
+  }
+});
+
+test('WhatsApp hello_world test sends the fixed Meta template without security-alert components', async () => {
+  const originalPost = axios.post;
+  let requestBody;
+  axios.post = async (_url, body) => {
+    requestBody = body;
+    return { data: { messages: [{ id: 'wamid.hello-world-test' }] } };
+  };
+
+  try {
+    const response = await sendHelloWorldTest({
+      token: 'test-token',
+      phoneNumberId: 'test-phone-number',
+      recipient: '27762609804'
+    });
+
+    assert.deepEqual(requestBody.template, {
+      name: 'hello_world',
+      language: { code: 'en_US' }
+    });
+    assert.equal(response.templateName, 'hello_world');
+    assert.equal(response.recipient, '27762609804');
   } finally {
     axios.post = originalPost;
   }
