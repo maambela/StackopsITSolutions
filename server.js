@@ -21,6 +21,11 @@ const {
     sendSecurityAlert
 } = require('./services/whatsapp');
 const { createWhatsAppNotificationLedger } = require('./services/whatsapp-notification-ledger');
+const {
+    constantTimeStringEqual,
+    extractWhatsAppStatusEvents,
+    verifyMetaWebhookSignature
+} = require('./services/whatsapp-webhook');
 const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');
 const { createAzureOpenAIService } = require('./services/azure-openai');
 const { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');
@@ -15513,6 +15518,70 @@ app.post("/api/whatsapp/test-hello-world", authenticateToken, async (req, res) =
             details: error.response?.data || null,
             recipient
         });
+    }
+});
+
+/**
+ * Meta WhatsApp webhook verification and message-status callback.
+ */
+app.get('/api/webhooks/whatsapp', async (req, res) => {
+    try {
+        const verifyToken = await getSecret('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+        const mode = req.query['hub.mode'];
+        const suppliedToken = req.query['hub.verify_token'];
+        const challenge = req.query['hub.challenge'];
+
+        if (mode !== 'subscribe' || !verifyToken || !constantTimeStringEqual(suppliedToken, verifyToken) || typeof challenge !== 'string') {
+            console.warn('[WhatsApp Webhook] Verification rejected.');
+            return res.sendStatus(403);
+        }
+
+        console.info('[WhatsApp Webhook] Verification completed.');
+        return res.status(200).send(challenge);
+    } catch (error) {
+        console.error('[WhatsApp Webhook] Verification failed:', error);
+        return res.sendStatus(500);
+    }
+});
+
+app.post('/api/webhooks/whatsapp', async (req, res) => {
+    try {
+        const appSecret = await getSecret('WHATSAPP_APP_SECRET');
+        const signature = req.get('x-hub-signature-256');
+        if (!appSecret) {
+            console.error('[WhatsApp Webhook] WHATSAPP_APP_SECRET is not configured.');
+            return res.sendStatus(500);
+        }
+        if (!verifyMetaWebhookSignature(req.rawBody, signature, appSecret)) {
+            console.warn('[WhatsApp Webhook] Rejected callback with invalid signature.');
+            return res.sendStatus(403);
+        }
+
+        const events = extractWhatsAppStatusEvents(req.body);
+        for (const event of events) {
+            const details = {
+                messageId: event.messageId,
+                recipientId: event.recipientId,
+                status: event.status,
+                timestamp: event.timestamp,
+                phoneNumberId: event.phoneNumberId,
+                wabaId: event.wabaId
+            };
+
+            if (event.status === 'failed') {
+                console.error('[WhatsApp Webhook] Message delivery failed:', {
+                    ...details,
+                    errors: event.errors
+                });
+            } else {
+                console.info('[WhatsApp Webhook] Message status:', details);
+            }
+        }
+
+        return res.sendStatus(200);
+    } catch (error) {
+        console.error('[WhatsApp Webhook] Callback processing failed:', error);
+        return res.sendStatus(500);
     }
 });
 
