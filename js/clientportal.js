@@ -5311,7 +5311,7 @@ async function sendLatestSunbirdSecurityAlertToWhatsApp() {
         }
 
         if (status) {
-            status.textContent = `Meta accepted security_alert: ${data.messageId || 'No message ID returned'}`;
+            status.textContent = `Meta accepted ${data.templateName || 'WhatsApp template'}: ${data.messageId || 'No message ID returned'}`;
             status.className = 'success';
         }
     } catch (error) {
