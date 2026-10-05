@@ -14604,7 +14604,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_PHONE_NUMBER_ID'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_RECIPIENT', 'WHATSAPP_RECIPIENT'], '27762609804'),
             readWhatsAppConfigValue('WHATSAPP_GRAPH_VERSION', 'v25.0'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_alert'),
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alert'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
@@ -15446,7 +15446,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
 
 /**
  * Route: POST /api/whatsapp/test-hello
- * Sends the configured security_alert template with safe sample values.
+ * Sends the configured security alert template with safe sample values.
  */
 app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
     let recipient = null;
@@ -15474,7 +15474,7 @@ app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
             action: req.body?.action || "Review the event immediately"
         };
 
-        console.log(`[WhatsApp Test] Sending ${config.templateName || "security_alert"} to ${recipient}`);
+        console.log(`[WhatsApp Test] Sending ${config.templateName || "security_monitoring_alert"} to ${recipient}`);
 
         const response = await sendSecurityAlert(sampleAlert, { ...config, recipient });
         const messageId = response.messages?.[0]?.id || null;
@@ -15498,7 +15498,7 @@ app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
         console.error("[WhatsApp Test] Failed", detail);
         res.status(error.response?.status || 500).json({
             success: false,
-            error: "Failed to send WhatsApp security_alert test",
+            error: "Failed to send WhatsApp security alert test",
             message: error.response?.data?.error?.message || error.message,
             details: error.response?.data || null,
             recipient
