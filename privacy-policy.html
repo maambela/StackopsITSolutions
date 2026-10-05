@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10151b">
+  <meta name="description" content="Learn how StackOps IT Solutions handles personal information when you use our website and services.">
+  <title>Privacy Policy | StackOps IT Solutions</title>
+  <link rel="stylesheet" href="/latest.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --policy-ink: #f6f7f8;
+      --policy-muted: #c3c9ce;
+      --policy-dim: #9fa9b1;
+      --policy-line: rgba(255, 255, 255, .14);
+      --policy-accent: rgba(255, 255, 255, .78);
+      --policy-accent-soft: rgba(255, 255, 255, .07);
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--policy-ink);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      overflow-x: hidden;
+    }
+
+    .policy-skip {
+      position: absolute;
+      z-index: 10;
+      top: 18px;
+      left: 18px;
+      padding: 11px 15px;
+      transform: translateY(-170%);
+      border: 1px solid rgba(255, 255, 255, .22);
+      border-radius: 8px;
+      background: rgba(15, 18, 24, .9);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .policy-skip:focus {
+      transform: translateY(0);
+    }
+
+    @media (min-width: 1025px) and (max-height: 900px) {
+      .navbar {
+        width: calc(100% - 32px);
+        margin: 8px 16px 0;
+        padding: 0.62rem 2rem;
+        border-radius: 34px;
+      }
+
+      .navbar .logo img { width: 106px; }
+    }
+
+    .policy-shell {
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 26px 0 0;
+    }
+
+    .policy-intro {
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 18px;
+      padding: clamp(26px, 5vw, 56px);
+      border: 1px solid rgba(255, 255, 255, .19);
+      border-radius: 22px;
+      background: rgba(0, 0, 0, .48);
+      box-shadow: 0 16px 42px rgba(0, 0, 0, .2);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+    }
+
+    .policy-kicker {
+      margin: 0 0 15px;
+      color: var(--policy-muted);
+      font-size: .74rem;
+      font-weight: 700;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    .policy-intro h1 {
+      max-width: 780px;
+      margin: 0;
+      color: #fff;
+      font-size: clamp(2.35rem, 5vw, 4.2rem);
+      font-weight: 600;
+      letter-spacing: -.055em;
+      line-height: 1.02;
+    }
+
+    .policy-summary {
+      max-width: 680px;
+      margin: 19px 0 0;
+      color: #d7d9db;
+      font-size: clamp(1rem, 1.5vw, 1.15rem);
+      line-height: 1.7;
+    }
+
+    .policy-updated {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin: 25px 0 0;
+      color: #fff;
+      font-size: .86rem;
+      font-weight: 600;
+    }
+
+    .policy-updated::before {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--policy-accent);
+      content: "";
+    }
+
+    .policy-layout {
+      display: grid;
+      grid-template-columns: minmax(190px, .34fr) minmax(0, 1fr);
+      align-items: start;
+      gap: 18px;
+      padding-bottom: 22px;
+    }
+
+    .policy-toc,
+    .policy-article {
+      border: 1px solid rgba(255, 255, 255, .18);
+      background: rgba(0, 0, 0, .52);
+      box-shadow: 0 14px 42px rgba(0, 0, 0, .18);
+      -webkit-backdrop-filter: blur(15px);
+      backdrop-filter: blur(15px);
+    }
+
+    .policy-toc {
+      position: sticky;
+      top: 20px;
+      padding: 21px 17px;
+      border-radius: 16px;
+    }
+
+    .policy-toc h2 {
+      margin: 0 0 14px;
+      color: #fff;
+      font-size: .76rem;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .policy-toc ol {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .policy-toc a {
+      display: block;
+      padding: 7px 8px;
+      border-left: 2px solid transparent;
+      color: var(--policy-muted);
+      font-size: .84rem;
+      line-height: 1.4;
+      text-decoration: none;
+      transition: color .18s ease, background .18s ease, border-color .18s ease;
+    }
+
+    .policy-toc a:hover,
+    .policy-toc a:focus-visible {
+      border-left-color: var(--policy-accent);
+      background: var(--policy-accent-soft);
+      color: #fff;
+    }
+
+    .policy-article {
+      min-width: 0;
+      padding: clamp(24px, 5vw, 52px);
+      border-radius: 16px;
+    }
+
+    .policy-article section + section {
+      margin-top: 34px;
+      padding-top: 30px;
+      border-top: 1px solid var(--policy-line);
+    }
+
+    .policy-article h2 {
+      display: flex;
+      align-items: baseline;
+      gap: 13px;
+      margin: 0 0 13px;
+      color: #fff;
+      font-size: clamp(1.16rem, 2.2vw, 1.42rem);
+      font-weight: 650;
+      letter-spacing: -.02em;
+      line-height: 1.35;
+      scroll-margin-top: 24px;
+    }
+
+    .policy-article h2 span {
+      flex: 0 0 auto;
+      color: var(--policy-muted);
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+
+    .policy-article p,
+    .policy-article li {
+      color: var(--policy-muted);
+      font-size: .98rem;
+      line-height: 1.78;
+      overflow-wrap: anywhere;
+    }
+
+    .policy-article p { margin: 0; }
+    .policy-article p + p { margin-top: 12px; }
+
+    .policy-article ul {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 0;
+      padding-left: 22px;
+    }
+
+    .policy-article li::marker { color: var(--policy-muted); }
+
+    .policy-article a {
+      color: #f4f4f4;
+      text-decoration-color: rgba(255, 255, 255, .55);
+      text-underline-offset: 3px;
+    }
+
+    .policy-article a:hover { color: #fff; }
+
+    .policy-contact {
+      margin-top: 17px;
+      padding: 16px 18px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 8px;
+      background: var(--policy-accent-soft);
+    }
+
+    .policy-footnote {
+      margin-top: 22px !important;
+      color: var(--policy-dim) !important;
+      font-size: .87rem !important;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(255, 255, 255, .82);
+      outline-offset: 3px;
+    }
+
+    .stackops-site-footer {
+      position: relative;
+      width: 96%;
+      margin: 26px auto;
+      padding: 44px clamp(24px, 4vw, 64px) 76px;
+      border-radius: 42px;
+      background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.032));
+      border: 1px solid rgba(255,255,255,.11);
+      backdrop-filter: blur(22px) saturate(145%);
+      -webkit-backdrop-filter: blur(22px) saturate(145%);
+      color: rgba(255,255,255,.70);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+    }
+
+    .stackops-footer-grid {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.2fr) repeat(5, minmax(132px, 1fr));
+      gap: 30px;
+      align-items: start;
+    }
+
+    .stackops-footer-logo {
+      grid-column: 1;
+      grid-row: 1;
+      justify-self: start;
+      align-self: start;
+      max-width: 250px;
+      padding-top: 61px;
+      text-align: left;
+      min-height: 150px;
+    }
+
+    .stackops-footer-logo img {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      display: block;
+      width: clamp(104px, 26vw, 124px);
+      height: 45px;
+      object-fit: contain;
+      object-position: left center;
+      margin: 0;
+    }
+
+    .stackops-footer-logo p,
+    .stackops-site-footer p,
+    .stackops-site-footer a,
+    .stackops-site-footer li {
+      color: rgba(255,255,255,.60);
+      font-size: .94rem;
+      line-height: 1.7;
+      font-weight: 200;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .stackops-site-footer h3 {
+      font-size: 1rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin: 0 0 15px;
+      color: rgba(255,255,255,.74);
+      font-weight: 200;
+      line-height: 1.6;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .stackops-site-footer ul {
+      list-style: none;
+      display: grid;
+      gap: 8px;
+      padding: 0;
+      margin: 0;
+    }
+
+    .stackops-site-footer p { margin: 0 0 6px; }
+
+    .stackops-footer-logo p {
+      position: absolute;
+      top: 98px;
+      left: 30px;
+      width: min(250px, calc(100% - 60px));
+      max-width: 250px;
+      margin: 0;
+    }
+
+    .stackops-site-footer a {
+      text-decoration: none;
+      transition: color .25s ease;
+    }
+
+    .stackops-site-footer a:hover { color: #fff; }
+
+    .stackops-footer-socials {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .stackops-footer-socials a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      color: rgba(255,255,255,.72);
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12);
+      transition: transform .25s ease, background .25s ease, color .25s ease, border-color .25s ease;
+    }
+
+    .stackops-footer-socials a:hover {
+      transform: translateY(-3px);
+      color: #fff;
+      background: rgba(72,216,255,.16);
+      border-color: rgba(72,216,255,.36);
+    }
+
+    .stackops-footer-socials i {
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .stackops-footer-copyright {
+      position: absolute;
+      left: 30px;
+      right: 40px;
+      bottom: 34px;
+      color: rgba(255,255,255,.42);
+      font-size: .86rem;
+      font-weight: 200;
+      line-height: 1.6;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    @media (max-width: 760px) {
+      .policy-shell { width: min(100% - 32px, 620px); }
+      .policy-layout { grid-template-columns: minmax(0, 1fr); }
+      .policy-toc { position: static; }
+      .policy-toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; }
+    }
+
+    @media (max-width: 980px) {
+      .stackops-site-footer {
+        padding: 34px clamp(18px, 3vw, 34px) 62px;
+      }
+
+      .stackops-footer-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px 22px;
+      }
+
+      .stackops-footer-logo {
+        grid-column: 1 / -1;
+        min-height: 122px;
+        padding-top: 52px;
+      }
+
+      .stackops-footer-logo img {
+        width: 100px;
+        height: 38px;
+      }
+
+      .stackops-footer-logo p,
+      .stackops-site-footer p,
+      .stackops-site-footer a,
+      .stackops-site-footer li {
+        font-size: .74rem;
+        line-height: 1.48;
+      }
+
+      .stackops-site-footer h3 {
+        font-size: .82rem;
+        line-height: 1.28;
+        margin-bottom: 9px;
+      }
+
+      .stackops-site-footer ul { gap: 5px; }
+
+      .stackops-footer-socials {
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .stackops-footer-socials a {
+        width: 30px;
+        height: 30px;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .stackops-site-footer {
+        width: 94%;
+        margin: 18px auto;
+        padding: 26px 16px 50px;
+        border-radius: 26px;
+      }
+
+      .stackops-footer-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px 12px;
+      }
+
+      .stackops-footer-logo {
+        grid-column: 1 / -1;
+        min-height: 84px;
+        padding-top: 40px;
+      }
+
+      .stackops-footer-logo img {
+        top: 12px;
+        left: 18px;
+        width: 88px;
+        height: 32px;
+      }
+
+      .stackops-footer-logo p {
+        top: 58px;
+        left: 30px;
+        width: min(220px, calc(100% - 60px));
+      }
+
+      .stackops-footer-logo p,
+      .stackops-site-footer p,
+      .stackops-site-footer a,
+      .stackops-site-footer li {
+        font-size: .62rem;
+        line-height: 1.36;
+      }
+
+      .stackops-site-footer h3 {
+        font-size: .69rem;
+        letter-spacing: .07em;
+        line-height: 1.24;
+        margin-bottom: 7px;
+      }
+
+      .stackops-site-footer ul { gap: 4px; }
+      .stackops-site-footer a,
+      .stackops-site-footer li,
+      .stackops-site-footer p { overflow-wrap: anywhere; }
+
+      .stackops-footer-socials {
+        gap: 7px;
+        margin-top: 8px;
+      }
+
+      .stackops-footer-socials a {
+        width: 28px;
+        height: 28px;
+      }
+
+      .stackops-footer-copyright {
+        left: 30px;
+        right: 40px;
+        bottom: 16px;
+        font-size: .58rem;
+        line-height: 1.35;
+      }
+    }
+
+    @media (max-width: 440px) {
+      .policy-shell { width: calc(100% - 24px); padding-top: 20px; }
+      .policy-intro { padding: 25px 21px; }
+      .policy-article { padding: 23px 19px; }
+      .policy-toc { padding: 18px 14px; }
+      .policy-toc ol { grid-template-columns: minmax(0, 1fr); }
+      .policy-article h2 { gap: 9px; }
+    }
+
+    @media (max-width: 380px) {
+      .stackops-site-footer {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .stackops-footer-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px 12px;
+      }
+
+      .stackops-footer-logo p,
+      .stackops-site-footer p,
+      .stackops-site-footer a,
+      .stackops-site-footer li {
+        font-size: .61rem;
+      }
+
+      .stackops-site-footer h3 { font-size: .68rem; }
+    }
+
+    @media (max-width: 980px) {
+      .stackops-footer-logo {
+        grid-column: 1 / -1;
+      }
+
+      .stackops-footer-logo img,
+      .stackops-footer-logo p,
+      .stackops-footer-copyright {
+        left: clamp(18px, 3vw, 34px);
+      }
+
+      .stackops-footer-copyright {
+        right: clamp(18px, 3vw, 34px);
+      }
+
+      .stackops-footer-socials { gap: 6px; }
+
+      .stackops-footer-socials a {
+        width: 26px;
+        height: 26px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="background"></div>
+  <a class="policy-skip" href="#main-content">Skip to privacy policy</a>
+
+  <header class="navbar">
+    <div class="logo">
+      <img src="Images/Logos/RemovedStackOps.png" alt="StackOps Logo" />
+    </div>
+  </header>
+
+  <main id="main-content" class="policy-shell">
+    <header class="policy-intro" aria-label="Privacy policy introduction">
+      <p class="policy-kicker">StackOps IT Solutions · Privacy</p>
+      <h1>Privacy Policy</h1>
+      <p class="policy-summary">This policy explains how StackOps IT Solutions handles personal information when you visit our website or use services we provide.</p>
+      <p class="policy-updated">Last updated: 5 October 2026</p>
+    </header>
+
+    <div class="policy-layout">
+      <nav class="policy-toc" aria-label="Privacy policy sections">
+        <h2>On this page</h2>
+        <ol>
+          <li><a href="#information">Information we collect</a></li>
+          <li><a href="#use">How we use information</a></li>
+          <li><a href="#client-services">Client services &amp; Microsoft data</a></li>
+          <li><a href="#whatsapp">WhatsApp alerts &amp; Meta</a></li>
+          <li><a href="#providers">Service providers &amp; security</a></li>
+          <li><a href="#retention">Retention</a></li>
+          <li><a href="#choices">Your choices &amp; requests</a></li>
+          <li><a href="#children">Children</a></li>
+          <li><a href="#changes">Changes</a></li>
+          <li><a href="#contact">Contact</a></li>
+        </ol>
+      </nav>
+
+      <article class="policy-article" aria-label="StackOps privacy policy">
+        <section id="information">
+          <h2><span>01</span> Information we collect</h2>
+          <p>Depending on how you interact with us, we may receive information you provide directly, such as your name, contact details, company and service enquiry. When you use our website, we may also receive technical and usage information such as your device, browser, approximate connection information, and the pages or features you use.</p>
+          <p>Information handled for a client while delivering a service may include business or technical information that the client or its users make available to us. The type of information depends on the services the client has enabled and the instructions we receive.</p>
+        </section>
+
+        <section id="use">
+          <h2><span>02</span> How we use information</h2>
+          <p>We use information as appropriate to respond to enquiries, provide and support requested services, administer client relationships, maintain and secure our systems, communicate service-related updates, and meet applicable legal or contractual requirements.</p>
+          <p>We do not describe every possible use here: the context, the service selected, and any applicable agreement or instructions determine how information is handled.</p>
+        </section>
+
+        <section id="client-services">
+          <h2><span>03</span> Client dashboards and Microsoft security data</h2>
+          <p>Some client services may include a dashboard or integrations with Microsoft services and security tools. Where a customer authorizes and enables an integration, we may process the information made available through that integration—for example, relevant account, device, sign-in, alert, or security-event information—to deliver the enabled service and provide support.</p>
+          <p>The data available and the purposes for which we handle it depend on the customer's configuration, permissions, and service instructions. Customers remain responsible for deciding whether to enable an integration and for managing the access they authorize. We do not access Microsoft security data through an integration that the customer has not enabled for the relevant service.</p>
+        </section>
+
+        <section id="whatsapp">
+          <h2><span>04</span> WhatsApp security alerts and Meta</h2>
+          <p>If a customer configures WhatsApp security alerts, contact details and alert information may be processed to deliver those notifications. The alerts and their recipients depend on the customer's configuration and the service enabled.</p>
+          <p>WhatsApp is a service provided by Meta. Use of WhatsApp and associated processing by Meta is also subject to Meta's terms and privacy information. StackOps does not control Meta's independent processing of information on its platforms.</p>
+        </section>
+
+        <section id="providers">
+          <h2><span>05</span> Service providers and data security</h2>
+          <p>We may use service providers to support our website, communications, hosting, and delivery of requested services. Those providers may process information as needed for their services and under the arrangements applicable to them. Information may also be disclosed when required by law or when reasonably necessary to protect rights, safety, and systems.</p>
+          <p>We use measures intended to help protect information, taking account of its nature and how it is handled. No website, transmission, or storage method can be guaranteed to be completely secure.</p>
+        </section>
+
+        <section id="retention">
+          <h2><span>06</span> Retention</h2>
+          <p>We keep information for as long as it is reasonably needed for the purposes described in this policy, to provide an enabled service, to meet applicable legal or contractual obligations, and to address disputes or enforce agreements. Retention can vary by information type, service, and customer instructions.</p>
+        </section>
+
+        <section id="choices">
+          <h2><span>07</span> Your choices and privacy requests</h2>
+          <p>You may contact us to ask about personal information associated with you, or to request access, correction, deletion, or other action where applicable law provides that right. A customer who uses our client services should also contact their organization, which may control the relevant information or integration.</p>
+          <p>We may need to verify your identity and authority before acting. How we respond depends on the nature of the request, the information involved, and applicable legal obligations. We may be unable to fulfil a request in full where an exception or other obligation applies.</p>
+          <div class="policy-contact">
+            <p>Send privacy requests to <a href="mailto:support@stackopsit.co.za?subject=Privacy%20Request">support@stackopsit.co.za</a> with the subject <strong>Privacy Request</strong>.</p>
+          </div>
+        </section>
+
+        <section id="children">
+          <h2><span>08</span> Children</h2>
+          <p>Our website and services are intended for businesses and their authorized users, not for children. If you believe a child has provided personal information to us, please contact us so we can review the matter.</p>
+        </section>
+
+        <section id="changes">
+          <h2><span>09</span> Changes to this policy</h2>
+          <p>We may update this policy to reflect changes to our website, services, or information practices. The date at the top indicates when this version was last updated. Please review this page periodically for the current version.</p>
+        </section>
+
+        <section id="contact">
+          <h2><span>10</span> Contact StackOps</h2>
+          <p>For questions about this policy or our privacy practices, contact <a href="mailto:support@stackopsit.co.za">support@stackopsit.co.za</a>. For a privacy request, include <strong>Privacy Request</strong> in the subject line.</p>
+          <p class="policy-footnote">This policy is provided for general information about our privacy practices. It is not legal advice.</p>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="stackops-site-footer">
+    <div class="stackops-footer-grid">
+      <div class="stackops-footer-logo">
+        <img src="Images/Logos/RemovedStackOps.png" alt="StackOps IT Solutions" />
+        <p>Managed IT and cybersecurity for modern businesses.</p>
+      </div>
+
+      <div>
+        <h3>Quick Links</h3>
+        <ul>
+          <li><a href="Home.html">Home</a></li>
+          <li><a href="about.html">About us</a></li>
+          <li><a href="contact.html">Contact</a></li>
+          <li><a href="consultation.html">Book a session</a></li>
+          <li><a href="signin.html">Admin portal</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Services</h3>
+        <ul>
+          <li><a href="service.html">Managed IT</a></li>
+          <li><a href="service.html">Cybersecurity</a></li>
+          <li><a href="service.html">Governance</a></li>
+          <li><a href="service.html">IT audit</a></li>
+          <li><a href="service.html">Web development</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Solutions</h3>
+        <ul>
+          <li><a href="ClientDashboardHome.html">StackCTRL portal</a></li>
+          <li><a href="https://proqpilot.com">ProQ Pilot shop</a></li>
+          <li><a href="service.html">Microsoft 365</a></li>
+          <li><a href="service.html">Cisco Duo</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Disclaimer</h3>
+        <ul>
+          <li><a href="service.html#web-development">POPIA</a></li>
+          <li><a href="/privacy-policy">Privacy policy</a></li>
+          <li><a href="service.html#mobile-development">Terms</a></li>
+          <li><a href="service.html">Security audits</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Contact</h3>
+        <p><a href="mailto:info@stackopsit.co.za">info@stackopsit.co.za</a></p>
+        <p><a href="mailto:support@stackopsit.co.za">support@stackopsit.co.za</a></p>
+        <p><a href="mailto:sales@stackopsit.co.za">sales@stackopsit.co.za</a></p>
+        <p>Mia Drive, Waterfall City, Johannesburg, 1685</p>
+        <p>011 568 9337</p>
+        <div class="stackops-footer-socials" aria-label="Social links">
+          <a href="https://www.linkedin.com/in/ndamulelo-sandani-0988289a/overlay/about-this-profile/?lipi=urn%3Ali%3Apage%3Ad_flagship3_profile_view_base%3BAO9qQ1ErRwqaNzIPO5obNA%3D%3D" aria-label="LinkedIn" target="_blank" rel="noopener noreferrer"><i class="fab fa-linkedin-in" aria-hidden="true"></i></a>
+        </div>
+      </div>
+    </div>
+    <div class="stackops-footer-copyright">© <span id="copyright-year" class="copyright-year">2026</span> StackOps IT Solutions. All rights reserved.</div>
+  </footer>
+</body>
+</html>

@@ -2806,6 +2806,10 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'Home.html'));
 });
 
+app.get('/privacy-policy', (req, res) => {
+    res.sendFile(path.join(__dirname, 'privacy-policy.html'));
+});
+
 app.get('/admin/register', (req, res) => {
     res.sendFile(path.join(__dirname, 'signup.html'));
 });
