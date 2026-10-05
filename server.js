@@ -2810,6 +2810,14 @@ app.get('/privacy-policy', (req, res) => {
     res.sendFile(path.join(__dirname, 'privacy-policy.html'));
 });
 
+app.get('/terms', (req, res) => {
+    res.sendFile(path.join(__dirname, 'terms.html'));
+});
+
+app.get('/data-deletion', (req, res) => {
+    res.sendFile(path.join(__dirname, 'data-deletion.html'));
+});
+
 app.get('/admin/register', (req, res) => {
     res.sendFile(path.join(__dirname, 'signup.html'));
 });
