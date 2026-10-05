@@ -4,11 +4,14 @@ const crypto = require('crypto');
 const DEFAULT_COUNTRY_CODE = '27';
 const DEFAULT_GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v25.0';
 const DEFAULT_RECIPIENT = process.env.WHATSAPP_SECURITY_ALERT_RECIPIENT || '27762609804';
-const DEFAULT_SECURITY_ALERT_TEMPLATE = process.env.WHATSAPP_SECURITY_ALERT_TEMPLATE || 'security_monitoring_alert';
+const DEFAULT_SECURITY_ALERT_TEMPLATE = process.env.WHATSAPP_SECURITY_ALERT_TEMPLATE || 'security_monitoring_alerts';
 const DEFAULT_TEMPLATE_LANGUAGE =
   process.env.WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE ||
   process.env.WHATSAPP_TEMPLATE_LANGUAGE ||
   'en_US';
+const DEFAULT_SECURITY_ALERT_IMAGE_URL =
+  process.env.WHATSAPP_SECURITY_ALERT_IMAGE_URL ||
+  'https://stackopsit.co.za/Images/Logos/Ctrl%20big.png';
 
 const SEVERITY_LABELS = {
   critical: '[CRITICAL]',
@@ -169,6 +172,7 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
   const apiVersion = config.apiVersion || DEFAULT_GRAPH_VERSION;
   const templateName = config.templateName || DEFAULT_SECURITY_ALERT_TEMPLATE;
   const templateLanguage = config.templateLanguage || DEFAULT_TEMPLATE_LANGUAGE;
+  const headerImageUrl = config.headerImageUrl || DEFAULT_SECURITY_ALERT_IMAGE_URL;
   const url = `https://graph.facebook.com/${apiVersion}/${config.phoneNumberId}/messages`;
 
   const response = await axios.post(
@@ -181,6 +185,15 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
         name: templateName,
         language: { code: templateLanguage },
         components: [
+          {
+            type: 'header',
+            parameters: [
+              {
+                type: 'image',
+                image: { link: headerImageUrl }
+              }
+            ]
+          },
           {
             type: 'body',
             parameters: [

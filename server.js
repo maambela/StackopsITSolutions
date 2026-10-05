@@ -14596,6 +14596,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             apiVersion,
             templateName,
             templateLanguage,
+            imageUrl,
             limitValue,
             severityValue
         ] = await Promise.all([
@@ -14604,8 +14605,9 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_PHONE_NUMBER_ID'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_RECIPIENT', 'WHATSAPP_RECIPIENT'], '27762609804'),
             readWhatsAppConfigValue('WHATSAPP_GRAPH_VERSION', 'v25.0'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alert'),
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alerts'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_IMAGE_URL', 'https://stackopsit.co.za/Images/Logos/Ctrl%20big.png'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
         ]);
@@ -14620,7 +14622,18 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
         const limit = Math.max(1, Number(limitValue || 20));
         const severities = getSecurityAlertSeverities(severityValue);
 
-        return { enabled, token, phoneNumberId, recipient, apiVersion, templateName, templateLanguage, limit, severities };
+        return {
+            enabled,
+            token,
+            phoneNumberId,
+            recipient,
+            apiVersion,
+            templateName,
+            templateLanguage,
+            headerImageUrl: imageUrl,
+            limit,
+            severities
+        };
     } catch (error) {
         console.warn('[security_alerts:whatsapp_config_error] Failed to read WhatsApp config, defaulting to disabled:', error.message);
         return { enabled: false };
@@ -15474,7 +15487,7 @@ app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
             action: req.body?.action || "Review the event immediately"
         };
 
-        console.log(`[WhatsApp Test] Sending ${config.templateName || "security_monitoring_alert"} to ${recipient}`);
+        console.log(`[WhatsApp Test] Sending ${config.templateName || "security_monitoring_alerts"} to ${recipient}`);
 
         const response = await sendSecurityAlert(sampleAlert, { ...config, recipient });
         const messageId = response.messages?.[0]?.id || null;
