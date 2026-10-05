@@ -20,6 +20,7 @@ const {
     sendHelloWorldTest,
     sendSecurityAlert
 } = require('./services/whatsapp');
+const { createWhatsAppNotificationLedger } = require('./services/whatsapp-notification-ledger');
 const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');
 const { createAzureOpenAIService } = require('./services/azure-openai');
 const { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');
@@ -1870,6 +1871,7 @@ async function ensureDatabaseSchema() {
     try {
         if (!pool) return;
         console.log('Ensuring database schema for automation...');
+        await whatsappNotificationLedger.ensureWhatsAppSecurityAlertTable();
 
         // Intelligence automation scheduler tables must exist before the one-minute tick starts.
         await pool.query(`
@@ -2108,28 +2110,6 @@ async function ensureDatabaseSchema() {
                 UNIQUE KEY uq_security_events_payload_company (CompanyID),
                 FOREIGN KEY (CompanyID) REFERENCES Companies(ID)
             )
-        `);
-
-        // A durable ledger prevents an active Microsoft alert from being sent
-        // repeatedly when the dashboard refreshes or the service restarts.
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS WhatsAppSecurityAlertNotifications (
-                ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                NotificationKey VARCHAR(100) NOT NULL,
-                Recipient VARCHAR(32) NOT NULL,
-                AlertType VARCHAR(32) NOT NULL,
-                Severity VARCHAR(16) NOT NULL,
-                Issue VARCHAR(900) NOT NULL,
-                Status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                MetaMessageID VARCHAR(255) NULL,
-                ErrorMessage TEXT NULL,
-                SentAt DATETIME NULL,
-                CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                PRIMARY KEY (ID),
-                UNIQUE KEY uq_whatsapp_security_notification (NotificationKey),
-                KEY ix_whatsapp_security_notification_status (Status, CreatedAt)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         `);
 
         await pool.query(`
@@ -14641,60 +14621,22 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
     }
 }
 
+const whatsappNotificationLedger = createWhatsAppNotificationLedger({
+    pool,
+    buildKey: buildSecurityAlertNotificationKey,
+    normalizeSeverity: normalizeWhatsAppSeverity
+});
+
 function getWhatsAppSecurityAlertTime(item = {}) {
     return item.eventTime || item.timestamp || item.created || item.updated || item.createdDateTime || new Date().toISOString();
 }
 
 async function claimWhatsAppSecurityAlertNotification(alert, recipient) {
-    if (!pool) {
-        // Failing closed is intentional: without the ledger we cannot promise
-        // that a refresh or restart will not duplicate an alert.
-        return { claimed: false, status: 'skipped-ledger-unavailable' };
-    }
-
-    const notificationKey = buildSecurityAlertNotificationKey(alert, recipient);
-    const [insert] = await pool.query(
-        `INSERT IGNORE INTO WhatsAppSecurityAlertNotifications
-         (NotificationKey, Recipient, AlertType, Severity, Issue, Status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
-        [
-            notificationKey,
-            recipient,
-            String(alert.recordType || alert.type || 'security').slice(0, 32),
-            normalizeWhatsAppSeverity(alert.severity),
-            String(alert.issue || alert.title || alert.displayName || alert.name || 'Security alert').slice(0, 900)
-        ]
-    );
-
-    if (insert.affectedRows === 1) return { claimed: true, notificationKey };
-
-    const [rows] = await pool.query(
-        'SELECT Status, MetaMessageID, CreatedAt FROM WhatsAppSecurityAlertNotifications WHERE NotificationKey = ? LIMIT 1',
-        [notificationKey]
-    );
-    return {
-        claimed: false,
-        notificationKey,
-        status: rows[0]?.Status || 'existing',
-        messageId: rows[0]?.MetaMessageID || null,
-        createdAt: rows[0]?.CreatedAt || null
-    };
+    return whatsappNotificationLedger.claimWhatsAppSecurityAlertNotification(alert, recipient);
 }
 
 async function completeWhatsAppSecurityAlertNotification(notificationKey, result = {}) {
-    if (!pool || !notificationKey) return;
-    await pool.query(
-        `UPDATE WhatsAppSecurityAlertNotifications
-         SET Status = ?, MetaMessageID = ?, ErrorMessage = ?, SentAt = CASE WHEN ? = 'sent' THEN NOW() ELSE SentAt END
-         WHERE NotificationKey = ?`,
-        [
-            result.status || 'failed',
-            result.messageId || null,
-            result.error ? String(result.error).slice(0, 4000) : null,
-            result.status || 'failed',
-            notificationKey
-        ]
-    );
+    return whatsappNotificationLedger.completeWhatsAppSecurityAlertNotification(notificationKey, result);
 }
 
 function getWhatsAppSecurityAlertCandidates(payload = {}) {
