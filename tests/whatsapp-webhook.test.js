@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const test = require('node:test');
 const {
   constantTimeStringEqual,
+  extractWhatsAppMessageEvents,
   extractWhatsAppStatusEvents,
   verifyMetaWebhookSignature
 } = require('../services/whatsapp-webhook');
@@ -47,4 +48,39 @@ test('status extraction retains delivery state and full failure errors', () => {
   assert.deepEqual(events[1].errors, errors);
   assert.equal(events[1].phoneNumberId, 'phone-1');
   assert.equal(events[1].wabaId, 'waba-1');
+});
+
+test('message extraction logs searchable metadata without message content', () => {
+  const events = extractWhatsAppMessageEvents({
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: 'waba-1',
+      changes: [{
+        field: 'messages',
+        value: {
+          metadata: { phone_number_id: 'phone-1' },
+          messages: [{
+            id: 'wamid.inbound',
+            from: '27762609804',
+            timestamp: '123',
+            type: 'text',
+            text: { body: 'private message content' },
+            context: { id: 'wamid.context' }
+          }]
+        }
+      }]
+    }]
+  });
+
+  assert.deepEqual(events, [{
+    field: 'messages',
+    wabaId: 'waba-1',
+    phoneNumberId: 'phone-1',
+    messageId: 'wamid.inbound',
+    senderId: '***9804',
+    timestamp: '123',
+    messageType: 'text',
+    contextMessageId: 'wamid.context'
+  }]);
+  assert.equal(JSON.stringify(events).includes('private message content'), false);
 });

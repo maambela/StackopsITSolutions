@@ -23,7 +23,9 @@ const {
 const { createWhatsAppNotificationLedger } = require('./services/whatsapp-notification-ledger');
 const {
     constantTimeStringEqual,
+    extractWhatsAppMessageEvents,
     extractWhatsAppStatusEvents,
+    maskWhatsAppNumber,
     verifyMetaWebhookSignature
 } = require('./services/whatsapp-webhook');
 const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');
@@ -15569,24 +15571,23 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
             return res.sendStatus(403);
         }
 
-        const events = extractWhatsAppStatusEvents(req.body);
-        for (const event of events) {
-            const details = {
-                messageId: event.messageId,
-                recipientId: event.recipientId,
-                status: event.status,
-                timestamp: event.timestamp,
-                phoneNumberId: event.phoneNumberId,
-                wabaId: event.wabaId
-            };
+        const statusEvents = extractWhatsAppStatusEvents(req.body).map(event => ({
+            ...event,
+            recipientId: maskWhatsAppNumber(event.recipientId),
+            displayPhoneNumber: maskWhatsAppNumber(event.displayPhoneNumber)
+        }));
+        const messageEvents = extractWhatsAppMessageEvents(req.body);
 
+        console.info('[WhatsApp Webhook] Callback received', {
+            object: req.body?.object || null,
+            entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0,
+            statuses: statusEvents,
+            messages: messageEvents
+        });
+
+        for (const event of statusEvents) {
             if (event.status === 'failed') {
-                console.error('[WhatsApp Webhook] Message delivery failed:', {
-                    ...details,
-                    errors: event.errors
-                });
-            } else {
-                console.info('[WhatsApp Webhook] Message status:', details);
+                console.error('[WhatsApp Webhook] Message delivery failed', event);
             }
         }
 

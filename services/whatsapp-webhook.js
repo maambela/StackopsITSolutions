@@ -36,8 +36,38 @@ function extractWhatsAppStatusEvents(payload) {
   return events;
 }
 
+function maskWhatsAppNumber(value) {
+  if (typeof value !== 'string' || !value) return null;
+  const digits = value.replace(/\D/g, '');
+  return digits.length > 4 ? `***${digits.slice(-4)}` : '****';
+}
+
+function extractWhatsAppMessageEvents(payload) {
+  const events = [];
+  for (const entry of Array.isArray(payload?.entry) ? payload.entry : []) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+      const value = change?.value;
+      for (const message of Array.isArray(value?.messages) ? value.messages : []) {
+        events.push({
+          field: change?.field || null,
+          wabaId: entry?.id || null,
+          phoneNumberId: value?.metadata?.phone_number_id || null,
+          messageId: message?.id || null,
+          senderId: maskWhatsAppNumber(message?.from),
+          timestamp: message?.timestamp || null,
+          messageType: message?.type || 'unknown',
+          contextMessageId: message?.context?.id || null
+        });
+      }
+    }
+  }
+  return events;
+}
+
 module.exports = {
   constantTimeStringEqual,
+  extractWhatsAppMessageEvents,
   extractWhatsAppStatusEvents,
+  maskWhatsAppNumber,
   verifyMetaWebhookSignature
 };
