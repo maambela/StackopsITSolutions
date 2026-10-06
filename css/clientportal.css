@@ -16583,3 +16583,157 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     transition: none;
   }
 }
+
+/* Client Dashboard liquid-glass treatment for Portal dashboard actions. */
+.credential-security-onepassword-button,
+.network-security-card-cta span,
+.btn-view-full-dashboard,
+.identity-card-button,
+.sunbird-dashboard-btn,
+.sunbird-id-back-btn,
+.sunbird-id-evidence-btn,
+.sunbird-risk-view-btn,
+.network-evidence-trigger,
+.btn-back,
+.btn-back-dashboard {
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-top-color: rgba(255, 255, 255, 0.48) !important;
+  border-left-color: rgba(255, 255, 255, 0.38) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  color: #ffffff !important;
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 100 !important;
+  text-shadow: none !important;
+  transition: background 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), border-color 0.4s ease, box-shadow 0.4s ease, color 0.4s ease !important;
+}
+
+.credential-security-onepassword-button,
+.network-security-card-cta span,
+.identity-card-button,
+.sunbird-dashboard-btn,
+.sunbird-id-back-btn,
+.sunbird-id-evidence-btn,
+.sunbird-risk-view-btn,
+.network-evidence-trigger,
+.btn-back,
+.btn-back-dashboard {
+  position: relative;
+}
+
+.credential-security-onepassword-button::before,
+.network-security-card-cta span::before,
+.btn-view-full-dashboard::before,
+.identity-card-button::before,
+.sunbird-dashboard-btn::before,
+.sunbird-id-back-btn::before,
+.sunbird-id-evidence-btn::before,
+.sunbird-risk-view-btn::before,
+.network-evidence-trigger::before,
+.btn-back::before,
+.btn-back-dashboard::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: -100%;
+  width: 120%;
+  height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transition: left 0.6s ease;
+  pointer-events: none;
+}
+
+.credential-security-onepassword-button:hover,
+.credential-security-onepassword-button:focus-visible,
+.network-security-card-cta:hover span,
+.network-security-card-cta:focus-visible span,
+.btn-view-full-dashboard:hover,
+.btn-view-full-dashboard:focus-visible,
+.identity-card-button:hover,
+.identity-card-button:focus-visible,
+.sunbird-dashboard-btn:hover,
+.sunbird-dashboard-btn:focus-visible,
+.sunbird-id-back-btn:hover,
+.sunbird-id-back-btn:focus-visible,
+.sunbird-id-evidence-btn:hover,
+.sunbird-id-evidence-btn:focus-visible,
+.sunbird-risk-view-btn:hover,
+.sunbird-risk-view-btn:focus-visible,
+.network-evidence-trigger:hover,
+.network-evidence-trigger:focus-visible,
+.btn-back:hover,
+.btn-back:focus-visible,
+.btn-back-dashboard:hover,
+.btn-back-dashboard:focus-visible {
+  transform: translateY(-2px) scale(1.02) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 12px 35px rgba(255, 120, 2, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+  color: #ffffff !important;
+  transform-origin: center;
+  will-change: transform;
+  animation: liquidWobble 0.8s ease-out !important;
+  animation-fill-mode: both !important;
+}
+
+.credential-security-onepassword-button:hover::before,
+.credential-security-onepassword-button:focus-visible::before,
+.network-security-card-cta:hover span::before,
+.network-security-card-cta:focus-visible span::before,
+.btn-view-full-dashboard:hover::before,
+.btn-view-full-dashboard:focus-visible::before,
+.identity-card-button:hover::before,
+.identity-card-button:focus-visible::before,
+.sunbird-dashboard-btn:hover::before,
+.sunbird-dashboard-btn:focus-visible::before,
+.sunbird-id-back-btn:hover::before,
+.sunbird-id-back-btn:focus-visible::before,
+.sunbird-id-evidence-btn:hover::before,
+.sunbird-id-evidence-btn:focus-visible::before,
+.sunbird-risk-view-btn:hover::before,
+.sunbird-risk-view-btn:focus-visible::before,
+.network-evidence-trigger:hover::before,
+.network-evidence-trigger:focus-visible::before,
+.btn-back:hover::before,
+.btn-back:focus-visible::before,
+.btn-back-dashboard:hover::before,
+.btn-back-dashboard:focus-visible::before {
+  left: 100%;
+}
+
+.credential-security-onepassword-button:focus-visible,
+.network-security-card-cta:focus-visible,
+.btn-view-full-dashboard:focus-visible,
+.identity-card-button:focus-visible,
+.sunbird-dashboard-btn:focus-visible,
+.sunbird-id-back-btn:focus-visible,
+.sunbird-id-evidence-btn:focus-visible,
+.sunbird-risk-view-btn:focus-visible,
+.network-evidence-trigger:focus-visible,
+.btn-back:focus-visible,
+.btn-back-dashboard:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.82) !important;
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .credential-security-onepassword-button,
+  .network-security-card-cta span,
+  .btn-view-full-dashboard,
+  .identity-card-button,
+  .sunbird-dashboard-btn,
+  .sunbird-id-back-btn,
+  .sunbird-id-evidence-btn,
+  .sunbird-risk-view-btn,
+  .network-evidence-trigger,
+  .btn-back,
+  .btn-back-dashboard {
+    animation: none !important;
+    transition: none !important;
+  }
+}
