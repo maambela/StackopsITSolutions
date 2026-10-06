@@ -84,7 +84,7 @@ function createWhatsAppNotificationLedger({ pool, buildKey, normalizeSeverity, l
         return { critical: 4, high: 3, medium: 2, low: 1 }[normalizeSeverity(value)] || 1;
     }
 
-    async function claimWhatsAppSecurityAlertNotification(alert, recipient, { cooldownMinutes = 240 } = {}) {
+    async function claimWhatsAppSecurityAlertNotification(alert, recipient, { cooldownMinutes = 240, force = false } = {}) {
         if (!pool) {
             return { claimed: false, status: 'skipped-ledger-unavailable' };
         }
@@ -119,7 +119,7 @@ function createWhatsAppNotificationLedger({ pool, buildKey, normalizeSeverity, l
         const severityEscalated = severityRank(severity) > severityRank(existing.HighestSeverity);
         const cooldownExpired = !existing.CooldownUntil || new Date(existing.CooldownUntil).getTime() <= Date.now();
 
-        if (severityEscalated || cooldownExpired) {
+        if (force || severityEscalated || cooldownExpired) {
             await pool.query(
                 `UPDATE WhatsAppSecurityAlertNotifications
                  SET Status = 'pending', Severity = ?, Issue = ?, LastObservedAt = NOW(),
@@ -138,7 +138,11 @@ function createWhatsAppNotificationLedger({ pool, buildKey, normalizeSeverity, l
                     notificationKey
                 ]
             );
-            return { claimed: true, notificationKey, reason: severityEscalated ? 'severity-escalated' : 'cooldown-expired' };
+            return {
+                claimed: true,
+                notificationKey,
+                reason: force ? 'manual-forced' : (severityEscalated ? 'severity-escalated' : 'cooldown-expired')
+            };
         }
 
         await pool.query(

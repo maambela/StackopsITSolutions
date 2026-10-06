@@ -14705,12 +14705,20 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
     const candidates = getWhatsAppSecurityAlertCandidates(payload)
         .filter(item => types.has(String(item.recordType || item.type || '').toLowerCase()))
         .filter(item => severities.has(normalizeWhatsAppSeverity(item.severity)))
+        .sort((a, b) => {
+            if (options.prioritizeSeverity) {
+                const severityDifference = getSecuritySeverityRank(b.severity) - getSecuritySeverityRank(a.severity);
+                if (severityDifference) return severityDifference;
+            }
+            return new Date(getWhatsAppSecurityAlertTime(b)) - new Date(getWhatsAppSecurityAlertTime(a));
+        })
         .slice(0, limit);
 
     const results = [];
     for (const alert of candidates) {
         const claim = await claimWhatsAppSecurityAlertNotification(alert, config.recipient, {
-            cooldownMinutes: config.cooldownMinutes
+            cooldownMinutes: config.cooldownMinutes,
+            force: Boolean(options.force)
         });
         if (!claim.claimed) {
             results.push({
@@ -15955,7 +15963,12 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
         const result = await notifySecurityAlertsViaWhatsApp(payload, {
             limit,
             severities,
-            types
+            types,
+            // This authenticated route is an explicit operator action. It
+            // deliberately resends the selected alert even if the automatic
+            // anti-spam cooldown already recorded it.
+            force: true,
+            prioritizeSeverity: true
         });
 
         res.json({
@@ -17254,8 +17267,36 @@ function hasValidEnterpriseAutomationTrigger(req) {
 }
 
 // Cloud Run can suspend an idle instance, so a secure Cloud Scheduler request is
-// the reliable trigger. The legacy hourly path remains compatible, but now obeys
-// the daily Johannesburg schedule; use the explicit daily path for a forced retry.
+// the reliable trigger for Security Alerts. This runs the same collection and
+// WhatsApp deduplication path as the in-process scheduler.
+app.post('/api/internal/automation/security-alerts', async (req, res) => {
+    if (!String(process.env.STACKCTRL_AUTOMATION_TRIGGER_SECRET || '')) {
+        return res.status(503).json({ success: false, message: 'Security Alerts automation trigger is not configured.' });
+    }
+    if (!hasValidEnterpriseAutomationTrigger(req)) {
+        return res.status(403).json({ success: false, message: 'Invalid automation trigger.' });
+    }
+
+    try {
+        const result = await securityEvidenceAutomation.runOnce('cloud_scheduler');
+        const whatsappConfig = await getWhatsAppSecurityAlertConfig({ requireEnabled: false });
+        const status = result.status === 'failed' ? 500 : 200;
+        return res.status(status).json({
+            success: status < 400,
+            message: whatsappConfig.enabled
+                ? 'Security Alerts collection completed; eligible new alerts are sent through WhatsApp.'
+                : 'Security Alerts collection completed, but WhatsApp automatic notifications are disabled.',
+            whatsappAutomationEnabled: Boolean(whatsappConfig.enabled),
+            ...result
+        });
+    } catch (error) {
+        console.error('[Security Alerts Automation] Scheduler trigger failed:', error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// The enterprise report scheduler remains compatible with the existing daily
+// Johannesburg schedule.
 app.post(['/api/internal/automation/enterprise-hourly', '/api/internal/automation/enterprise-daily'], async (req, res) => {
     if (!String(process.env.STACKCTRL_AUTOMATION_TRIGGER_SECRET || '')) {
         return res.status(503).json({ success: false, message: 'Enterprise automation trigger is not configured.' });

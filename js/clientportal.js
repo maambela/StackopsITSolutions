@@ -5328,7 +5328,7 @@ async function sendLatestSunbirdSecurityAlertToWhatsApp() {
         endpoint: '/api/security-events/whatsapp-alerts',
         buttonId: 'sunbird-security-whatsapp-test-btn',
         statusId: 'sunbird-security-whatsapp-test-status',
-        loadingText: 'Sending latest live security alert...',
+        loadingText: 'Sending highest live security alert...',
         requestBody: { limit: 1, severities: 'critical,high,medium', types: 'alert,incident' }
     });
 }
