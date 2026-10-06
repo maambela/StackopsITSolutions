@@ -14606,8 +14606,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             templateName,
             templateLanguage,
             limitValue,
-            severityValue,
-            cooldownMinutesValue
+            severityValue
         ] = await Promise.all([
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERTS_ENABLED', 'false'),
             readWhatsAppConfigValue('WHATSAPP_ACCESS_TOKEN'),
@@ -14617,8 +14616,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alerts'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_COOLDOWN_MINUTES', '240')
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
         ]);
 
         const enabled = String(enabledValue || 'false').toLowerCase() === 'true';
@@ -14630,7 +14628,11 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
         const recipient = normalizeWhatsAppRecipient(recipientValue);
         const limit = Math.max(1, Number(limitValue || 20));
         const severities = getSecurityAlertSeverities(severityValue);
-        const cooldownMinutes = Math.max(1, Number(cooldownMinutesValue) || 240);
+        // This is operational configuration, not a credential. Keep it out
+        // of Secret Manager and reliably fall back to the four-hour window.
+        const cooldownMinutes = Math.max(1, Number(process.env.WHATSAPP_SECURITY_ALERT_COOLDOWN_MINUTES) || 240);
+        const headerImageUrl = process.env.WHATSAPP_SECURITY_ALERT_HEADER_IMAGE_URL
+            || 'https://stackopsit.co.za/Images/Logos/MinimalistStackCTRL.png';
 
         return {
             enabled,
@@ -14640,6 +14642,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             apiVersion,
             templateName,
             templateLanguage,
+            headerImageUrl,
             limit,
             severities,
             cooldownMinutes

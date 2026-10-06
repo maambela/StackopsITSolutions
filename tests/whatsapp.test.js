@@ -87,10 +87,13 @@ test('WhatsApp security alert template uses its fixed Meta header and five body 
     );
 
     const components = requestBody.template.components;
-    assert.equal(components.length, 1);
-    assert.equal(components[0].type, 'body');
-    assert.equal(components[0].parameters.length, 5);
-    assert.equal(components[0].parameters[2].text, 'Microsoft Graph');
+    const header = components.find(component => component.type === 'header');
+    const body = components.find(component => component.type === 'body');
+    assert.equal(components.length, 2);
+    assert.equal(header.parameters[0].type, 'image');
+    assert.equal(header.parameters[0].image.link, 'https://stackopsit.co.za/Images/Logos/MinimalistStackCTRL.png');
+    assert.equal(body.parameters.length, 5);
+    assert.equal(body.parameters[2].text, 'Microsoft Graph');
   } finally {
     axios.post = originalPost;
   }

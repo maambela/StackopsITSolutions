@@ -9,6 +9,9 @@ const DEFAULT_TEMPLATE_LANGUAGE =
   process.env.WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE ||
   process.env.WHATSAPP_TEMPLATE_LANGUAGE ||
   'en_US';
+const DEFAULT_SECURITY_ALERT_HEADER_IMAGE_URL =
+  process.env.WHATSAPP_SECURITY_ALERT_HEADER_IMAGE_URL ||
+  'https://stackopsit.co.za/Images/Logos/MinimalistStackCTRL.png';
 
 const SEVERITY_LABELS = {
   critical: '[CRITICAL]',
@@ -246,6 +249,7 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
   const apiVersion = config.apiVersion || DEFAULT_GRAPH_VERSION;
   const templateName = config.templateName || DEFAULT_SECURITY_ALERT_TEMPLATE;
   const templateLanguage = config.templateLanguage || DEFAULT_TEMPLATE_LANGUAGE;
+  const headerImageUrl = config.headerImageUrl || DEFAULT_SECURITY_ALERT_HEADER_IMAGE_URL;
   const url = `https://graph.facebook.com/${apiVersion}/${config.phoneNumberId}/messages`;
 
   const response = await axios.post(
@@ -258,6 +262,12 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
         name: templateName,
         language: { code: templateLanguage },
         components: [
+          {
+            type: 'header',
+            parameters: [
+              { type: 'image', image: { link: headerImageUrl } }
+            ]
+          },
           {
             type: 'body',
             parameters: [
