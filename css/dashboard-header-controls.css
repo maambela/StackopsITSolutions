@@ -1,0 +1,148 @@
+/* Client Dashboard header links and action buttons. */
+.site-header .center-nav > li > a,
+.site-header .header-actions > .glass-icon-btn {
+    position: relative !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-top-color: rgba(255, 255, 255, 0.48) !important;
+    border-left-color: rgba(255, 255, 255, 0.38) !important;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    color: #fff !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 100 !important;
+    text-decoration: none !important;
+    text-shadow: none !important;
+    isolation: isolate !important;
+    transition: background 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), border-color 0.4s ease, box-shadow 0.4s ease, color 0.4s ease !important;
+    animation: pulse-green 2s infinite !important;
+}
+
+.site-header .center-nav > li > a {
+    min-height: 32px !important;
+    padding: 0 14px !important;
+    border-radius: 50px !important;
+    font-size: 0.76rem !important;
+}
+
+.site-header .center-nav > li > a::after {
+    display: none !important;
+}
+
+.site-header .header-actions > .glass-icon-btn {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    min-height: 38px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+}
+
+.site-header .center-nav > li > a::before,
+.site-header .header-actions > .glass-icon-btn::before {
+    content: "" !important;
+    position: absolute !important;
+    z-index: 0 !important;
+    top: 0 !important;
+    left: -100% !important;
+    width: 120% !important;
+    height: 100% !important;
+    background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent) !important;
+    transform: none !important;
+    transition: left 0.6s ease !important;
+    pointer-events: none !important;
+}
+
+.site-header .center-nav > li > a:hover::before,
+.site-header .header-actions > .glass-icon-btn:hover::before {
+    left: 100% !important;
+}
+
+.site-header .center-nav > li > a:hover,
+.site-header .center-nav > li > a:focus-visible,
+.site-header .header-actions > .glass-icon-btn:hover,
+.site-header .header-actions > .glass-icon-btn:focus-visible {
+    transform: translateY(-2px) scale(1.02);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+    border-color: rgba(255, 255, 255, 0.4) !important;
+    box-shadow: 0 12px 35px rgba(0, 110, 255, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+    animation: liquidWobble 0.8s ease-out !important;
+    color: #fff !important;
+}
+
+.site-header .center-nav > li > a.active {
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    border-top-color: rgba(255, 255, 255, 0.48) !important;
+    border-left-color: rgba(255, 255, 255, 0.38) !important;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+}
+
+.site-header .header-actions > #shop-link {
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    border-top-color: rgba(255, 255, 255, 0.48) !important;
+    border-left-color: rgba(255, 255, 255, 0.38) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+    overflow: visible !important;
+    animation: pulse-green 2s infinite !important;
+}
+
+.site-header .header-actions > #shop-link::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: -8px !important;
+    width: auto !important;
+    height: auto !important;
+    border: 2px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 50% !important;
+    background: none !important;
+    transform: none !important;
+    animation: pulse-ring 2s infinite !important;
+    z-index: -1 !important;
+}
+
+.site-header .header-actions > #shop-link::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: -14px !important;
+    border-radius: 50% !important;
+    background: radial-gradient(circle, rgba(0, 128, 255, 0.35) 0%, rgba(0, 255, 128, 0) 70%) !important;
+    transform: none !important;
+    animation: pulse-fade 1s infinite !important;
+    z-index: -2 !important;
+}
+
+.site-header .center-nav > li > a:focus-visible,
+.site-header .header-actions > .glass-icon-btn:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.82) !important;
+    outline-offset: 3px !important;
+}
+
+@keyframes pulse-green {
+    0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(0, 230, 118, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+}
+
+@keyframes liquidWobble {
+    0% { transform: scale(1) rotate(0deg); }
+    20% { transform: scale(1.06, 0.96) rotate(-1deg); }
+    40% { transform: scale(0.98, 1.04) rotate(1deg); }
+    60% { transform: scale(1.03, 0.97) rotate(-0.5deg); }
+    80% { transform: scale(0.99, 1.01) rotate(0.5deg); }
+    100% { transform: scale(1) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-header .center-nav > li > a,
+    .site-header .header-actions > .glass-icon-btn {
+        animation: none !important;
+        transition: none !important;
+    }
+}
