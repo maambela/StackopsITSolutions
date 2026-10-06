@@ -4,6 +4,7 @@ const axios = require('axios');
 
 const {
   buildSecurityAlertNotificationKey,
+  getSecurityReportingSystem,
   getSecurityAlertSeverities,
   normalizeWhatsAppRecipient,
   sendHelloWorldTest,
@@ -44,7 +45,13 @@ test('WhatsApp alerts include only critical, high, and medium severities', () =>
   assert.equal(normalizeWhatsAppRecipient('076 260 9804'), '27762609804');
 });
 
-test('WhatsApp security alert template sends its configured image header and five body parameters', async () => {
+test('security reporting system is normalised to Cloudflare or Microsoft Graph', () => {
+  assert.equal(getSecurityReportingSystem({ source: 'Cloudflare One Gateway' }), 'Cloudflare');
+  assert.equal(getSecurityReportingSystem({ vendor: 'Microsoft Defender for Endpoint' }), 'Microsoft Graph');
+  assert.equal(getSecurityReportingSystem({ source: 'Microsoft Entra ID' }), 'Microsoft Graph');
+});
+
+test('WhatsApp security alert template uses its fixed Meta header and five body parameters', async () => {
   const originalPost = axios.post;
   let requestBody;
   axios.post = async (_url, body) => {
@@ -57,18 +64,15 @@ test('WhatsApp security alert template sends its configured image header and fiv
       { severity: 'high', issue: 'Test issue', source: 'StackOps', eventTime: '2026-10-05T10:00:00Z' },
       {
         token: 'test-token',
-        phoneNumberId: 'test-phone-number',
-        headerImageUrl: 'https://example.com/stackctrl.png'
+        phoneNumberId: 'test-phone-number'
       }
     );
 
     const components = requestBody.template.components;
-    assert.deepEqual(components[0], {
-      type: 'header',
-      parameters: [{ type: 'image', image: { link: 'https://example.com/stackctrl.png' } }]
-    });
-    assert.equal(components[1].type, 'body');
-    assert.equal(components[1].parameters.length, 5);
+    assert.equal(components.length, 1);
+    assert.equal(components[0].type, 'body');
+    assert.equal(components[0].parameters.length, 5);
+    assert.equal(components[0].parameters[2].text, 'Microsoft Graph');
   } finally {
     axios.post = originalPost;
   }

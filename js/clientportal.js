@@ -451,7 +451,9 @@ function createChart(ctx, chartConfig) {
                                 drawBorder: false
                             },
                             ticks: {
-                                color: 'rgba(255, 255, 255, 0.72)'
+                                color: 'rgba(255, 255, 255, 0.72)',
+                                autoSkip: true,
+                                maxTicksLimit: windowKey === '30d' ? 10 : windowKey === '24h' ? 8 : 7
                             }
                         }
                     }
@@ -624,6 +626,19 @@ function goBackToProjects() {
     }
     
     currentProject = null;
+
+    // The side-peek cards are measured while the Projects view is visible.
+    // Recalculate them after returning so a previously measured Credential
+    // Security peek cannot retain an off-screen width/position.
+    requestAnimationFrame(() => {
+        if (!projectsView || projectsView.style.display === 'none') return;
+        if (window.matchMedia('(max-width: 600px)').matches) {
+            clearSidePeekCards();
+            return;
+        }
+        renderSidePeekCards();
+        requestAnimationFrame(syncSidePeekCardSizing);
+    });
 }
 
 // Check if current user is a Sunbird client
@@ -5771,6 +5786,21 @@ function renderSunbirdSecuritySummaryPanel(model) {
     `;
 }
 
+function getSunbirdSecurityReportingSystem(event = {}) {
+    const sourceText = [
+        event.reportingSecuritySystem,
+        event.source,
+        event.vendor,
+        event.serviceSource,
+        event.provider,
+        event.category
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return /cloudflare|cloudflare one|cloudflare api|\bwarp\b|\bgateway\b/.test(sourceText)
+        ? 'Cloudflare'
+        : 'Microsoft Graph';
+}
+
 function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     const body = document.getElementById('sunbird-security-body');
     if (!body) return;
@@ -5790,7 +5820,7 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
                 <td data-label="Incident / Alert">${escapeIdentityText(event.title || event.displayName || event.name || event.message || 'Security event')}</td>
                 <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.status || event.riskLevel || 'observed')}</span></td>
                 <td data-label="User / Asset">${escapeIdentityText(event.user || event.assignedTo || event.indicator || 'Unknown')}</td>
-                <td data-label="Source">${escapeIdentityText(event.source || event.vendor || event.type || 'Microsoft Security')}</td>
+                <td data-label="Source">${escapeIdentityText(getSunbirdSecurityReportingSystem(event))}</td>
                 <td data-label="Category">${escapeIdentityText(event.category || event.location || event.action || 'SOC signal')}</td>
                 <td data-label="MITRE">${escapeIdentityText(`${mitre.tactic} / ${mitre.technique}`)}</td>
                 <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${JSON.stringify(event.uid)})'>Open</button></td>
@@ -6094,16 +6124,22 @@ function calculateSunbirdSecurityScore({ alerts = [], incidents = [], threats = 
 
 function buildSunbirdSecurityRiskTrend(events, windowKey = '7d') {
     const now = new Date();
-    const count = windowKey === '24h' ? 7 : windowKey === '30d' ? 10 : 7;
+    const count = windowKey === '24h' ? 7 : windowKey === '30d' ? 30 : 7;
     const days = Array.from({ length: count }, (_, offset) => {
         const date = new Date(now);
-        if (windowKey === '24h') date.setHours(now.getHours() - (count - 1 - offset), 0, 0, 0);
-        else date.setDate(now.getDate() - ((count - 1 - offset) * (windowKey === '30d' ? 3 : 1)));
-        if (windowKey !== '24h') date.setHours(0, 0, 0, 0);
+        if (windowKey === '24h') {
+            date.setMinutes(0, 0, 0);
+            date.setHours(now.getHours() - (count - 1 - offset));
+        } else {
+            date.setDate(now.getDate() - (count - 1 - offset));
+            date.setHours(0, 0, 0, 0);
+        }
         return {
             date,
             key: getSunbirdSecurityDayKey(date),
-            label: windowKey === '24h' ? date.toLocaleTimeString(undefined, { hour: '2-digit' }) : date.toLocaleDateString(undefined, { weekday: 'short' }),
+            label: windowKey === '24h'
+                ? date.toLocaleTimeString(undefined, { hour: '2-digit' })
+                : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
             critical: 0,
             high: 0,
             medium: 0

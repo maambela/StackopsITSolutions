@@ -9,9 +9,6 @@ const DEFAULT_TEMPLATE_LANGUAGE =
   process.env.WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE ||
   process.env.WHATSAPP_TEMPLATE_LANGUAGE ||
   'en_US';
-const DEFAULT_SECURITY_ALERT_IMAGE_URL =
-  process.env.WHATSAPP_SECURITY_ALERT_IMAGE_URL ||
-  'https://stackopsit.co.za/Images/Logos/Ctrl%20big.png';
 
 const SEVERITY_LABELS = {
   critical: '[CRITICAL]',
@@ -46,6 +43,31 @@ function normalizeWhatsAppRecipient(value, defaultCountryCode = DEFAULT_COUNTRY_
   if (!digits) return DEFAULT_RECIPIENT;
   if (digits.startsWith('0')) return `${defaultCountryCode}${digits.slice(1)}`;
   return digits;
+}
+
+// Keep the client-facing label deliberately small and consistent. The security
+// dashboard and WhatsApp template need to state which reporting system raised
+// the concern, rather than exposing a mixture of provider/product names.
+function getSecurityReportingSystem(alert = {}) {
+  const values = typeof alert === 'string'
+    ? [alert]
+    : [
+      alert.reportingSecuritySystem,
+      alert.source,
+      alert.vendor,
+      alert.serviceSource,
+      alert.provider,
+      alert.category
+    ];
+  const sourceText = values.filter(Boolean).join(' ').toLowerCase();
+
+  if (/cloudflare|cloudflare one|cloudflare api|\bwarp\b|\bgateway\b/.test(sourceText)) {
+    return 'Cloudflare';
+  }
+
+  // This security-alert flow is collected from Microsoft Graph. Treat its
+  // product labels (Defender, Entra, Azure, etc.) as one reporting system.
+  return 'Microsoft Graph';
 }
 
 function buildSecurityAlertNotificationKey(alert = {}, recipient = '') {
@@ -172,7 +194,6 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
   const apiVersion = config.apiVersion || DEFAULT_GRAPH_VERSION;
   const templateName = config.templateName || DEFAULT_SECURITY_ALERT_TEMPLATE;
   const templateLanguage = config.templateLanguage || DEFAULT_TEMPLATE_LANGUAGE;
-  const headerImageUrl = config.headerImageUrl || DEFAULT_SECURITY_ALERT_IMAGE_URL;
   const url = `https://graph.facebook.com/${apiVersion}/${config.phoneNumberId}/messages`;
 
   const response = await axios.post(
@@ -186,20 +207,11 @@ async function sendSecurityAlertTemplate(alert = {}, config = {}) {
         language: { code: templateLanguage },
         components: [
           {
-            type: 'header',
-            parameters: [
-              {
-                type: 'image',
-                image: { link: headerImageUrl }
-              }
-            ]
-          },
-          {
             type: 'body',
             parameters: [
               { type: "text", text: severity },
               { type: "text", text: toTemplateText(alert.issue || alert.title || alert.displayName || alert.name, "Security alert") },
-              { type: "text", text: toTemplateText(alert.source || alert.category || alert.vendor, "StackOps Security") },
+              { type: "text", text: toTemplateText(getSecurityReportingSystem(alert), "Microsoft Graph") },
               { type: "text", text: eventTime },
               { type: "text", text: toTemplateText(getSecurityAlertAction(alert), "Review the event immediately") }
             ]
@@ -270,6 +282,7 @@ module.exports = {
   buildSecurityAlertNotificationKey,
   buildSecurityAlertMessage,
   formatDateTime,
+  getSecurityReportingSystem,
   getSecurityAlertSeverities,
   normalizeSeverity,
   normalizeWhatsAppRecipient,

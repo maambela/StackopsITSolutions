@@ -16359,6 +16359,20 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   border-radius: 30px;
 }
 
+/* Keep the summary tiles compact and consistent across Sunbird dashboards. */
+.sunbird-identity-dashboard .sunbird-id-metrics .sunbird-id-metric-card {
+  min-height: 116px;
+  aspect-ratio: auto;
+  padding: 12px 14px;
+}
+
+@media (max-width: 720px) {
+  .sunbird-identity-dashboard .sunbird-id-metrics .sunbird-id-metric-card {
+    min-height: 92px;
+    padding: 10px;
+  }
+}
+
 /* Client Portal sign-in buttons use the supplied liquid-glass button motion. */
 #login-choice-card #signin-choices #microsoft-signin-btn,
 #login-choice-card #signin-choices #email-signin-trigger {
@@ -16805,4 +16819,29 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
   color: #ffffff !important;
+}
+
+/* Every actual action button inside a Client Dashboard is a pill. Keeping this
+   at the end prevents older dashboard-specific button rules from reverting
+   evidence controls to square corners. */
+#dashboard-view button,
+#dashboard-view .network-security-card-cta span {
+  border-radius: 50px !important;
+}
+
+/* Apply the wobble to controls only—not their cards, tiles, or containers. */
+#dashboard-view button:hover,
+#dashboard-view button:focus-visible,
+#dashboard-view .network-security-card-cta:hover span,
+#dashboard-view .network-security-card-cta:focus-visible span {
+  transform-origin: center !important;
+  animation: clientDashboardButtonWobble 0.8s ease-out !important;
+}
+
+@keyframes clientDashboardButtonWobble {
+  0% { transform: translateY(-2px) scale(1.02) rotate(0deg); }
+  22% { transform: translateY(-3px) scale(1.07, 0.95) rotate(-1.25deg); }
+  46% { transform: translateY(-2px) scale(0.98, 1.05) rotate(1.1deg); }
+  68% { transform: translateY(-3px) scale(1.04, 0.98) rotate(-0.55deg); }
+  100% { transform: translateY(-2px) scale(1.02) rotate(0deg); }
 }

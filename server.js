@@ -15,6 +15,7 @@ const { ClientSecretCredential } = require('@azure/identity');
 const {
     buildSecurityAlertNotificationKey,
     getSecurityAlertSeverities,
+    getSecurityReportingSystem,
     normalizeSeverity: normalizeWhatsAppSeverity,
     normalizeWhatsAppRecipient,
     sendHelloWorldTest,
@@ -14596,7 +14597,6 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             apiVersion,
             templateName,
             templateLanguage,
-            imageUrl,
             limitValue,
             severityValue
         ] = await Promise.all([
@@ -14607,7 +14607,6 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_GRAPH_VERSION', 'v25.0'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alerts'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_IMAGE_URL', 'https://stackopsit.co.za/Images/Logos/Ctrl%20big.png'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
         ]);
@@ -14630,7 +14629,6 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             apiVersion,
             templateName,
             templateLanguage,
-            headerImageUrl: imageUrl,
             limit,
             severities
         };
@@ -14672,7 +14670,7 @@ function getWhatsAppSecurityAlertCandidates(payload = {}) {
         issue: incident.displayName || incident.title || 'Security incident',
         assignedTo: incident.assignedTo || 'Unassigned',
         timestamp: getWhatsAppSecurityAlertTime(incident),
-        source: incident.source || 'Microsoft Security Incident'
+        source: getSecurityReportingSystem(incident)
     }));
 
     return [...alerts, ...incidents]
@@ -14868,7 +14866,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
         category: alert.category || alert.serviceSource || alert.classification || 'Other',
         vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
-        source: alert.serviceSource || alert.vendorInformation?.provider || 'Microsoft Security',
+        reportingSecuritySystem: getSecurityReportingSystem(alert),
+        source: getSecurityReportingSystem(alert),
         user: (alert.userStates || [])[0]?.accountName ||
             alert.userPrincipalName ||
             alert.assignedTo ||
@@ -14886,7 +14885,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         created: incident.createdDateTime || new Date().toISOString(),
         updated: incident.lastUpdateDateTime || incident.lastUpdatedDateTime || new Date().toISOString(),
         assignedTo: incident.assignedTo || 'Unassigned',
-        redirectUrl: incident.incidentUrl || incident.webUrl || '#'
+        redirectUrl: incident.incidentUrl || incident.webUrl || '#',
+        reportingSecuritySystem: getSecurityReportingSystem(incident),
+        source: getSecurityReportingSystem(incident)
     }));
 
     const suspiciousSignIns = signIns
