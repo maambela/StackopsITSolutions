@@ -87,6 +87,58 @@ function buildSecurityAlertNotificationKey(alert = {}, recipient = '') {
   return `security-alert:${fingerprint}`;
 }
 
+function normalizeAlertFingerprintText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, '<id>')
+    .replace(/\b\d+\b/g, '<n>')
+    .replace(/[^a-z0-9@._:/-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+function normalizeAlertFingerprintAsset(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+// Providers often emit a new alert ID for the same ongoing condition. This
+// fingerprint intentionally excludes that provider ID and event timestamp so
+// the notification ledger can suppress the repeated condition during its
+// configured cooldown window.
+function buildSecurityAlertSemanticNotificationKey(alert = {}, recipient = '') {
+  const recordType = String(alert.recordType || alert.type || 'security').toLowerCase();
+  const affectedAsset = [
+    alert.domain,
+    alert.zoneName,
+    alert.zone,
+    alert.user,
+    alert.userPrincipalName,
+    alert.email,
+    alert.ipAddress,
+    alert.clientIpAddress,
+    alert.deviceName,
+    alert.hostName,
+    alert.indicator
+  ].filter(Boolean).join('|');
+  const identity = JSON.stringify({
+    source: getSecurityReportingSystem(alert),
+    type: recordType,
+    issue: normalizeAlertFingerprintText(alert.issue || alert.title || alert.displayName || alert.name),
+    category: normalizeAlertFingerprintText(alert.category || alert.alertType || alert.classification),
+    asset: normalizeAlertFingerprintAsset(affectedAsset)
+  });
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(`${recordType}|${normalizeWhatsAppRecipient(recipient)}|${identity}`)
+    .digest('hex');
+  return `security-alert:${fingerprint}`;
+}
+
 function formatDateTime(value, timeZone = 'Africa/Johannesburg') {
   const date = value ? new Date(value) : new Date();
   const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
@@ -280,6 +332,7 @@ async function sendSecurityAlert(alert, config) {
 module.exports = {
   DEFAULT_SECURITY_ALERT_SEVERITIES,
   buildSecurityAlertNotificationKey,
+  buildSecurityAlertSemanticNotificationKey,
   buildSecurityAlertMessage,
   formatDateTime,
   getSecurityReportingSystem,

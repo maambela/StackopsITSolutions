@@ -16838,10 +16838,15 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
 
+#dashboard-view button.client-dashboard-button-wobble {
+  transform-origin: center !important;
+  animation: clientDashboardButtonWobble 0.8s ease-out !important;
+}
+
 @keyframes clientDashboardButtonWobble {
   0% { transform: translateY(-2px) scale(1.02) rotate(0deg); }
-  22% { transform: translateY(-3px) scale(1.07, 0.95) rotate(-1.25deg); }
-  46% { transform: translateY(-2px) scale(0.98, 1.05) rotate(1.1deg); }
-  68% { transform: translateY(-3px) scale(1.04, 0.98) rotate(-0.55deg); }
+  22% { transform: translateY(-4px) scale(1.08, 0.94) rotate(-2.2deg); }
+  46% { transform: translateY(-2px) scale(0.97, 1.06) rotate(2deg); }
+  68% { transform: translateY(-4px) scale(1.05, 0.97) rotate(-1deg); }
   100% { transform: translateY(-2px) scale(1.02) rotate(0deg); }
 }

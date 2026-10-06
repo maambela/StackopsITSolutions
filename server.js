@@ -13,7 +13,7 @@ const { Webhook } = require('svix');
 const SVGtoPDF = require('svg-to-pdfkit');
 const { ClientSecretCredential } = require('@azure/identity');
 const {
-    buildSecurityAlertNotificationKey,
+    buildSecurityAlertSemanticNotificationKey,
     getSecurityAlertSeverities,
     getSecurityReportingSystem,
     normalizeSeverity: normalizeWhatsAppSeverity,
@@ -22,6 +22,11 @@ const {
     sendSecurityAlert
 } = require('./services/whatsapp');
 const { createWhatsAppNotificationLedger } = require('./services/whatsapp-notification-ledger');
+const {
+    getMicrosoftGraphSecurityNotificationIds,
+    normalizeCloudflareWebhookAlert,
+    normalizeMicrosoftGraphWebhookAlert
+} = require('./services/security-alert-webhooks');
 const {
     constantTimeStringEqual,
     extractWhatsAppMessageEvents,
@@ -1880,6 +1885,7 @@ async function ensureDatabaseSchema() {
         if (!pool) return;
         console.log('Ensuring database schema for automation...');
         await whatsappNotificationLedger.ensureWhatsAppSecurityAlertTable();
+        await ensureRealtimeSecurityAlertTable();
 
         // Intelligence automation scheduler tables must exist before the one-minute tick starts.
         await pool.query(`
@@ -14598,7 +14604,8 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             templateName,
             templateLanguage,
             limitValue,
-            severityValue
+            severityValue,
+            cooldownMinutesValue
         ] = await Promise.all([
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERTS_ENABLED', 'false'),
             readWhatsAppConfigValue('WHATSAPP_ACCESS_TOKEN'),
@@ -14608,7 +14615,8 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_TEMPLATE', 'security_monitoring_alerts'),
             readFirstWhatsAppConfigValue(['WHATSAPP_SECURITY_ALERT_TEMPLATE_LANGUAGE', 'WHATSAPP_TEMPLATE_LANGUAGE'], 'en_US'),
             readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_LIMIT', '20'),
-            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium')
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_SEVERITIES', 'critical,high,medium'),
+            readWhatsAppConfigValue('WHATSAPP_SECURITY_ALERT_COOLDOWN_MINUTES', '240')
         ]);
 
         const enabled = String(enabledValue || 'false').toLowerCase() === 'true';
@@ -14620,6 +14628,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
         const recipient = normalizeWhatsAppRecipient(recipientValue);
         const limit = Math.max(1, Number(limitValue || 20));
         const severities = getSecurityAlertSeverities(severityValue);
+        const cooldownMinutes = Math.max(1, Number(cooldownMinutesValue) || 240);
 
         return {
             enabled,
@@ -14630,7 +14639,8 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
             templateName,
             templateLanguage,
             limit,
-            severities
+            severities,
+            cooldownMinutes
         };
     } catch (error) {
         console.warn('[security_alerts:whatsapp_config_error] Failed to read WhatsApp config, defaulting to disabled:', error.message);
@@ -14640,7 +14650,7 @@ async function getWhatsAppSecurityAlertConfig({ requireEnabled = false } = {}) {
 
 const whatsappNotificationLedger = createWhatsAppNotificationLedger({
     pool,
-    buildKey: buildSecurityAlertNotificationKey,
+    buildKey: buildSecurityAlertSemanticNotificationKey,
     normalizeSeverity: normalizeWhatsAppSeverity
 });
 
@@ -14648,8 +14658,8 @@ function getWhatsAppSecurityAlertTime(item = {}) {
     return item.eventTime || item.timestamp || item.created || item.updated || item.createdDateTime || new Date().toISOString();
 }
 
-async function claimWhatsAppSecurityAlertNotification(alert, recipient) {
-    return whatsappNotificationLedger.claimWhatsAppSecurityAlertNotification(alert, recipient);
+async function claimWhatsAppSecurityAlertNotification(alert, recipient, options = {}) {
+    return whatsappNotificationLedger.claimWhatsAppSecurityAlertNotification(alert, recipient, options);
 }
 
 async function completeWhatsAppSecurityAlertNotification(notificationKey, result = {}) {
@@ -14697,7 +14707,9 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
 
     const results = [];
     for (const alert of candidates) {
-        const claim = await claimWhatsAppSecurityAlertNotification(alert, config.recipient);
+        const claim = await claimWhatsAppSecurityAlertNotification(alert, config.recipient, {
+            cooldownMinutes: config.cooldownMinutes
+        });
         if (!claim.claimed) {
             results.push({
                 key: claim.notificationKey || null,
@@ -14741,6 +14753,198 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
     };
 }
 
+const SECURITY_REALTIME_ALERT_TABLE = `
+    CREATE TABLE IF NOT EXISTS SecurityRealtimeWebhookAlerts (
+        ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        CompanyID BIGINT NOT NULL,
+        EventKey VARCHAR(100) NOT NULL,
+        ReportingSystem VARCHAR(64) NOT NULL,
+        ExternalAlertID VARCHAR(255) NULL,
+        AlertStatus VARCHAR(32) NOT NULL DEFAULT 'active',
+        Payload LONGTEXT NOT NULL,
+        OccurrenceCount INT UNSIGNED NOT NULL DEFAULT 1,
+        FirstSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        LastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (ID),
+        UNIQUE KEY uq_security_realtime_alert (CompanyID, EventKey),
+        KEY ix_security_realtime_alert_recent (CompanyID, LastSeenAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+`;
+let realtimeSecurityAlertTablePromise = null;
+
+async function ensureRealtimeSecurityAlertTable() {
+    if (!pool) throw new Error('MySQL pool is not available for real-time security alerts.');
+    if (!realtimeSecurityAlertTablePromise) {
+        realtimeSecurityAlertTablePromise = pool.query(SECURITY_REALTIME_ALERT_TABLE)
+            .catch(error => {
+                realtimeSecurityAlertTablePromise = null;
+                throw error;
+            });
+    }
+    await realtimeSecurityAlertTablePromise;
+}
+
+function isResolvedRealtimeSecurityAlert(alert = {}) {
+    return /resolved|closed|recovered|clear|normal/i.test(String(alert.status || alert.rawAlertEvent || ''));
+}
+
+function securityRealtimeAlertKey(alert = {}) {
+    return buildSecurityAlertSemanticNotificationKey(alert, 'security-dashboard');
+}
+
+async function persistRealtimeSecurityAlert(companyId, alert) {
+    if (!companyId) return;
+    await ensureRealtimeSecurityAlertTable();
+    const eventKey = securityRealtimeAlertKey(alert);
+    await pool.query(
+        `INSERT INTO SecurityRealtimeWebhookAlerts
+         (CompanyID, EventKey, ReportingSystem, ExternalAlertID, AlertStatus, Payload, OccurrenceCount, FirstSeenAt, LastSeenAt)
+         VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+           ExternalAlertID = VALUES(ExternalAlertID),
+           AlertStatus = VALUES(AlertStatus),
+           Payload = VALUES(Payload),
+           OccurrenceCount = OccurrenceCount + 1,
+           LastSeenAt = NOW()`,
+        [
+            companyId,
+            eventKey,
+            getSecurityReportingSystem(alert),
+            String(alert.correlationId || alert.id || '').slice(0, 255) || null,
+            String(alert.status || 'active').slice(0, 32),
+            JSON.stringify(alert)
+        ]
+    );
+}
+
+function mergeUniqueSecurityAlerts(baseAlerts = [], realtimeAlerts = []) {
+    const merged = new Map();
+    [...realtimeAlerts, ...baseAlerts].forEach(alert => {
+        if (!alert || typeof alert !== 'object') return;
+        const key = securityRealtimeAlertKey(alert);
+        if (!merged.has(key)) merged.set(key, alert);
+    });
+    return [...merged.values()].sort((a, b) => new Date(b.eventTime || b.created || 0) - new Date(a.eventTime || a.created || 0));
+}
+
+async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
+    if (!companyId || !pool) return payload;
+    await ensureRealtimeSecurityAlertTable();
+    const [rows] = await pool.query(
+        `SELECT Payload FROM SecurityRealtimeWebhookAlerts
+         WHERE CompanyID = ? AND LastSeenAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+         ORDER BY LastSeenAt DESC LIMIT 100`,
+        [companyId]
+    );
+    const realtimeAlerts = rows.map(row => {
+        try { return JSON.parse(row.Payload); } catch (_) { return null; }
+    }).filter(Boolean);
+    if (!realtimeAlerts.length) return payload;
+
+    const alerts = mergeUniqueSecurityAlerts(payload.alerts, realtimeAlerts);
+    const summary = {
+        ...(payload.summary || {}),
+        totalAlerts: alerts.length,
+        highSeverityAlerts: alerts.filter(alert => ['critical', 'high'].includes(normalizeWhatsAppSeverity(alert.severity))).length
+    };
+    return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, summary };
+}
+
+async function getSecurityWebhookConfig() {
+    const [graphClientState, cloudflareSecret, companyIdValue] = await Promise.all([
+        readWhatsAppConfigValue('MICROSOFT_GRAPH_SECURITY_ALERT_WEBHOOK_CLIENT_STATE'),
+        readWhatsAppConfigValue('CLOUDFLARE_SECURITY_ALERT_WEBHOOK_SECRET'),
+        readWhatsAppConfigValue('SECURITY_ALERTS_WEBHOOK_COMPANY_ID')
+    ]);
+    return {
+        graphClientState,
+        cloudflareSecret,
+        companyId: Number(companyIdValue) || null
+    };
+}
+
+async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
+    if (!companyId) throw new Error('SECURITY_ALERTS_WEBHOOK_COMPANY_ID is required to store real-time alerts.');
+    await persistRealtimeSecurityAlert(companyId, alert);
+    if (isResolvedRealtimeSecurityAlert(alert)) {
+        console.info(`[Security Webhook] Stored resolved ${provider} alert without WhatsApp notification.`, { id: alert.id });
+        return { stored: true, notification: null };
+    }
+    const notification = await notifySecurityAlertsViaWhatsApp({ alerts: [alert], incidents: [] }, {
+        requireEnabled: true,
+        types: ['alert'],
+        limit: 1
+    });
+    console.info(`[Security Webhook] Processed ${provider} alert.`, {
+        id: alert.id,
+        sent: notification.sent,
+        skipped: notification.skipped,
+        failed: notification.failed
+    });
+    return { stored: true, notification };
+}
+
+function buildCloudflarePollingSecurityAlerts(summary = {}) {
+    const alerts = [];
+    const seen = new Set();
+    const addAlert = ({ id, title, description, severity = 'medium', category, eventTime, user, ipAddress, domain }) => {
+        const key = `${title}|${category || ''}|${user || ipAddress || domain || ''}`.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        alerts.push({
+            id: `cloudflare-poll-${String(id || alerts.length + 1).slice(0, 180)}`,
+            title,
+            description,
+            severity: normalizeSecuritySeverity(severity),
+            status: 'active',
+            created: eventTime || summary.fetchedAt || new Date().toISOString(),
+            eventTime: eventTime || summary.fetchedAt || new Date().toISOString(),
+            category: category || 'Cloudflare Security',
+            source: 'Cloudflare',
+            reportingSecuritySystem: 'Cloudflare',
+            vendor: 'Cloudflare',
+            user: user || null,
+            ipAddress: ipAddress || null,
+            domain: domain || null,
+            cloudflareApiSignal: true
+        });
+    };
+
+    // These are real observations/finding feeds. Configuration gaps and every
+    // routine log line are intentionally excluded to avoid client alert noise.
+    (Array.isArray(summary.accessLogs) ? summary.accessLogs : [])
+        .filter(log => /block|deny|fail/i.test(String(log.action || log.status || '')))
+        .slice(0, 10)
+        .forEach((log, index) => addAlert({
+            id: log.id || `access-${index}`,
+            title: `Cloudflare Access ${log.action || 'blocked'} event`,
+            description: [log.userEmail, log.appName, log.country, log.ipAddress].filter(Boolean).join(' | ') || 'Cloudflare Access recorded a denied or blocked request.',
+            severity: 'high',
+            category: 'Access',
+            eventTime: log.timestamp,
+            user: log.userEmail,
+            ipAddress: log.ipAddress,
+            domain: log.appName
+        }));
+
+    const addFindingRows = (rows, category, fallbackTitle) => {
+        (Array.isArray(rows) ? rows : []).slice(0, 10).forEach((finding, index) => addAlert({
+            id: finding.id || finding.uuid || `${category}-${index}`,
+            title: finding.title || finding.name || fallbackTitle,
+            description: finding.description || finding.status || `${category} reported a security finding.`,
+            severity: /critical/i.test(String(finding.severity || finding.priority || '')) ? 'critical' : /high/i.test(String(finding.severity || finding.priority || '')) ? 'high' : 'medium',
+            category,
+            eventTime: finding.createdAt || finding.created_on || finding.timestamp || finding.updatedAt,
+            domain: finding.domain || finding.zoneName || finding.zone
+        }));
+    };
+
+    addFindingRows(summary.casbFindings, 'CASB Dashboard', 'Cloudflare CASB finding');
+    addFindingRows(summary.securityInsights, 'Security Dashboard', 'Cloudflare security insight');
+    addFindingRows(summary.applicationSecurityReports, 'Application Security', 'Cloudflare application security finding');
+    return alerts;
+}
+
 async function buildSecurityEventsPayloadFromApi(options = {}) {
     console.log('[security_alerts:start] Security Alerts domain processing starting');
 
@@ -14781,13 +14985,20 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         throw error;
     }
 
-    console.log('[security_alerts:prepare_fetch:start] Preparing to fetch from 4 Microsoft Graph sources');
+    console.log('[security_alerts:prepare_fetch:start] Preparing Microsoft Graph and Cloudflare API security sources');
 
     const sourceSettled = await Promise.allSettled([
         fetchSecurityAlertRows(token),
         fetchSecurityIncidentRows(token),
         fetchSecurityThreatIndicatorRows(token),
-        fetchSecuritySignInRows(token)
+        fetchSecuritySignInRows(token),
+        getCloudflareNetworkSecuritySummary({ getSecret }).then(summary => ({
+            label: 'Cloudflare security polling',
+            summary,
+            warnings: [],
+            recordsFetched: 0,
+            ok: true
+        }))
     ]);
 
     function resolvedSource(index, fallback) {
@@ -14809,6 +15020,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     const incidentsResult = resolvedSource(1, { label: 'Incidents fetch', incidents: [] });
     const threatIndicatorsResult = resolvedSource(2, { label: 'Threat indicators', threats: [], optional: true });
     const signInsResult = resolvedSource(3, { label: 'Sign-ins fetch', signIns: [] });
+    const cloudflareResult = resolvedSource(4, { label: 'Cloudflare security polling', summary: null, optional: true });
 
     stages.push(
         {
@@ -14834,6 +15046,12 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             status: signInsResult.warnings?.length ? 'warning' : 'complete',
             recordsFetched: signInsResult.recordsFetched || 0,
             at: new Date().toISOString()
+        },
+        {
+            stage: 'cloudflare_security_polling:complete_or_warning',
+            status: cloudflareResult.warnings?.length ? 'warning' : 'complete',
+            recordsFetched: cloudflareResult.recordsFetched || 0,
+            at: new Date().toISOString()
         }
     );
 
@@ -14841,12 +15059,16 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     const incidents = Array.isArray(incidentsResult.incidents) ? incidentsResult.incidents : [];
     const externalThreatIndicators = Array.isArray(threatIndicatorsResult.threats) ? threatIndicatorsResult.threats : [];
     const signIns = Array.isArray(signInsResult.signIns) ? signInsResult.signIns : [];
+    const cloudflareAlerts = cloudflareResult.summary
+        ? buildCloudflarePollingSecurityAlerts(cloudflareResult.summary)
+        : [];
 
     allMetrics.recordsFetched =
         (alertsResult.recordsFetched || 0) +
         (incidentsResult.recordsFetched || 0) +
         (threatIndicatorsResult.recordsFetched || 0) +
-        (signInsResult.recordsFetched || 0);
+        (signInsResult.recordsFetched || 0) +
+        cloudflareAlerts.length;
 
     stages.push({
         stage: 'evidence_prepare:start',
@@ -14854,7 +15076,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         at: new Date().toISOString()
     });
 
-    console.log(`[security_alerts:evidence_prepare:start] Preparing evidence: ${alerts.length} alerts, ${incidents.length} incidents, ${externalThreatIndicators.length} external threats, ${signIns.length} sign-ins`);
+    console.log(`[security_alerts:evidence_prepare:start] Preparing evidence: ${alerts.length} Graph alerts, ${cloudflareAlerts.length} Cloudflare alerts, ${incidents.length} incidents, ${externalThreatIndicators.length} external threats, ${signIns.length} sign-ins`);
 
     const processedAlerts = alerts.map(alert => ({
         id: alert.id,
@@ -14875,6 +15097,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ipAddress: alert.ipAddress || alert.clientIpAddress || alert.sourceIpAddress || null,
         deviceName: alert.deviceName || alert.hostName || alert.hostname || null
     }));
+
+    processedAlerts.push(...cloudflareAlerts);
 
     const processedIncidents = incidents.map(incident => ({
         id: incident.id,
@@ -14961,7 +15185,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ...(alertsResult.warnings || []),
         ...(incidentsResult.warnings || []),
         ...(threatIndicatorsResult.warnings || []),
-        ...(signInsResult.warnings || [])
+        ...(signInsResult.warnings || []),
+        ...(cloudflareResult.warnings || [])
     ];
 
     rawWarnings = cleanSecurityCollectionWarnings(rawWarnings, {
@@ -15222,6 +15447,11 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: signIns.length,
                     recordsPrepared: suspiciousSignIns.length,
                     status: signInsResult.warnings?.length && !suspiciousSignIns.length ? 'warning' : 'complete'
+                },
+                cloudflare: {
+                    recordsFetched: cloudflareAlerts.length,
+                    recordsPrepared: cloudflareAlerts.length,
+                    status: cloudflareResult.warnings?.length && !cloudflareAlerts.length ? 'warning' : 'complete'
                 }
             },
             accounting: allMetrics,
@@ -15336,6 +15566,81 @@ async function fetchSecurityEventsPayloadFromApi(options = {}) {
     }
 }
 
+// Microsoft Graph validates a notification endpoint by POSTing validationToken.
+// After validation, each notification is checked against our clientState before
+// its full alert record is retrieved from Microsoft Graph.
+app.post('/api/webhooks/microsoft-security-alerts', async (req, res) => {
+    const validationToken = req.query?.validationToken;
+    if (typeof validationToken === 'string' && validationToken) {
+        return res.type('text/plain').status(200).send(validationToken);
+    }
+
+    try {
+        const config = await getSecurityWebhookConfig();
+        if (!config.graphClientState || !config.companyId) {
+            console.error('[Microsoft Security Webhook] Required webhook configuration is missing.');
+            return res.sendStatus(503);
+        }
+
+        const notifications = getMicrosoftGraphSecurityNotificationIds(req.body)
+            .filter(({ notification }) => constantTimeStringEqual(notification?.clientState, config.graphClientState));
+        if (!notifications.length) {
+            console.warn('[Microsoft Security Webhook] Rejected notification with an invalid clientState.');
+            return res.sendStatus(403);
+        }
+
+        // Microsoft expects a fast acknowledgement. The full Graph lookup and
+        // WhatsApp delivery continue after this verified acknowledgement.
+        res.sendStatus(202);
+        setImmediate(async () => {
+            for (const { id } of notifications) {
+                try {
+                    const token = await getMicrosoftGraphToken({ securityAlerts: true });
+                    const graphAlert = await fetchMicrosoftGraphJson(
+                        `https://graph.microsoft.com/v1.0/security/alerts/${encodeURIComponent(id)}`,
+                        token,
+                        `Microsoft Graph webhook alert ${id}`,
+                        { shared: false, retries: 1 }
+                    );
+                    await handleRealtimeSecurityAlert({
+                        companyId: config.companyId,
+                        alert: normalizeMicrosoftGraphWebhookAlert(graphAlert),
+                        provider: 'Microsoft Graph'
+                    });
+                } catch (error) {
+                    console.error('[Microsoft Security Webhook] Background processing failed:', error.message);
+                }
+            }
+        });
+    } catch (error) {
+        console.error('[Microsoft Security Webhook] Request failed:', error.message);
+        if (!res.headersSent) res.sendStatus(500);
+    }
+});
+
+// Cloudflare generic webhooks include the configured shared secret in the
+// cf-webhook-auth header. Every policy type can use this one endpoint.
+app.post('/api/webhooks/cloudflare-security-alerts', async (req, res) => {
+    try {
+        const config = await getSecurityWebhookConfig();
+        const suppliedSecret = req.get('cf-webhook-auth');
+        if (!config.cloudflareSecret || !config.companyId || !constantTimeStringEqual(suppliedSecret, config.cloudflareSecret)) {
+            console.warn('[Cloudflare Security Webhook] Rejected unauthenticated request.');
+            return res.sendStatus(403);
+        }
+
+        const alert = normalizeCloudflareWebhookAlert(req.body);
+        res.sendStatus(202);
+        setImmediate(() => {
+            handleRealtimeSecurityAlert({ companyId: config.companyId, alert, provider: 'Cloudflare' })
+                .catch(error => console.error('[Cloudflare Security Webhook] Background processing failed:', error.message));
+        });
+    } catch (error) {
+        console.error('[Cloudflare Security Webhook] Request failed:', error.message);
+        if (!res.headersSent) res.sendStatus(500);
+    }
+});
+
 app.get('/api/db/security-events', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
@@ -15349,8 +15654,11 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
         if (rows.length > 0 && rows[0].Payload) {
             try {
                 const payload = JSON.parse(rows[0].Payload);
-                if (payload && payload.success) {
-                    return res.json({ ...payload, source: 'db', fetchedAt: rows[0].LastUpdated });
+                if (payload && typeof payload === 'object') {
+                    const mergedPayload = await mergeStoredRealtimeSecurityAlerts(context.companyId, payload);
+                    if (mergedPayload.success) {
+                        return res.json({ ...mergedPayload, source: 'db', fetchedAt: rows[0].LastUpdated });
+                    }
                 }
             } catch (_) {}
         }
@@ -15361,7 +15669,8 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
              VALUES (?, ?, NOW())`,
             [context.companyId, JSON.stringify(api)]
         );
-        return res.json({ ...api, source: 'api-fallback' });
+        const mergedApi = await mergeStoredRealtimeSecurityAlerts(context.companyId, api);
+        return res.json({ ...mergedApi, source: 'api-fallback' });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -15386,14 +15695,15 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         }
 
         const payload = await fetchSecurityEventsPayloadFromApi();
+        const payloadWithRealtimeAlerts = await mergeStoredRealtimeSecurityAlerts(tenant.companyId, payload);
         console.log(`[Security Events] Compiled cached/live SOC payload for ${userEmail}:`, {
-            alerts: payload.alerts.length,
-            incidents: payload.incidents.length,
-            mitre: payload.mitre.length,
-            usersUnderAttack: payload.signIns.usersUnderAttack.length
+            alerts: payloadWithRealtimeAlerts.alerts.length,
+            incidents: payloadWithRealtimeAlerts.incidents.length,
+            mitre: payloadWithRealtimeAlerts.mitre.length,
+            usersUnderAttack: payloadWithRealtimeAlerts.signIns.usersUnderAttack.length
         });
 
-        const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload });
+        const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload: payloadWithRealtimeAlerts });
         if (securityEvidenceService && tenant.companyId) {
             securityEvidenceService.persistProcessedEvidence({
                 companyId: tenant.companyId,
@@ -15601,8 +15911,8 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
 
 /**
  * Route: POST /api/security-events/whatsapp-alerts
- * Sends current Microsoft security alerts/incidents to the configured WhatsApp recipient.
- * Outbound-only: no WhatsApp webhook or inbound message handling is required.
+ * Sends current Microsoft Graph and stored Cloudflare security alerts/incidents
+ * to the configured WhatsApp recipient through the same deduplication path.
  */
 app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, res) => {
     try {
@@ -15616,7 +15926,10 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
             });
         }
 
-        const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
+        const payload = await mergeStoredRealtimeSecurityAlerts(
+            tenant.companyId,
+            await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true })
+        );
         const severities = getSecurityAlertSeverities(req.body?.severities || req.query.severities || 'critical,high,medium');
         const types = String(req.body?.types || req.query.types || 'alert,incident')
             .split(',')
@@ -16220,7 +16533,10 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger) {
     if (!securityEvidenceService) throw new Error('Security evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Security Alerts';
     try {
-        const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
+        // The scheduled collection is the automatic notification path.  The
+        // notification ledger suppresses recurring provider noise before any
+        // WhatsApp message is sent.
+        const payload = await fetchSecurityEventsPayloadFromApi();
         const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: 'sunbird', payload });
         await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
         const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });

@@ -4,6 +4,7 @@ const axios = require('axios');
 
 const {
   buildSecurityAlertNotificationKey,
+  buildSecurityAlertSemanticNotificationKey,
   getSecurityReportingSystem,
   getSecurityAlertSeverities,
   normalizeWhatsAppRecipient,
@@ -35,6 +36,23 @@ test('WhatsApp notification key is scoped to its recipient', () => {
   assert.notEqual(
     buildSecurityAlertNotificationKey(alert, '27762609804'),
     buildSecurityAlertNotificationKey(alert, '27820000000')
+  );
+});
+
+test('semantic notification key groups recurring provider alerts but keeps different assets separate', () => {
+  const original = {
+    recordType: 'alert', id: 'cloudflare-1', source: 'Cloudflare One',
+    issue: 'Gateway policy blocked 203.0.113.42', ipAddress: '203.0.113.42'
+  };
+  const repeated = { ...original, id: 'cloudflare-2', issue: 'Gateway policy blocked 203.0.113.99' };
+  const differentAsset = { ...repeated, ipAddress: '198.51.100.8' };
+  assert.equal(
+    buildSecurityAlertSemanticNotificationKey(original, '27762609804'),
+    buildSecurityAlertSemanticNotificationKey(repeated, '27762609804')
+  );
+  assert.notEqual(
+    buildSecurityAlertSemanticNotificationKey(original, '27762609804'),
+    buildSecurityAlertSemanticNotificationKey(differentAsset, '27762609804')
   );
 });
 

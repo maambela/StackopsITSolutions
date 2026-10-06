@@ -1138,6 +1138,7 @@ function normalizeSummaryMetrics(project) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    enableClientDashboardButtonWobble();
     setupEventListeners();
     initializePortalMobileDashboard();
     setupSessionManagement();
@@ -2388,6 +2389,28 @@ let sunbirdIdentityTableState = {
     sort: 'risk'
 };
 let lockedSunbirdInsightEvidenceKey = null;
+
+function enableClientDashboardButtonWobble() {
+    const dashboardView = document.getElementById('dashboard-view');
+    if (!dashboardView || dashboardView.dataset.buttonWobbleReady === 'true') return;
+
+    dashboardView.dataset.buttonWobbleReady = 'true';
+    dashboardView.addEventListener('pointerover', event => {
+        const button = event.target.closest('button');
+        if (!button || !dashboardView.contains(button) || button.contains(event.relatedTarget)) return;
+
+        // Dynamically-rendered dashboards reuse the same root. Toggling this
+        // class explicitly restarts the animation for every button hover.
+        button.classList.remove('client-dashboard-button-wobble');
+        void button.offsetWidth;
+        button.classList.add('client-dashboard-button-wobble');
+    });
+    dashboardView.addEventListener('pointerout', event => {
+        const button = event.target.closest('button');
+        if (!button || button.contains(event.relatedTarget)) return;
+        button.classList.remove('client-dashboard-button-wobble');
+    });
+}
 
 function escapeIdentityText(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -5302,10 +5325,11 @@ function setupSunbirdSecurityDashboard() {
 
 async function sendLatestSunbirdSecurityAlertToWhatsApp() {
     await sendSunbirdWhatsAppTest({
-        endpoint: '/api/whatsapp/test-hello',
+        endpoint: '/api/security-events/whatsapp-alerts',
         buttonId: 'sunbird-security-whatsapp-test-btn',
         statusId: 'sunbird-security-whatsapp-test-status',
-        loadingText: 'Sending security alert test...'
+        loadingText: 'Sending latest live security alert...',
+        requestBody: { limit: 1, severities: 'critical,high,medium', types: 'alert,incident' }
     });
 }
 
@@ -5318,7 +5342,7 @@ async function sendSunbirdWhatsAppHelloWorldTest() {
     });
 }
 
-async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingText }) {
+async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingText, requestBody }) {
     const button = document.getElementById(buttonId);
     const status = document.getElementById(statusId);
     const token = localStorage.getItem('authToken');
@@ -5346,7 +5370,8 @@ async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingTe
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
-            }
+            },
+            body: requestBody ? JSON.stringify(requestBody) : undefined
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.success) {
@@ -5354,7 +5379,9 @@ async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingTe
         }
 
         if (status) {
-            status.textContent = `Meta accepted ${data.templateName || 'WhatsApp template'}: ${data.messageId || 'No message ID returned'}`;
+            status.textContent = typeof data.sent === 'number'
+                ? data.message
+                : `Meta accepted ${data.templateName || 'WhatsApp template'}: ${data.messageId || 'No message ID returned'}`;
             status.className = 'success';
         }
     } catch (error) {
@@ -11510,13 +11537,40 @@ function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
     const signals = buildCloudflareSecuritySignals();
     if (!signals.notificationCount) return data;
     const payload = data.payload && typeof data.payload === 'object' ? data.payload : data;
-    const stripCloudflare = row => !row?.cloudflareOneSignal && !/^cloudflare-/i.test(String(row?.id || ''));
-    const alerts = [...signals.alerts, ...(Array.isArray(payload.alerts) ? payload.alerts.filter(stripCloudflare) : [])];
-    const incidents = [...signals.incidents, ...(Array.isArray(payload.incidents) ? payload.incidents.filter(stripCloudflare) : [])];
-    const baseAlerts = alerts.filter(alert => !alert.cloudflareOneSignal);
-    const baseIncidents = incidents.filter(incident => !incident.cloudflareOneSignal);
-    const activityFeed = [...signals.activityFeed, ...(Array.isArray(payload.activityFeed) ? payload.activityFeed.filter(stripCloudflare) : [])];
-    const recommendations = [...signals.recommendations, ...(Array.isArray(payload.recommendations) ? payload.recommendations.filter(stripCloudflare) : [])];
+    // API-polled Cloudflare findings are authoritative. Do not show the same
+    // categories again as locally generated snapshot signals.
+    const polledCloudflareCategories = new Set(
+        (Array.isArray(payload.alerts) ? payload.alerts : [])
+            .filter(row => row?.cloudflareApiSignal)
+            .map(row => String(row.category || '').toLowerCase())
+            .filter(Boolean)
+    );
+    const generatedAlerts = signals.alerts.filter(alert => !polledCloudflareCategories.has(String(alert.category || '').toLowerCase()));
+    const generatedIncidents = signals.incidents.filter(incident => !polledCloudflareCategories.has(String(incident.category || '').toLowerCase()));
+    // Retain any older webhook alerts, while replacing only the generated
+    // snapshot signals and collapsing equivalent rows.
+    const stripGeneratedCloudflare = row => !(row?.cloudflareOneSignal && !row?.cloudflareWebhook);
+    const dedupeRows = rows => {
+        const unique = new Map();
+        rows.forEach(row => {
+            const key = [
+                row?.source || row?.vendor || '',
+                row?.title || row?.displayName || row?.name || '',
+                row?.category || '',
+                row?.domain || row?.zoneName || row?.user || row?.ipAddress || ''
+            ].join('|').toLowerCase().replace(/\b\d+\b/g, '<n>').replace(/\s+/g, ' ').trim();
+            if (key && !unique.has(key)) unique.set(key, row);
+        });
+        return [...unique.values()];
+    };
+    const alerts = dedupeRows([...generatedAlerts, ...(Array.isArray(payload.alerts) ? payload.alerts.filter(stripGeneratedCloudflare) : [])]);
+    const incidents = dedupeRows([...generatedIncidents, ...(Array.isArray(payload.incidents) ? payload.incidents.filter(stripGeneratedCloudflare) : [])]);
+    const baseAlerts = alerts.filter(alert => !alert.cloudflareOneSignal || alert.cloudflareWebhook);
+    const baseIncidents = incidents.filter(incident => !incident.cloudflareOneSignal || incident.cloudflareWebhook);
+    const generatedCloudflareAlerts = alerts.filter(alert => alert.cloudflareOneSignal && !alert.cloudflareWebhook);
+    const generatedCloudflareIncidents = incidents.filter(incident => incident.cloudflareOneSignal && !incident.cloudflareWebhook);
+    const activityFeed = dedupeRows([...signals.activityFeed, ...(Array.isArray(payload.activityFeed) ? payload.activityFeed.filter(stripGeneratedCloudflare) : [])]);
+    const recommendations = dedupeRows([...signals.recommendations, ...(Array.isArray(payload.recommendations) ? payload.recommendations.filter(stripGeneratedCloudflare) : [])]);
     const baseSummary = payload.summary || {};
     const baseHigh = baseAlerts.filter(alert => ['critical', 'high'].includes(String(alert.severity || '').toLowerCase())).length;
     const baseActive = baseIncidents.filter(incident => ['active', 'inprogress', 'newalert'].includes(String(incident.status || '').toLowerCase())).length;
@@ -11541,12 +11595,12 @@ function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
         topTargetedUsers: null,
         summary: {
             ...baseSummary,
-            highSeverityAlerts: baseHigh + signals.alerts.filter(alert => ['critical', 'high'].includes(String(alert.severity || '').toLowerCase())).length,
-            activeIncidents: baseActive + signals.incidents.filter(incident => ['active', 'inprogress', 'newalert'].includes(String(incident.status || '').toLowerCase())).length,
-            totalAlerts: baseTotal + signals.alerts.length,
-            securityScore: Math.max(0, Math.min(100, securityScore - signals.scorePenalty)),
-            cloudflareAlerts: signals.alerts.length,
-            cloudflareIncidents: signals.incidents.length,
+            highSeverityAlerts: baseHigh + generatedCloudflareAlerts.filter(alert => ['critical', 'high'].includes(String(alert.severity || '').toLowerCase())).length,
+            activeIncidents: baseActive + generatedCloudflareIncidents.filter(incident => ['active', 'inprogress', 'newalert'].includes(String(incident.status || '').toLowerCase())).length,
+            totalAlerts: baseTotal + generatedCloudflareAlerts.length,
+            securityScore: Math.max(0, Math.min(100, securityScore - (polledCloudflareCategories.size ? 0 : signals.scorePenalty))),
+            cloudflareAlerts: alerts.filter(alert => /cloudflare/i.test(String(alert.source || alert.vendor || ''))).length,
+            cloudflareIncidents: incidents.filter(incident => /cloudflare/i.test(String(incident.source || incident.vendor || ''))).length,
             cloudflareIntegrated: true
         }
     };
