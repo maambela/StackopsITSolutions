@@ -16793,16 +16793,6 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   border-radius: inherit !important;
 }
 
-/* All Portal buttons share the same hover wobble. */
-button:not(:disabled):hover,
-button:not(:disabled):focus-visible,
-[role="button"]:hover,
-[role="button"]:focus-visible {
-  transform-origin: center;
-  will-change: transform;
-  animation: liquidWobble 0.8s ease-out both !important;
-}
-
 /* Credential Evidence actions use the Client Dashboard pill treatment. */
 .credential-evidence-actions button,
 .credential-evidence-browse,
@@ -16815,13 +16805,4 @@ button:not(:disabled):focus-visible,
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
   color: #ffffff !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  button:not(:disabled):hover,
-  button:not(:disabled):focus-visible,
-  [role="button"]:hover,
-  [role="button"]:focus-visible {
-    animation: none !important;
-  }
 }
