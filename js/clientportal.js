@@ -14160,6 +14160,25 @@ window.toggleBillingItems = function() {
 };
 
 // Switch billing menu for Sunbird users
+function enableSunbirdBillingDashboardNavigation(billingCard) {
+    if (!billingCard || billingCard.dataset.dashboardNavigationReady === 'true') return;
+
+    billingCard.dataset.dashboardNavigationReady = 'true';
+    billingCard.addEventListener('click', event => {
+        // Preserve controls inside the preview, including the existing dashboard button.
+        if (event.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+
+        const dashboardTargetByView = {
+            security: 'security',
+            backup: 'backup',
+            applications: 'applications'
+        };
+        const dashboardTarget = dashboardTargetByView[billingCard.dataset.sunbirdView];
+
+        if (dashboardTarget) window.openSunbirdFullDashboard(dashboardTarget);
+    });
+}
+
 window.switchBillingMenu = async function(menuItem) {
     sunbirdBillingMenuSelection = menuItem;
 
@@ -14181,6 +14200,7 @@ window.switchBillingMenu = async function(menuItem) {
 
     const billingCard = document.getElementById('billing-card');
     if (!billingCard) return;
+    enableSunbirdBillingDashboardNavigation(billingCard);
     billingCard.dataset.sunbirdView = menuItem;
 
     const placeholderViews = {

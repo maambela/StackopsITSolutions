@@ -133,6 +133,106 @@
             box-shadow: 0 0 20px rgba(255, 120, 2, 0.6), 0 8px 20px rgba(255, 120, 2, 0.3);
         }
 
+        .hero-buttons > .glow-wrap:not(:first-child) .link-content,
+        .cta-buttons .glow-wrap .link-content {
+            position: relative;
+            z-index: 10;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            min-height: 42px;
+            padding: 0 18px;
+            border-radius: 999px;
+            background: rgba(10, 12, 15, 0.8);
+            border: 1px solid rgba(255, 145, 70, 0.65);
+            border-top: 1px solid rgba(255, 255, 255, 0.38);
+            border-left: 1px solid rgba(255, 255, 255, 0.28);
+            box-shadow: 0 0 0 1px rgba(255, 120, 2, 0.18), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(12px) saturate(150%);
+            -webkit-backdrop-filter: blur(12px) saturate(150%);
+            color: rgba(255, 255, 255, 0.96);
+            text-decoration: none;
+            font-family: 'Inter', sans-serif !important;
+            font-size: 0.8rem;
+            font-weight: 100 !important;
+            line-height: 1.38 !important;
+            white-space: nowrap;
+            overflow: hidden;
+            transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease, color 0.35s ease;
+        }
+
+        .hero-buttons > .glow-wrap:not(:first-child) .link-content::before,
+        .cta-buttons .glow-wrap .link-content::before,
+        .site-header .glass-icon-btn::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+            transform: translateX(-120%);
+            transition: transform 0.6s ease;
+            pointer-events: none;
+        }
+
+        .hero-buttons > .glow-wrap:not(:first-child) .link-content:hover,
+        .cta-buttons .glow-wrap .link-content:hover {
+            transform: translateY(-2px) scale(1.02);
+            color: #ffffff;
+            border-color: rgba(255, 166, 95, 0.85);
+            box-shadow: 0 0 24px rgba(255, 120, 2, 0.28), 0 12px 30px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.24);
+        }
+
+        .hero-buttons > .glow-wrap:not(:first-child) .link-content:hover::before,
+        .cta-buttons .glow-wrap .link-content:hover::before,
+        .site-header .glass-icon-btn:hover::before {
+            transform: translateX(120%);
+        }
+
+        .site-header .glass-icon-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px !important;
+            height: 36px !important;
+            padding: 0 !important;
+            border-radius: 50% !important;
+            background: rgba(10, 12, 15, 0.8) !important;
+            border: 1px solid rgba(255, 145, 70, 0.65) !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.38) !important;
+            border-left: 1px solid rgba(255, 255, 255, 0.26) !important;
+            box-shadow: 0 0 0 1px rgba(255, 120, 2, 0.18), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.18) !important;
+            backdrop-filter: blur(12px) saturate(150%) !important;
+            -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+            color: rgba(255, 255, 255, 0.96) !important;
+            text-decoration: none !important;
+            overflow: hidden;
+            transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+            animation: none !important;
+        }
+
+        .site-header .glass-icon-btn i,
+        .site-header .glass-icon-btn svg {
+            font-size: 0.72rem;
+            line-height: 1;
+        }
+
+        .site-header .glass-icon-btn:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 166, 95, 0.85) !important;
+            box-shadow: 0 0 18px rgba(255, 120, 2, 0.22), 0 10px 28px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.24) !important;
+        }
+
+        .site-header #shop-link {
+            animation: dashboardGlassPulse 2s infinite !important;
+        }
+
+        @keyframes dashboardGlassPulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 120, 2, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.18); }
+            70% { box-shadow: 0 0 0 8px rgba(255, 120, 2, 0), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.18); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 120, 2, 0), 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.18); }
+        }
+
         .glowing-border-layer {
             position: absolute;
             top: -60px;
@@ -144,29 +244,96 @@
             animation: spin 3s linear infinite;
         }
 
-        .link-content {
+        .hero-buttons > .glow-wrap:first-child .glowing-border-layer {
+            display: none;
+        }
+
+        .hero-buttons > .glow-wrap:first-child {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            overflow: visible;
+        }
+
+        .hero-buttons > .glow-wrap:first-child:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .hero-buttons > .glow-wrap:first-child .link-content {
             position: relative;
             z-index: 10;
-            font-weight: 200;
-            font-size: clamp(0.7rem, 0.95vw, 0.85rem);
-            padding: clamp(0.4rem, 0.8vw, 0.6rem) clamp(1rem, 1.8vw, 1.5rem);
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
-            color: white;
-            background: black;
-            border: none;
-            border-radius: 40px;
-            cursor: pointer;
+            min-height: 42px;
+            padding: 0 18px;
+            font-family: 'Inter', sans-serif !important;
+            font-size: 0.8rem;
+            font-weight: 100 !important;
+            line-height: 1.38 !important;
+            color: var(--white, #ffffff);
             text-decoration: none;
-            transition: all 0.3s ease;
             white-space: nowrap;
-            margin: 2px;
+            border-radius: 50px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02));
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-top: 1px solid rgba(255, 255, 255, 0.35);
+            border-left: 1px solid rgba(255, 255, 255, 0.25);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.22);
+            backdrop-filter: blur(18px) saturate(180%);
+            -webkit-backdrop-filter: blur(18px) saturate(180%);
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+            overflow: hidden;
+            margin: 0;
+            animation: pulse-green 2s infinite;
         }
 
-        .link-content:hover {
-            color: #ff7802;
+        .hero-buttons > .glow-wrap:first-child .link-content::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 120%;
+            height: 100%;
+            background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+            transition: all 0.6s ease;
+            z-index: 0;
+        }
+
+        .hero-buttons > .glow-wrap:first-child .link-content:hover::before {
+            left: 100%;
+        }
+
+        .hero-buttons > .glow-wrap:first-child .link-content:hover {
+            color: #ffffff;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1));
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 12px 35px rgba(0, 188, 212, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+            border-color: rgba(255, 255, 255, 0.4);
+            animation: liquidWobble 0.8s ease-out;
+        }
+
+        @keyframes pulse-green {
+            0% {
+                box-shadow: 0 0 0 0 rgba(9, 116, 255, 0.4), 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(0, 230, 118, 0), 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(0, 230, 118, 0), 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+            }
+        }
+
+        @keyframes liquidWobble {
+            0% { transform: scale(1) rotate(0deg); }
+            20% { transform: scale(1.06, 0.96) rotate(-1deg); }
+            40% { transform: scale(0.98, 1.04) rotate(1deg); }
+            60% { transform: scale(1.03, 0.97) rotate(-0.5deg); }
+            80% { transform: scale(0.99, 1.01) rotate(0.5deg); }
+            100% { transform: scale(1) rotate(0deg); }
         }
 
         @keyframes spin {
@@ -2486,6 +2653,425 @@
                 font-size: 0.7rem !important;
             }
         }
+
+        /* Replace the legacy button layers on this page with one consistent glass treatment. */
+        .site-header .center-nav > li > a {
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 32px !important;
+            padding: 0 14px !important;
+            border: 1px solid rgba(255, 255, 255, 0.24) !important;
+            border-radius: 999px !important;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.13), 0 5px 16px rgba(0, 0, 0, 0.22) !important;
+            -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
+            backdrop-filter: blur(14px) saturate(145%) !important;
+            color: rgba(255, 255, 255, 0.92) !important;
+            text-decoration: none !important;
+            text-shadow: none !important;
+            transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease !important;
+        }
+
+        .site-header .center-nav > li > a::after {
+            display: none !important;
+        }
+
+        .site-header .center-nav > li > a:hover,
+        .site-header .center-nav > li > a:focus-visible {
+            border-color: rgba(255, 255, 255, 0.58) !important;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.055)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 6px 20px rgba(0, 0, 0, 0.28) !important;
+            color: #fff !important;
+        }
+
+        .site-header .center-nav > li > a.active {
+            border-color: rgba(255, 120, 2, 0.82) !important;
+            background: linear-gradient(145deg, rgba(255, 120, 2, 0.17), rgba(255, 120, 2, 0.055)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.17), 0 0 16px rgba(255, 120, 2, 0.19) !important;
+            color: #ffb16d !important;
+        }
+
+        .site-header .header-actions > .glass-icon-btn {
+            position: relative !important;
+            width: 38px !important;
+            height: 38px !important;
+            min-width: 38px !important;
+            min-height: 38px !important;
+            padding: 0 !important;
+            border: 1px solid rgba(255, 255, 255, 0.36) !important;
+            border-radius: 50% !important;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.035)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 6px 18px rgba(0, 0, 0, 0.3) !important;
+            -webkit-backdrop-filter: blur(14px) saturate(150%) !important;
+            backdrop-filter: blur(14px) saturate(150%) !important;
+            color: #fff !important;
+            animation: none !important;
+        }
+
+        .site-header .header-actions > .glass-icon-btn:hover,
+        .site-header .header-actions > .glass-icon-btn:focus-visible {
+            border-color: rgba(255, 255, 255, 0.7) !important;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.26), 0 8px 22px rgba(0, 0, 0, 0.34) !important;
+        }
+
+        .site-header .header-actions > #shop-link {
+            border-color: rgba(255, 120, 2, 0.85) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 0 14px rgba(255, 120, 2, 0.22), 0 6px 18px rgba(0, 0, 0, 0.3) !important;
+            animation: dashboardGlassPulse 2s infinite !important;
+        }
+
+        .hero-buttons > .glow-wrap,
+        .cta-buttons > .glow-wrap {
+            position: relative !important;
+            width: fit-content !important;
+            height: auto !important;
+            overflow: visible !important;
+            border: 0 !important;
+            border-radius: 999px !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            transform: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .glowing-border-layer,
+        .cta-buttons > .glow-wrap > .glowing-border-layer {
+            display: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content,
+        .cta-buttons > .glow-wrap > .link-content {
+            position: relative !important;
+            isolation: isolate;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.55rem !important;
+            min-height: 46px !important;
+            margin: 0 !important;
+            padding: 0 21px !important;
+            overflow: hidden !important;
+            border: 1px solid rgba(255, 255, 255, 0.43) !important;
+            border-radius: 999px !important;
+            background: linear-gradient(145deg, rgba(31, 32, 34, 0.94), rgba(8, 9, 10, 0.96)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 0 0 2px rgba(255, 255, 255, 0.09), 0 7px 18px rgba(0, 0, 0, 0.44) !important;
+            -webkit-backdrop-filter: blur(16px) saturate(145%) !important;
+            backdrop-filter: blur(16px) saturate(145%) !important;
+            color: #fff !important;
+            font-family: 'Inter', sans-serif !important;
+            font-size: 0.82rem !important;
+            font-weight: 100 !important;
+            line-height: 1.2 !important;
+            text-decoration: none !important;
+            white-space: nowrap !important;
+            transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease !important;
+            animation: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content::before,
+        .cta-buttons > .glow-wrap > .link-content::before {
+            content: "" !important;
+            position: absolute !important;
+            z-index: -1 !important;
+            inset: 0 !important;
+            background: linear-gradient(120deg, transparent 20%, rgba(255, 255, 255, 0.2) 50%, transparent 80%) !important;
+            transform: translateX(-120%) !important;
+            transition: transform 0.65s ease !important;
+            pointer-events: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:hover,
+        .hero-buttons > .glow-wrap > .link-content:focus-visible,
+        .cta-buttons > .glow-wrap > .link-content:hover,
+        .cta-buttons > .glow-wrap > .link-content:focus-visible {
+            border-color: rgba(255, 255, 255, 0.76) !important;
+            background: linear-gradient(145deg, rgba(43, 44, 46, 0.97), rgba(10, 11, 12, 0.98)) !important;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.26), 0 0 0 2px rgba(255, 255, 255, 0.12), 0 10px 24px rgba(0, 0, 0, 0.48) !important;
+            color: #fff !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:hover::before,
+        .hero-buttons > .glow-wrap > .link-content:focus-visible::before,
+        .cta-buttons > .glow-wrap > .link-content:hover::before,
+        .cta-buttons > .glow-wrap > .link-content:focus-visible::before {
+            transform: translateX(120%) !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:focus-visible,
+        .cta-buttons > .glow-wrap > .link-content:focus-visible,
+        .site-header .center-nav > li > a:focus-visible,
+        .site-header .header-actions > .glass-icon-btn:focus-visible {
+            outline: 2px solid rgba(255, 255, 255, 0.82) !important;
+            outline-offset: 3px !important;
+        }
+
+        @media (max-width: 768px) {
+            .site-header .center-nav > li > a {
+                min-height: 34px !important;
+                padding: 0 13px !important;
+            }
+
+            .hero-buttons > .glow-wrap,
+            .cta-buttons > .glow-wrap {
+                width: fit-content !important;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .hero-buttons .link-content,
+            .cta-buttons .link-content,
+            .site-header .center-nav > li > a,
+            .site-header .header-actions > .glass-icon-btn {
+                animation: none !important;
+            }
+        }
+
+        /* Use the supplied liquid-glass button treatment consistently on this page. */
+        .hero-buttons > .glow-wrap,
+        .cta-buttons > .glow-wrap {
+            overflow: visible !important;
+            border: 0 !important;
+            border-radius: 50px !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            transform: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .glowing-border-layer,
+        .cta-buttons > .glow-wrap > .glowing-border-layer {
+            display: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content,
+        .cta-buttons > .glow-wrap > .link-content,
+        .site-header .center-nav > li > a,
+        .site-header .header-actions > .glass-icon-btn {
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+            border: 1px solid rgba(255, 255, 255, 0.18) !important;
+            border-top-color: rgba(255, 255, 255, 0.35) !important;
+            border-left-color: rgba(255, 255, 255, 0.25) !important;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+            backdrop-filter: blur(20px) saturate(180%) !important;
+            color: #fff !important;
+            font-family: 'Inter', sans-serif !important;
+            font-weight: 100 !important;
+            text-decoration: none !important;
+            text-shadow: none !important;
+            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1) !important;
+            animation: pulse-green 2s infinite !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content,
+        .cta-buttons > .glow-wrap > .link-content,
+        .site-header .center-nav > li > a,
+        .site-header .header-actions > .glass-icon-btn {
+            isolation: isolate !important;
+            transition: background 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), border-color 0.4s ease, box-shadow 0.4s ease, color 0.4s ease !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content,
+        .cta-buttons > .glow-wrap > .link-content {
+            min-height: 42px !important;
+            margin: 0 !important;
+            padding: 0 26px !important;
+            border-radius: 50px !important;
+            font-size: 0.85rem !important;
+            line-height: 1.38 !important;
+            white-space: nowrap !important;
+        }
+
+        .site-header .center-nav > li > a {
+            min-height: 32px !important;
+            padding: 0 14px !important;
+            border-radius: 50px !important;
+            font-size: 0.76rem !important;
+        }
+
+        .site-header .center-nav > li > a::after {
+            display: none !important;
+        }
+
+        .site-header .header-actions > .glass-icon-btn {
+            width: 38px !important;
+            height: 38px !important;
+            min-width: 38px !important;
+            min-height: 38px !important;
+            padding: 0 !important;
+            border-radius: 50% !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content::before,
+        .cta-buttons > .glow-wrap > .link-content::before,
+        .site-header .center-nav > li > a::before,
+        .site-header .header-actions > .glass-icon-btn::before {
+            content: "" !important;
+            position: absolute !important;
+            z-index: 0 !important;
+            top: 0 !important;
+            left: -100% !important;
+            width: 120% !important;
+            height: 100% !important;
+            background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent) !important;
+            transform: none !important;
+            transition: left 0.6s ease !important;
+            pointer-events: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:hover::before,
+        .cta-buttons > .glow-wrap > .link-content:hover::before,
+        .site-header .center-nav > li > a:hover::before,
+        .site-header .header-actions > .glass-icon-btn:hover::before {
+            left: 100% !important;
+            transform: none !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content > *,
+        .cta-buttons > .glow-wrap > .link-content > *,
+        .site-header .center-nav > li > a > *,
+        .site-header .header-actions > .glass-icon-btn > * {
+            position: relative !important;
+            z-index: 1 !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:hover,
+        .cta-buttons > .glow-wrap > .link-content:hover {
+            transform: translateY(-2px) scale(1.02);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+            border-color: rgba(255, 255, 255, 0.4) !important;
+            box-shadow: 0 12px 35px rgba(0, 188, 212, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+            animation: liquidWobble 0.8s ease-out !important;
+        }
+
+        .site-header .center-nav > li > a:hover,
+        .site-header .center-nav > li > a:focus-visible,
+        .site-header .header-actions > .glass-icon-btn:hover,
+        .site-header .header-actions > .glass-icon-btn:focus-visible {
+            transform: translateY(-2px) scale(1.02);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+            border-color: rgba(255, 255, 255, 0.4) !important;
+            box-shadow: 0 12px 35px rgba(0, 188, 212, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+            animation: liquidWobble 0.8s ease-out !important;
+            color: #fff !important;
+        }
+
+        .site-header .center-nav > li > a.active {
+            color: #fff !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content,
+        .cta-buttons > .glow-wrap > .link-content,
+        .site-header .center-nav > li > a,
+        .site-header .header-actions > .glass-icon-btn {
+            border-color: rgba(255, 255, 255, 0.3) !important;
+            border-top-color: rgba(255, 255, 255, 0.48) !important;
+            border-left-color: rgba(255, 255, 255, 0.38) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:hover,
+        .cta-buttons > .glow-wrap > .link-content:hover,
+        .site-header .center-nav > li > a:hover,
+        .site-header .center-nav > li > a:focus-visible,
+        .site-header .header-actions > .glass-icon-btn:hover,
+        .site-header .header-actions > .glass-icon-btn:focus-visible {
+            border-color: rgba(255, 255, 255, 0.4) !important;
+        }
+
+        .site-header .center-nav > li > a.active {
+            border-color: rgba(255, 255, 255, 0.3) !important;
+            border-top-color: rgba(255, 255, 255, 0.48) !important;
+            border-left-color: rgba(255, 255, 255, 0.38) !important;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+        }
+
+        .site-header .header-actions > #shop-link {
+            border-color: rgba(255, 255, 255, 0.3) !important;
+            border-top-color: rgba(255, 255, 255, 0.48) !important;
+            border-left-color: rgba(255, 255, 255, 0.38) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+            animation: pulse-green 2s infinite !important;
+        }
+
+
+
+        @media (prefers-reduced-motion: reduce) {
+            .hero-buttons > .glow-wrap > .link-content,
+            .cta-buttons > .glow-wrap > .link-content,
+            .site-header .center-nav > li > a,
+            .site-header .header-actions > .glass-icon-btn {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+
+        .hero-buttons > .glow-wrap > .link-content:focus-visible,
+        .cta-buttons > .glow-wrap > .link-content:focus-visible,
+        .site-header .center-nav > li > a:focus-visible,
+        .site-header .header-actions > .glass-icon-btn:focus-visible {
+            outline: 2px solid rgba(255, 255, 255, 0.82) !important;
+            outline-offset: 3px !important;
+        }
+
+        .hero-buttons > .glow-wrap:nth-child(2) > .link-content,
+        .cta-buttons > .glow-wrap:nth-child(2) > .link-content {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+        }
+
+        .hero-buttons > .glow-wrap:nth-child(2) > .link-content:hover,
+        .cta-buttons > .glow-wrap:nth-child(2) > .link-content:hover {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+            box-shadow: 0 12px 35px rgba(0, 188, 212, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .site-header .center-nav > li > a.active {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+        }
+
+        .site-header .header-actions > #shop-link {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+        }
+
+        /* Keep the shared About-page pulse layers outside Shop's glass button. */
+        .site-header .header-actions > #shop-link {
+            overflow: visible !important;
+            animation: pulse-green 2s infinite !important;
+        }
+
+        .site-header .header-actions > #shop-link::before {
+            content: "" !important;
+            position: absolute !important;
+            inset: -8px !important;
+            width: auto !important;
+            height: auto !important;
+            border: 2px solid rgba(255, 255, 255, 0.6) !important;
+            border-radius: 50% !important;
+            background: none !important;
+            transform: none !important;
+            animation: pulse-ring 2s infinite !important;
+            z-index: -1 !important;
+        }
+
+        .site-header .header-actions > #shop-link::after {
+            content: "" !important;
+            position: absolute !important;
+            inset: -14px !important;
+            border-radius: 50% !important;
+            background: radial-gradient(circle, rgba(0, 128, 255, 0.35) 0%, rgba(0, 255, 128, 0) 70%) !important;
+            transform: none !important;
+            animation: pulse-fade 1s infinite !important;
+            z-index: -2 !important;
+        }
   </style>
 </head>
 <body>
@@ -3192,20 +3778,6 @@
     </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
