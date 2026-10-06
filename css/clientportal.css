@@ -16595,7 +16595,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .sunbird-risk-view-btn,
 .network-evidence-trigger,
 .btn-back,
-.btn-back-dashboard {
+.btn-back-dashboard,
+.credential-evidence-actions button,
+.credential-evidence-browse,
+.credential-evidence-modal-close {
   isolation: isolate;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.3) !important;
@@ -16621,7 +16624,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .sunbird-risk-view-btn,
 .network-evidence-trigger,
 .btn-back,
-.btn-back-dashboard {
+.btn-back-dashboard,
+.credential-evidence-actions button,
+.credential-evidence-browse,
+.credential-evidence-modal-close {
   position: relative;
 }
 
@@ -16635,7 +16641,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .sunbird-risk-view-btn::before,
 .network-evidence-trigger::before,
 .btn-back::before,
-.btn-back-dashboard::before {
+.btn-back-dashboard::before,
+.credential-evidence-actions button::before,
+.credential-evidence-browse::before,
+.credential-evidence-modal-close::before {
   content: "";
   position: absolute;
   z-index: 0;
@@ -16669,7 +16678,13 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back:hover,
 .btn-back:focus-visible,
 .btn-back-dashboard:hover,
-.btn-back-dashboard:focus-visible {
+.btn-back-dashboard:focus-visible,
+.credential-evidence-actions button:hover,
+.credential-evidence-actions button:focus-visible,
+.credential-evidence-browse:hover,
+.credential-evidence-browse:focus-visible,
+.credential-evidence-modal-close:hover,
+.credential-evidence-modal-close:focus-visible {
   transform: translateY(-2px) scale(1.02) !important;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
   border-color: rgba(255, 255, 255, 0.4) !important;
@@ -16702,7 +16717,13 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back:hover::before,
 .btn-back:focus-visible::before,
 .btn-back-dashboard:hover::before,
-.btn-back-dashboard:focus-visible::before {
+.btn-back-dashboard:focus-visible::before,
+.credential-evidence-actions button:hover::before,
+.credential-evidence-actions button:focus-visible::before,
+.credential-evidence-browse:hover::before,
+.credential-evidence-browse:focus-visible::before,
+.credential-evidence-modal-close:hover::before,
+.credential-evidence-modal-close:focus-visible::before {
   left: 100%;
 }
 
@@ -16716,7 +16737,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .sunbird-risk-view-btn:focus-visible,
 .network-evidence-trigger:focus-visible,
 .btn-back:focus-visible,
-.btn-back-dashboard:focus-visible {
+.btn-back-dashboard:focus-visible,
+.credential-evidence-actions button:focus-visible,
+.credential-evidence-browse:focus-visible,
+.credential-evidence-modal-close:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.82) !important;
   outline-offset: 3px;
 }
@@ -16732,8 +16756,72 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   .sunbird-risk-view-btn,
   .network-evidence-trigger,
   .btn-back,
-  .btn-back-dashboard {
+  .btn-back-dashboard,
+  .credential-evidence-actions button,
+  .credential-evidence-browse,
+  .credential-evidence-modal-close {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* The project-card dashboard button now uses the same direct glass button,
+   without the former animated border layer behind it. */
+.preview-container .glow-wrap {
+  overflow: visible !important;
+  border: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+
+.preview-container .glow-wrap:hover {
+  transform: none !important;
+  animation: none !important;
+}
+
+.preview-container .glow-wrap .glowing-border-layer {
+  display: none !important;
+}
+
+.preview-container .btn-view-full-dashboard {
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: inherit !important;
+}
+
+/* All Portal buttons share the same hover wobble. */
+button:not(:disabled):hover,
+button:not(:disabled):focus-visible,
+[role="button"]:hover,
+[role="button"]:focus-visible {
+  transform-origin: center;
+  will-change: transform;
+  animation: liquidWobble 0.8s ease-out both !important;
+}
+
+/* Credential Evidence actions use the Client Dashboard pill treatment. */
+.credential-evidence-actions button,
+.credential-evidence-browse,
+.credential-evidence-modal-close {
+  min-height: 34px;
+  border-radius: 50px !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-top-color: rgba(255, 255, 255, 0.48) !important;
+  border-left-color: rgba(255, 255, 255, 0.38) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):hover,
+  button:not(:disabled):focus-visible,
+  [role="button"]:hover,
+  [role="button"]:focus-visible {
+    animation: none !important;
   }
 }
