@@ -5828,6 +5828,44 @@ function getSunbirdSecurityReportingSystem(event = {}) {
         : 'Microsoft Graph';
 }
 
+function getSunbirdSecurityApiSource(event = {}) {
+    if (event.apiSource) return event.apiSource;
+    const providerFallback = getSunbirdSecurityReportingSystem(event);
+    if (event.recordType === 'alert') return event.serviceSource || event.productName || event.vendorInformation?.provider || event.vendor || providerFallback;
+    if (event.recordType === 'incident') return event.providerName || event.serviceSource || providerFallback;
+    if (event.recordType === 'signin') return event.appDisplayName || event.resourceDisplayName || event.clientAppUsed || providerFallback;
+    if (event.recordType === 'indicator') return event.targetProduct || providerFallback;
+    return event.cloudflareApiSignal ? (event.source || 'Cloudflare') : providerFallback;
+}
+
+function getSunbirdSecurityApiCategory(event = {}) {
+    if (event.apiCategory) return event.apiCategory;
+    if (event.recordType === 'alert') return event.categories?.join?.(', ') || event.category || event.classification || 'Not found';
+    if (event.recordType === 'incident') return event.determination || event.classification || 'Not found';
+    if (event.recordType === 'signin') return event.riskDetail || event.riskState || event.conditionalAccessStatus || 'Not found';
+    if (event.recordType === 'indicator') return event.threatType || event.indicatorType || 'Not found';
+    return event.cloudflareApiSignal ? (event.rawCategory || 'Not found') : 'Not found';
+}
+
+function isSunbirdSecurityIdentifier(value) {
+    const text = String(value || '').trim();
+    return /^[a-f0-9]{24,}$/i.test(text) || /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(text);
+}
+
+function getSunbirdSecurityDisplayTitle(event = {}) {
+    const title = event.title || event.displayName || event.name || event.message || '';
+    if (!isSunbirdSecurityIdentifier(title)) return title || 'Security event';
+    const description = String(event.description || '').trim();
+    return description && !/^external threat indicator from microsoft graph$/i.test(description)
+        ? description
+        : 'Threat indicator';
+}
+
+function getSunbirdSecurityDisplayAsset(event = {}) {
+    const asset = event.user || event.assignedTo || event.indicator || '';
+    return asset && !isSunbirdSecurityIdentifier(asset) ? asset : 'Not found';
+}
+
 function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     const body = document.getElementById('sunbird-security-body');
     if (!body) return;
@@ -5839,16 +5877,18 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     body.innerHTML = events.map(event => {
         const severity = String(event.severity || 'low').toLowerCase();
         const mitre = getSunbirdSecurityMitre(event);
+        const apiSource = getSunbirdSecurityApiSource(event);
+        const apiCategory = getSunbirdSecurityApiCategory(event);
         return `
             <tr>
                 <td data-label="Time">${escapeIdentityText(formatSunbirdDeviceDate(event.timestamp))}</td>
                 <td data-label="Severity"><span class="sunbird-id-risk ${severity === 'critical' || severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'safe'}">${escapeIdentityText(severity)}</span></td>
                 <td data-label="Type"><span class="sunbird-id-role-list"><span>${escapeIdentityText(event.recordType || 'event')}</span></span></td>
-                <td data-label="Incident / Alert">${escapeIdentityText(event.title || event.displayName || event.name || event.message || 'Security event')}</td>
+                <td data-label="Incident / Alert">${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</td>
                 <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.status || event.riskLevel || 'observed')}</span></td>
-                <td data-label="User / Asset">${escapeIdentityText(event.user || event.assignedTo || event.indicator || 'Unknown')}</td>
-                <td data-label="Source">${escapeIdentityText(getSunbirdSecurityReportingSystem(event))}</td>
-                <td data-label="Category">${escapeIdentityText(event.category || event.location || event.action || 'SOC signal')}</td>
+                <td data-label="User / Asset">${escapeIdentityText(getSunbirdSecurityDisplayAsset(event))}</td>
+                <td data-label="Source">${escapeIdentityText(apiSource)}</td>
+                <td data-label="Category">${escapeIdentityText(apiCategory)}</td>
                 <td data-label="MITRE">${escapeIdentityText(`${mitre.tactic} / ${mitre.technique}`)}</td>
                 <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${JSON.stringify(event.uid)})'>Open</button></td>
             </tr>

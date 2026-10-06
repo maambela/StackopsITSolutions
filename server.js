@@ -14384,10 +14384,12 @@ async function fetchSecuritySignInRows(token) {
         'location',
         'deviceDetail',
         'status',
+        'conditionalAccessStatus',
         'riskDetail',
         'riskLevelAggregated',
         'riskLevelDuringSignIn',
-        'riskState'
+        'riskState',
+        'resourceDisplayName'
     ].join(',');
 
     const result = await fetchGraphJsonWithTimeout({
@@ -15086,7 +15088,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         status: normalizeSecurityStatus(alert.status),
         created: alert.createdDateTime || new Date().toISOString(),
         eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
-        category: alert.category || alert.serviceSource || alert.classification || 'Other',
+        category: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
+        apiCategory: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
+        apiSource: alert.serviceSource || alert.productName || alert.vendorInformation?.provider || null,
         vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
         reportingSecuritySystem: getSecurityReportingSystem(alert),
         source: getSecurityReportingSystem(alert),
@@ -15110,6 +15114,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         updated: incident.lastUpdateDateTime || incident.lastUpdatedDateTime || new Date().toISOString(),
         assignedTo: incident.assignedTo || 'Unassigned',
         redirectUrl: incident.incidentUrl || incident.webUrl || '#',
+        apiCategory: incident.determination || incident.classification || null,
+        apiSource: incident.providerName || incident.serviceSource || null,
         reportingSecuritySystem: getSecurityReportingSystem(incident),
         source: getSecurityReportingSystem(incident)
     }));
@@ -15131,6 +15137,14 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 : (signIn.location?.countryOrRegion || 'Unknown Location'),
             country: signIn.location?.countryOrRegion || 'Unknown',
             riskLevel: signIn.riskLevelDuringSignIn || signIn.riskLevelAggregated || signIn.riskState || 'none',
+            category: signIn.riskDetail || signIn.riskState || signIn.conditionalAccessStatus || null,
+            apiCategory: signIn.riskDetail || signIn.riskState || signIn.conditionalAccessStatus || null,
+            apiSource: signIn.appDisplayName || signIn.resourceDisplayName || signIn.clientAppUsed || null,
+            appDisplayName: signIn.appDisplayName || null,
+            resourceDisplayName: signIn.resourceDisplayName || null,
+            clientAppUsed: signIn.clientAppUsed || null,
+            riskDetail: signIn.riskDetail || null,
+            conditionalAccessStatus: signIn.conditionalAccessStatus || null,
             status: signIn.status?.errorCode === 0 ? 'Success' : 'Failed',
             errorCode: signIn.status?.errorCode || 0,
             failureReason: signIn.status?.failureReason || (signIn.status?.errorCode ? `Sign-in error ${signIn.status.errorCode}` : 'Suspicious sign-in')
@@ -15159,7 +15173,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                         ? 'URL'
                         : 'FileHash',
         severity: normalizeSecuritySeverity(threat.severity),
-        action: threat.targetProduct || threat.action || 'Block',
+        action: threat.action || null,
+        apiCategory: threat.threatType || threat.indicatorType || null,
+        apiSource: threat.targetProduct || null,
         description: threat.description || 'External threat indicator from Microsoft Graph',
         created: threat.createdDateTime || new Date().toISOString(),
         source: 'microsoft_graph_tiIndicators',
