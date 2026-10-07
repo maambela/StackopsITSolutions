@@ -16829,16 +16829,17 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   border-radius: 50px !important;
 }
 
-/* Apply the wobble to controls only—not their cards, tiles, or containers. */
-#dashboard-view button:hover,
-#dashboard-view button:focus-visible,
+/* Apply the wobble to portal buttons only—not their cards, tiles, or containers.
+   This stylesheet is ClientPortal-only, and body scope also covers injected controls. */
+body button:hover:not(:disabled),
+#dashboard-view button:focus-visible:not(:disabled),
 #dashboard-view .network-security-card-cta:hover span,
 #dashboard-view .network-security-card-cta:focus-visible span {
   transform-origin: center !important;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
 
-#dashboard-view button.client-dashboard-button-wobble {
+#dashboard-view button.client-dashboard-button-wobble:not(:disabled) {
   transform-origin: center !important;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
@@ -16849,4 +16850,14 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   46% { transform: translateY(-2px) scale(0.97, 1.06) rotate(2deg); }
   68% { transform: translateY(-4px) scale(1.05, 0.97) rotate(-1deg); }
   100% { transform: translateY(-2px) scale(1.02) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body button:hover:not(:disabled),
+  #dashboard-view button:focus-visible:not(:disabled),
+  #dashboard-view button.client-dashboard-button-wobble:not(:disabled),
+  #dashboard-view .network-security-card-cta:hover span,
+  #dashboard-view .network-security-card-cta:focus-visible span {
+    animation: none !important;
+  }
 }
