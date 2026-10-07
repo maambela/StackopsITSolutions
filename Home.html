@@ -2041,6 +2041,152 @@
       }
     }
   </style>
+  <style id="homepage-menu-button-treatment">
+    /* Only the six homepage navigation tiles: the same liquid-glass surface
+       used by the header links, while retaining their square dimensions and
+       existing blue outer glow. */
+    .right-section .menu-grid > .menu-item {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)) !important;
+      backdrop-filter: blur(28px) saturate(200%) brightness(1.15) !important;
+      -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.15) !important;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      border-top-color: rgba(255, 255, 255, 0.48) !important;
+      border-left-color: rgba(255, 255, 255, 0.38) !important;
+      box-shadow:
+        0 0 10px rgba(30, 144, 255, 0.7),
+        0 0 6px rgba(120, 180, 255, 0.45),
+        0 8px 32px rgba(0, 0, 0, 0.2),
+        inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .right-section .menu-grid > .menu-item::before {
+      content: "";
+      position: absolute;
+      z-index: 0;
+      top: 0;
+      left: -130%;
+      width: 120%;
+      height: 100%;
+      pointer-events: none;
+      border-radius: inherit;
+      background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+      transition: left 0.6s ease;
+    }
+
+    .right-section .menu-grid > .menu-item::after {
+      content: "";
+      position: absolute;
+      inset: -14px;
+      z-index: -1;
+      opacity: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      background: radial-gradient(circle at 50% 45%, rgba(0, 110, 255, 0.42), rgba(0, 110, 255, 0) 67%);
+      filter: blur(8px);
+    }
+
+    .right-section .menu-grid > .menu-item:hover::before,
+    .right-section .menu-grid > .menu-item:focus-visible::before {
+      left: 100%;
+    }
+
+    .right-section .menu-grid > .menu-item:hover,
+    .right-section .menu-grid > .menu-item:focus-visible {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+      border-color: rgba(255, 255, 255, 0.4) !important;
+      animation: homepage-menu-button-wobble 0.78s ease-out, homepage-menu-button-live-glow 1.6s ease-in-out infinite !important;
+    }
+
+    .right-section .menu-grid > .menu-item:hover::after,
+    .right-section .menu-grid > .menu-item:focus-visible::after {
+      opacity: 1;
+      animation: homepage-menu-button-flash 0.78s ease-out;
+    }
+
+    @keyframes homepage-menu-button-wobble {
+      0% { transform: translateY(-8px) scale(1.02) rotate(0); }
+      22% { transform: translateY(-12px) scale(1.075, 0.94) rotate(-2.2deg); }
+      46% { transform: translateY(-7px) scale(0.975, 1.035) rotate(2deg); }
+      68% { transform: translateY(-10px) scale(1.025, 0.985) rotate(-1deg); }
+      100% { transform: translateY(-8px) scale(1.02) rotate(0); }
+    }
+
+    @keyframes homepage-menu-button-flash {
+      0% { opacity: 0; transform: scale(0.7); }
+      30% { opacity: 1; transform: scale(1.08); }
+      100% { opacity: 0.56; transform: scale(1); }
+    }
+
+    @keyframes homepage-menu-button-live-glow {
+      0%, 100% {
+        box-shadow: 0 0 10px rgba(30, 144, 255, 0.7), 0 0 6px rgba(120, 180, 255, 0.45), 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+      }
+      50% {
+        box-shadow: 0 0 22px rgba(0, 110, 255, 0.82), 0 0 42px rgba(30, 144, 255, 0.42), 0 12px 35px rgba(0, 0, 0, 0.28), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+      }
+    }
+  </style>
+<style id="homepage-menu-liquid-glass-refinement">
+  /* Keep the six navigation tiles dark and translucent so the page behind them
+     remains visible, rather than reading as solid grey cards. */
+  .right-section .menu-grid > .menu-item {
+    background: linear-gradient(135deg,
+      rgba(255, 255, 255, 0.11) 0%,
+      rgba(210, 232, 255, 0.055) 36%,
+      rgba(7, 15, 27, 0.30) 100%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(165%) brightness(1.06) !important;
+    backdrop-filter: blur(20px) saturate(165%) brightness(1.06) !important;
+    border-color: rgba(210, 238, 255, 0.56) !important;
+    box-shadow:
+      0 0 8px rgba(0, 110, 255, 0.78),
+      0 0 20px rgba(0, 110, 255, 0.42),
+      0 10px 28px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.48),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.26) !important;
+  }
+
+  .right-section .menu-grid > .menu-item::before {
+    left: -125% !important;
+    width: 92% !important;
+    opacity: 0.56 !important;
+    background: linear-gradient(116deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.08) 28%,
+      rgba(255, 255, 255, 0.34) 49%,
+      rgba(255, 255, 255, 0.08) 70%,
+      transparent 100%) !important;
+  }
+
+  .right-section .menu-grid > .menu-item:hover,
+  .right-section .menu-grid > .menu-item:focus-visible {
+    background: linear-gradient(135deg,
+      rgba(255, 255, 255, 0.19) 0%,
+      rgba(177, 218, 255, 0.09) 42%,
+      rgba(7, 19, 37, 0.28) 100%) !important;
+    border-color: rgba(231, 246, 255, 0.78) !important;
+  }
+</style>
+<style id="homepage-menu-glass-sweep-visibility">
+  .right-section .menu-grid > .menu-item::before {
+    z-index: 3 !important;
+    display: block !important;
+    opacity: 0.88 !important;
+    mix-blend-mode: screen;
+    filter: blur(0.35px);
+  }
+
+  .right-section .menu-grid > .menu-item > * {
+    position: relative;
+    z-index: 4;
+  }
+
+  .right-section .menu-grid > .menu-item:hover::before,
+  .right-section .menu-grid > .menu-item:focus-visible::before {
+    animation: homepage-menu-glass-sweep 920ms cubic-bezier(0.16, 0.72, 0.24, 1) both !important;
+  }
+</style>
 </head>
 
 <body>
