@@ -16612,6 +16612,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back-dashboard,
 .credential-evidence-actions button,
 .credential-evidence-browse,
+.sunbird-left-menu .sunbird-menu-item,
 .credential-evidence-modal-close {
   isolation: isolate;
   overflow: hidden;
@@ -16641,6 +16642,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back-dashboard,
 .credential-evidence-actions button,
 .credential-evidence-browse,
+.sunbird-left-menu .sunbird-menu-item,
 .credential-evidence-modal-close {
   position: relative;
 }
@@ -16658,6 +16660,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back-dashboard::before,
 .credential-evidence-actions button::before,
 .credential-evidence-browse::before,
+.sunbird-left-menu .sunbird-menu-item::before,
 .credential-evidence-modal-close::before {
   content: "";
   position: absolute;
@@ -16697,6 +16700,8 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .credential-evidence-actions button:focus-visible,
 .credential-evidence-browse:hover,
 .credential-evidence-browse:focus-visible,
+.sunbird-left-menu .sunbird-menu-item:hover,
+.sunbird-left-menu .sunbird-menu-item:focus-visible,
 .credential-evidence-modal-close:hover,
 .credential-evidence-modal-close:focus-visible {
   transform: translateY(-2px) scale(1.02) !important;
@@ -16736,6 +16741,8 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .credential-evidence-actions button:focus-visible::before,
 .credential-evidence-browse:hover::before,
 .credential-evidence-browse:focus-visible::before,
+.sunbird-left-menu .sunbird-menu-item:hover::before,
+.sunbird-left-menu .sunbird-menu-item:focus-visible::before,
 .credential-evidence-modal-close:hover::before,
 .credential-evidence-modal-close:focus-visible::before {
   left: 100%;
@@ -16754,6 +16761,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .btn-back-dashboard:focus-visible,
 .credential-evidence-actions button:focus-visible,
 .credential-evidence-browse:focus-visible,
+.sunbird-left-menu .sunbird-menu-item:focus-visible,
 .credential-evidence-modal-close:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.82) !important;
   outline-offset: 3px;
@@ -16773,6 +16781,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   .btn-back-dashboard,
   .credential-evidence-actions button,
   .credential-evidence-browse,
+  .sunbird-left-menu .sunbird-menu-item,
   .credential-evidence-modal-close {
     animation: none !important;
     transition: none !important;
@@ -16835,6 +16844,12 @@ body button:hover:not(:disabled),
 #dashboard-view button:focus-visible:not(:disabled),
 #dashboard-view .network-security-card-cta:hover span,
 #dashboard-view .network-security-card-cta:focus-visible span {
+  transform-origin: center !important;
+  animation: clientDashboardButtonWobble 0.8s ease-out !important;
+}
+
+body .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
+#dashboard-view .sunbird-left-menu .sunbird-menu-item:focus-visible:not(:disabled) {
   transform-origin: center !important;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
