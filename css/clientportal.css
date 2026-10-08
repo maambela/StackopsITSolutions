@@ -16838,12 +16838,28 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   border-radius: 50px !important;
 }
 
-/* Apply the wobble to portal buttons only—not their cards, tiles, or containers.
-   This stylesheet is ClientPortal-only, and body scope also covers injected controls. */
-body button:hover:not(:disabled),
-#dashboard-view button:focus-visible:not(:disabled),
-#dashboard-view .network-security-card-cta:hover span,
-#dashboard-view .network-security-card-cta:focus-visible span {
+/* Match the Control Center buttons to the Credential Security Open button. */
+.sunbird-left-menu .sunbird-menu-item {
+  border-radius: 50px !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-top-color: rgba(255, 255, 255, 0.48) !important;
+  border-left-color: rgba(255, 255, 255, 0.38) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.25) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  transition: background 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), border-color 0.4s ease, box-shadow 0.4s ease, color 0.4s ease !important;
+}
+
+.sunbird-left-menu .sunbird-menu-item.active {
+  border-color: rgba(255, 176, 91, 0.5) !important;
+  background: linear-gradient(135deg, rgba(255, 151, 46, 0.32), rgba(255, 112, 21, 0.14)) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2), 0 0 16px rgba(255, 141, 43, 0.12), inset 0 1px 1px rgba(255, 225, 194, 0.25) !important;
+}
+
+/* Keep wobble limited to regular action buttons; security-card actions stay still. */
+body button:hover:not(:disabled):not(.credential-security-onepassword-button):not(.sunbird-menu-item),
+#dashboard-view button:focus-visible:not(:disabled):not(.credential-security-onepassword-button):not(.sunbird-menu-item) {
   transform-origin: center !important;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
@@ -16854,9 +16870,25 @@ body .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
 }
 
-#dashboard-view button.client-dashboard-button-wobble:not(:disabled) {
+#dashboard-view button.client-dashboard-button-wobble:not(:disabled):not(.credential-security-onepassword-button) {
   transform-origin: center !important;
   animation: clientDashboardButtonWobble 0.8s ease-out !important;
+}
+
+body .credential-security-onepassword-button:hover,
+body .credential-security-onepassword-button:focus-visible,
+body .network-security-card-cta:hover,
+body .network-security-card-cta:focus-visible,
+body .network-security-card-cta:hover span,
+body .network-security-card-cta:focus-visible span {
+  animation: none !important;
+}
+
+body .project-card[data-project-id="9"]:hover,
+body .project-card[data-project-id="9"]:focus-within,
+body .project-card[data-project-id="10"]:hover,
+body .project-card[data-project-id="10"]:focus-within {
+  animation: none !important;
 }
 
 @keyframes clientDashboardButtonWobble {
@@ -16875,4 +16907,8 @@ body .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
   #dashboard-view .network-security-card-cta:focus-visible span {
     animation: none !important;
   }
+}
+
+body:has(#dashboard-section) .site-header {
+  box-shadow: 0 0 25px rgba(252, 116, 38, 0.85) !important;
 }

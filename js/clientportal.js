@@ -2398,6 +2398,7 @@ function enableClientDashboardButtonWobble() {
     dashboardView.addEventListener('pointerover', event => {
         const button = event.target.closest('button');
         if (!button || !dashboardView.contains(button) || button.contains(event.relatedTarget)) return;
+        if (button.closest('.project-card[data-project-id="9"]')) return;
 
         // Dynamically-rendered dashboards reuse the same root. Toggling this
         // class explicitly restarts the animation for every button hover.
