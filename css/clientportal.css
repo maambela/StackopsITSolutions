@@ -16857,6 +16857,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2), 0 0 16px rgba(255, 141, 43, 0.12), inset 0 1px 1px rgba(255, 225, 194, 0.25) !important;
 }
 
+.sunbird-left-menu .sunbird-menu-item::before {
+  box-shadow: none !important;
+}
+
 /* Keep wobble limited to regular action buttons; security-card actions stay still. */
 body button:hover:not(:disabled):not(.credential-security-onepassword-button):not(.sunbird-menu-item),
 #dashboard-view button:focus-visible:not(:disabled):not(.credential-security-onepassword-button):not(.sunbird-menu-item) {
