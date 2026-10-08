@@ -1803,6 +1803,22 @@
   background: rgba(22, 163, 74, 0.24);
 }
 
+#dashboard-view .sunbird-report-domain-breakdown .sunbird-report-domain-detail-card {
+  align-content: start;
+  border-radius: 10px;
+}
+
+#dashboard-view .sunbird-report-domain-breakdown .sunbird-report-domain-finding {
+  border-radius: 10px !important;
+}
+
+#dashboard-view .sunbird-report-domain-breakdown .sunbird-report-domain-finding:hover:not(:disabled):not(.sunbird-menu-item),
+#dashboard-view .sunbird-report-domain-breakdown .sunbird-report-domain-finding:focus-visible:not(:disabled):not(.sunbird-menu-item),
+#dashboard-view .sunbird-report-domain-breakdown .sunbird-report-domain-finding.client-dashboard-button-wobble:not(:disabled):not(.sunbird-menu-item) {
+  animation: none !important;
+  transform: none !important;
+}
+
 .sunbird-report-domain-finding p,
 .sunbird-report-domain-finding small {
   margin: 0;
