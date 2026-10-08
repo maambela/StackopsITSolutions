@@ -9078,3 +9078,238 @@ footer a:hover {
     border-radius: 30px;
   }
 }
+
+/* Wide Home layouts: keep the right panel aligned to the navbar edge. */
+@media (min-width: 1441px) and (max-width: 1720px) {
+  .right-section {
+    translate: 5px 0;
+  }
+}
+
+@media (min-width: 1721px) and (max-width: 1919px) {
+  .content {
+    margin-right: 14px;
+    padding-right: 0;
+  }
+
+  .right-section {
+    margin-right: 0 !important;
+  }
+}
+
+@media (min-width: 1920px) {
+  .content {
+    width: calc(50% + 886px);
+    max-width: none;
+    margin-left: calc((100% - 1800px) / 2);
+    margin-right: 14px;
+    padding-right: 0;
+  }
+
+  .right-section {
+    margin-right: 0 !important;
+  }
+}
+
+@media (min-width: 1441px) and (max-width: 1720px) and (max-height: 900px) {
+  .right-section {
+    translate: 3px 0;
+  }
+}
+
+@media (min-width: 1721px) and (max-width: 1919px) and (max-height: 900px) {
+  .right-section {
+    translate: calc(50vw - 632.5px) 0;
+  }
+}
+
+@media (min-width: 1920px) and (max-height: 900px) {
+  .right-section {
+    translate: calc(25vw - 178.75px) 0;
+  }
+}
+
+/* Wide Home hero: extend the cube and its image faces into the available gap,
+   while a fixed-width content frame preserves existing overlay placement. */
+@media (min-width: 1721px) and (max-width: 1919px) and (min-height: 901px) {
+  .left-section {
+    --home-wide-left-width: calc(6vw + clamp(300px, 45vw, 900px) - 28px);
+    --home-original-face-width: 42vw;
+    --home-wide-face-width: calc(
+      var(--home-wide-left-width) - (3vw - 14px) - clamp(1rem, 2vw, 3rem)
+    );
+    position: relative;
+    left: calc(14px - 3vw);
+    width: var(--home-wide-left-width);
+    margin-right: calc(clamp(300px, 45vw, 900px) - var(--home-wide-left-width));
+  }
+
+  .left-section > .cube-container {
+    position: absolute;
+    top: 0;
+    left: calc(3vw - 14px);
+    right: 0;
+    width: auto;
+    height: 100%;
+  }
+}
+
+@media (min-width: 1920px) and (min-height: 901px) {
+  .left-section {
+    --home-wide-left-width: min(
+      calc(106vw + clamp(300px, 45vw, 900px) - 1843px),
+      calc(100vw - 803px)
+    );
+    --home-original-face-width: calc(
+      clamp(300px, 45vw, 900px) -
+      clamp(0.5vw, 1vw, 1.5vw) -
+      clamp(1rem, 2vw, 3rem)
+    );
+    --home-wide-face-width: calc(
+      var(--home-wide-left-width) - (53vw - 921.5px) - clamp(1rem, 2vw, 3rem) - 10px
+    );
+    position: relative;
+    left: calc(921.5px - 53vw);
+    width: var(--home-wide-left-width);
+    margin-right: calc(clamp(300px, 45vw, 900px) - var(--home-wide-left-width));
+  }
+
+  .left-section > .cube-container {
+    position: absolute;
+    top: 0;
+    left: calc(53vw - 921.5px);
+    right: 10px;
+    width: auto;
+    height: 100%;
+  }
+}
+
+@media (min-width: 1721px) and (max-height: 900px) {
+  .content > .left-section {
+    --home-wide-left-width: calc(100vw - 647px);
+    --home-original-face-width: calc(620px - clamp(1rem, 2vw, 3rem));
+    --home-wide-face-width: calc(
+      var(--home-wide-left-width) - (50vw - 646.5px) - clamp(1rem, 2vw, 3rem)
+    );
+    position: relative;
+    left: calc(646.5px - 50vw);
+    width: var(--home-wide-left-width);
+    margin-right: calc(620px - var(--home-wide-left-width));
+  }
+
+  .content > .left-section > .cube-container {
+    position: absolute;
+    top: 0;
+    left: calc(50vw - 646.5px);
+    right: 0;
+    width: auto;
+    height: 100%;
+  }
+}
+
+@media (min-width: 1920px) and (max-height: 900px) {
+  .content > .left-section {
+    --home-wide-face-width: calc(
+      var(--home-wide-left-width) - (75vw - 1100.25px) - clamp(1rem, 2vw, 3rem) - 10px
+    );
+    left: calc(1100.25px - 75vw);
+  }
+
+  .content > .left-section > .cube-container {
+    left: calc(75vw - 1100.25px);
+    right: 10px;
+  }
+}
+
+@media (min-width: 1721px) {
+  .home-wide-face-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--home-original-face-width);
+    height: 100%;
+    pointer-events: auto;
+  }
+
+  .face:has(> img) > .home-wide-face-content,
+  .face:has(> video) > .home-wide-face-content {
+    width: calc(var(--home-original-face-width) - 4px);
+  }
+
+  .home-force-heading {
+    position: relative;
+    left: calc(
+      var(--home-wide-face-width) / 2 -
+      var(--home-original-face-width) * 0.48
+    ) !important;
+    text-align: center !important;
+  }
+}
+
+/* Keep the wide desktop hero within the navbar and preserve the menu panel. */
+@media (min-width: 1721px) and (min-height: 901px) {
+  .content > .left-section {
+    --home-wide-left-width: calc(100vw - 803px) !important;
+    --home-wide-face-width: var(--home-wide-left-width) !important;
+    width: var(--home-wide-left-width) !important;
+    flex: 0 0 var(--home-wide-left-width) !important;
+    margin-right: calc(
+      clamp(300px, 45vw, 900px) - var(--home-wide-left-width)
+    ) !important;
+    padding-right: 0 !important;
+  }
+
+  .content > .left-section > .cube-container {
+    left: 0 !important;
+    right: 0 !important;
+    width: auto !important;
+    padding: 0 !important;
+  }
+
+  .content > .left-section .face > img {
+    width: calc(100% + 4px) !important;
+    margin-left: -2px !important;
+  }
+
+  .content > .right-section {
+    flex: 0 0 760px !important;
+    width: 760px !important;
+    max-width: 760px !important;
+    margin-left: auto !important;
+    margin-right: 0 !important;
+    transform: none !important;
+    translate: none !important;
+  }
+
+  .right-section > .menu-grid {
+    transform: none !important;
+    translate: none !important;
+  }
+
+  .home-wide-face-content {
+    left: var(--home-original-face-inset) !important;
+  }
+
+  .home-force-heading {
+    left: calc(
+      var(--home-wide-face-width) / 2 -
+      var(--home-original-face-width) * 0.48 -
+      var(--home-original-face-inset)
+    ) !important;
+    text-align: center !important;
+  }
+}
+
+@media (min-width: 1721px) and (max-width: 1919px) and (min-height: 901px) {
+  .content > .left-section {
+    --home-original-face-inset: calc(3vw - 14px + clamp(1rem, 2vw, 3rem));
+  }
+}
+
+@media (min-width: 1920px) and (min-height: 901px) {
+  .content > .left-section {
+    --home-original-face-inset: calc(
+      53vw - 921.5px + clamp(1rem, 2vw, 3rem)
+    );
+  }
+}

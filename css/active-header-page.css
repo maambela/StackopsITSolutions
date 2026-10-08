@@ -1,0 +1,41 @@
+/* A restrained primary-blue marker identifies the current public page. */
+body .site-header .nav-links a.is-current-page,
+body .site-header .nav-links a.active,
+body .navbar .nav-links a.is-current-page,
+body .navbar .nav-links a.active,
+body nav a.is-current-page,
+body nav a.active,
+body .header-actions a.is-current-page,
+body .header-actions a.active {
+  position: relative !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(0, 110, 255, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.22) !important;
+}
+
+body .site-header .nav-links a.is-current-page::after,
+body .site-header .nav-links a.active::after,
+body .navbar .nav-links a.is-current-page::after,
+body .navbar .nav-links a.active::after,
+body nav a.is-current-page::after,
+body nav a.active::after,
+body .header-actions a.is-current-page::after,
+body .header-actions a.active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  right: 14% !important;
+  bottom: 2px !important;
+  left: 14% !important;
+  width: auto !important;
+  height: 2px !important;
+  border-radius: 999px !important;
+  background: #006eff !important;
+  box-shadow: 0 0 7px rgba(0, 110, 255, 0.95), 0 0 13px rgba(0, 110, 255, 0.60) !important;
+  opacity: 1;
+  animation: active-header-live-line 1.35s ease-in-out infinite alternate !important;
+}
+
+@keyframes active-header-live-line {
+  from { opacity: 0.46; box-shadow: 0 0 4px rgba(0, 110, 255, 0.42); }
+  to { opacity: 1; box-shadow: 0 0 9px rgba(0, 110, 255, 1), 0 0 18px rgba(0, 110, 255, 0.70); }
+}

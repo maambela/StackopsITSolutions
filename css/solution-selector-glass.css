@@ -1,0 +1,57 @@
+/* Make the solutions switcher use the same liquid-glass CTA language. */
+.solutions-sidebar .solution-button {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-top-color: rgba(255, 255, 255, 0.35) !important;
+  border-left-color: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.22) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
+  backdrop-filter: blur(18px) saturate(180%) !important;
+  overflow: hidden !important;
+}
+
+.solutions-sidebar .solution-button::after {
+  left: -120% !important;
+  width: 120% !important;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.35), transparent) !important;
+  transition: left 0.6s ease !important;
+}
+
+.solutions-sidebar .solution-button:hover::after,
+.solutions-sidebar .solution-button:focus-visible::after {
+  left: 100% !important;
+}
+
+.solutions-sidebar .solution-button:hover,
+.solutions-sidebar .solution-button:focus-visible,
+.solutions-sidebar .solution-button.hovering {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.1)) !important;
+  border-color: rgba(172, 220, 255, 0.72) !important;
+  box-shadow: 0 0 22px rgba(0, 110, 255, 0.48), 0 12px 35px rgba(0, 110, 255, 0.34), inset 0 1px 2px rgba(255, 255, 255, 0.5) !important;
+  animation: solution-selector-glass-wobble 0.8s ease-out !important;
+}
+
+.solutions-sidebar .solution-button.active {
+  border-color: rgba(0, 110, 255, 0.72) !important;
+  box-shadow: 0 0 18px rgba(0, 110, 255, 0.34), inset 0 1px 2px rgba(255, 255, 255, 0.28) !important;
+  animation: none !important;
+}
+
+.solutions-sidebar .solution-button.active::before {
+  display: none !important;
+}
+
+.solutions-sidebar .solution-button:hover .solution-button-name,
+.solutions-sidebar .solution-button.active .solution-button-name {
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+@keyframes solution-selector-glass-wobble {
+  0% { scale: 1; rotate: 0deg; }
+  20% { scale: 1.04 0.97; rotate: -0.65deg; }
+  40% { scale: 0.99 1.02; rotate: 0.65deg; }
+  60% { scale: 1.02 0.98; rotate: -0.35deg; }
+  80% { scale: 0.995 1.005; rotate: 0.25deg; }
+  100% { scale: 1; rotate: 0deg; }
+}
