@@ -6614,3 +6614,17 @@ body:has(.our-story-header-image) .values.values-in-view .value-item.is-lit i {
         height: 35px !important;
     }
 }
+
+/* Match the homepage navigation glow and keep non-dashboard headers inset. */
+body:not(:has(.dashboard-preview-section)) :is(.site-header, .navbar) {
+    margin-top: 0 !important;
+    margin-bottom: 10px !important;
+    top: 10px !important;
+    box-shadow:
+        0 0 8px rgba(0, 110, 255, 0.78),
+        0 0 20px rgba(0, 110, 255, 0.42),
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.48),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.26) !important;
+    z-index: 20 !important;
+}

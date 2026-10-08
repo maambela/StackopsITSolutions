@@ -2484,6 +2484,23 @@
     -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
     backdrop-filter: blur(18px) saturate(180%) !important;
   }
+
+  @media (max-width: 480px) {
+    body .home-solutions-articulation .solutions-art-action {
+      bottom: 12px !important;
+    }
+
+    body .home-solutions-articulation .solutions-art-action > .solutions-art-cta.home-primary-glass-button,
+    body .home-solutions-articulation .solutions-art-action > .solutions-art-cta.home-primary-glass-button > .link-content {
+      min-height: 36px !important;
+    }
+
+    body .home-solutions-articulation .solutions-art-action > .solutions-art-cta.home-primary-glass-button > .link-content {
+      padding-right: 12px !important;
+      padding-left: 12px !important;
+      font-size: 11px !important;
+    }
+  }
 </style>
 <style id="home-about-image-visibility">
   .about-section > .about-image {
@@ -2590,6 +2607,7 @@
   @media (min-width: 1721px) and (min-height: 901px) {
     .left-section .cube .face:nth-child(4) .text-overlay5 {
       right: 0 !important;
+      transform: translate(clamp(24px, 3vw, 56px), -50%) !important;
     }
   }
 </style>
@@ -2612,6 +2630,41 @@
 
   .navbar::before {
     opacity: 0.2 !important;
+  }
+</style>
+<style id="home-partner-logo-cards">
+  .partners .logo-item {
+    box-sizing: border-box;
+    flex: 0 0 clamp(150px, 9.9vw, 190px) !important;
+    width: clamp(150px, 9.9vw, 190px) !important;
+    height: clamp(88px, 5.85vw, 112px) !important;
+    min-height: 0 !important;
+    max-width: none;
+    aspect-ratio: 1.7 / 1;
+    padding: 10px;
+    border-radius: 14px !important;
+    background: #fff !important;
+  }
+
+  .partners .logo-item img {
+    width: auto !important;
+    height: clamp(54px, 4.3vw, 80px) !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain;
+  }
+
+  @media (max-width: 600px) {
+    .partners .logo-item {
+      flex-basis: clamp(132px, 38vw, 160px) !important;
+      width: clamp(132px, 38vw, 160px) !important;
+      height: clamp(78px, 22.5vw, 94px) !important;
+      padding: 8px;
+    }
+
+    .partners .logo-item img {
+      height: clamp(52px, 14vw, 64px) !important;
+    }
   }
 </style>
 </head>
@@ -3086,10 +3139,6 @@
                             <li><i class="fas fa-check"></i> Security Audits</li>
                             <li><i class="fas fa-check"></i> Incident Response</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
 
@@ -3104,10 +3153,6 @@
                             <li><i class="fas fa-check"></i> System Integration</li>
                             <li><i class="fas fa-check"></i> Migration Services</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
 
@@ -3122,10 +3167,6 @@
                             <li><i class="fas fa-check"></i> Network Management</li>
                             <li><i class="fas fa-check"></i> Maintenance & Upgrades</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
 
@@ -3140,10 +3181,6 @@
                             <li><i class="fas fa-check"></i> Web Applications</li>
                             <li><i class="fas fa-check"></i> API Development</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
 
@@ -3158,10 +3195,6 @@
                             <li><i class="fas fa-check"></i> Endpoint Security</li>
                             <li><i class="fas fa-check"></i> User Training & Support</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
 
@@ -3177,10 +3210,6 @@
                             <li><i class="fas fa-check"></i> Risk Management & Reporting</li>
                             <li><i class="fas fa-check"></i> Policy Development & Audits</li>
                         </ul>
-                        <div class="glow-wrap">
-                          <div class="glowing-border-layer"></div>
-                          <a href="consultation.html" class="link-content">Enquire</a>
-                        </div>
                     </div>
                 </div>
             </div>
