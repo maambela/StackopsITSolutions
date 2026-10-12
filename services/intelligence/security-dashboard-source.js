@@ -1,3 +1,5 @@
+const { getExplicitSecurityIocs } = require('./security-ioc');
+
 function numberValue(value, fallback = 0) {
     if (value === null || value === undefined || value === '') return fallback;
     const number = Number(value);
@@ -65,46 +67,11 @@ function extractInternalThreatIndicators({ alerts = [], incidents = [], suspicio
     for (const row of rows) {
         if (!row || typeof row !== 'object') continue;
 
-        const structuredIndicators = [
-            ['IPAddress', firstValue(row.ipAddress, row.clientIpAddress, row.sourceIpAddress, row.ip)],
-            ['URL', firstValue(row.url, row.uri, row.link, row.maliciousUrl)],
-            ['Domain', firstValue(row.domain, row.senderDomain, row.urlDomain)],
-            ['FileHash', firstValue(row.fileHash, row.sha256, row.sha1, row.md5)],
-            ['SenderAddress', firstValue(row.senderAddress, row.senderEmail, row.sender, row.fromAddress, row.from)],
-            ['UserPrincipalName', firstValue(row.userPrincipalName, row.userEmail, row.mail, row.email, row.user)],
-            ['DeviceName', firstValue(row.deviceName, row.hostName, row.hostname, row.machineName, row.computerName)],
-            ['AlertTitle', firstValue(row.title, row.alertName, row.displayName, row.name)],
-            ['RiskType', firstValue(row.riskType, row.riskLevel, row.riskDetail, row.category, row.classification)]
-        ];
-
-        for (const [type, value] of structuredIndicators) {
+        for (const { type, value } of getExplicitSecurityIocs(row)) {
             addIndicator(indicatorMap, type, value, row, {
                 severity: row.severity || row.riskLevel || 'medium',
-                confidence: ['IPAddress', 'URL', 'Domain', 'FileHash'].includes(type) ? 'high' : 'medium'
+                confidence: 'medium'
             });
-        }
-
-        const serialized = JSON.stringify(row).slice(0, 12000);
-
-        for (const ip of serialized.match(/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g) || []) {
-            addIndicator(indicatorMap, 'IPAddress', ip, row, { confidence: 'high' });
-        }
-
-        for (const url of serialized.match(/\bhttps?:\/\/[^\s"'<>]+/gi) || []) {
-            addIndicator(indicatorMap, 'URL', url.replace(/[),.;]+$/g, ''), row, { confidence: 'high' });
-        }
-
-        for (const hash of serialized.match(/\b[a-f0-9]{64}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{32}\b/gi) || []) {
-            addIndicator(indicatorMap, 'FileHash', hash, row, { confidence: 'high' });
-        }
-
-        for (const email of serialized.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || []) {
-            addIndicator(indicatorMap, 'UserPrincipalName', email, row, { confidence: 'medium' });
-        }
-
-        const threatKeywords = serialized.match(/\b(?:malware|phishing|phish|ransomware|trojan|credential theft|bec|spoof|impossible travel|anonymous ip|risky sign[-\s]?in|brute force|password spray)\b/gi) || [];
-        for (const keyword of threatKeywords.slice(0, 10)) {
-            addIndicator(indicatorMap, 'ThreatKeyword', keyword, row, { confidence: 'medium' });
         }
     }
 

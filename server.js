@@ -63,6 +63,8 @@ const { createSecurityEvidenceStore } = require('./services/intelligence/securit
 const { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
 const { buildSecurityFindings } = require('./services/intelligence/security-findings');
+const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
+const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
 const { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');
@@ -3208,6 +3210,10 @@ function normalizeCloudflareReportData(data = {}) {
         success: data.success !== false,
         fetchedAt: data.fetchedAt || new Date().toISOString(),
         message: data.message || '',
+        overviewObservedFields: Object.fromEntries([
+            'protectedApps', 'identityProviders', 'dlpProfiles',
+            'gatewayProxyEnabled', 'udpProxyEnabled', 'tlsDecryptEnabled'
+        ].map(field => [field, Object.prototype.hasOwnProperty.call(overview, field)])),
         overview: {
             securityStatus: overview.securityStatus || 'No data configured',
             protectedApps: Number(overview.protectedApps || 0),
@@ -3221,9 +3227,9 @@ function normalizeCloudflareReportData(data = {}) {
             dlpProfiles: Number(overview.dlpProfiles || 0),
             warpProfiles: Number(overview.warpProfiles || 0),
             virtualNetworks: Number(overview.virtualNetworks || 0),
-            gatewayProxyEnabled: Boolean(overview.gatewayProxyEnabled),
-            udpProxyEnabled: Boolean(overview.udpProxyEnabled),
-            tlsDecryptEnabled: Boolean(overview.tlsDecryptEnabled)
+            gatewayProxyEnabled: typeof overview.gatewayProxyEnabled === 'boolean' ? overview.gatewayProxyEnabled : null,
+            udpProxyEnabled: typeof overview.udpProxyEnabled === 'boolean' ? overview.udpProxyEnabled : null,
+            tlsDecryptEnabled: typeof overview.tlsDecryptEnabled === 'boolean' ? overview.tlsDecryptEnabled : null
         },
         apps: Array.isArray(data.apps) ? data.apps : [],
         identityProviders: Array.isArray(data.identityProviders) ? data.identityProviders : [],
@@ -3264,17 +3270,27 @@ function buildCloudflareReportSignals(inputData = null) {
             summary: null,
             events: [],
             problems: [],
+            postureFindings: [],
+            coverageWarnings: [],
             recommendations: []
         };
     }
 
     const data = normalizeCloudflareReportData(inputData);
     const overview = data.overview;
+    const sectionEvidenceAvailable = (key, observedField) => {
+        const status = String(data.sections?.[key]?.status || '').toLowerCase();
+        if (['error', 'permission_unavailable', 'unavailable'].includes(status)) return false;
+        if (['ok', 'empty'].includes(status)) return true;
+        return data.success !== false && data.overviewObservedFields[observedField] === true;
+    };
     const timestamp = data.fetchedAt || new Date().toISOString();
     const events = [];
     const problems = [];
+    const postureFindings = [];
+    const coverageWarnings = [];
     const recommendations = [];
-    const addSignal = ({ title, detail, severity = 'medium', status = 'observed', category = 'Cloudflare One', problem = false, recommendation }) => {
+    const addSignal = ({ title, detail, severity = 'medium', status = 'observed', category = 'Cloudflare One', problem = false, posture = false, coverage = false, recommendation }) => {
         const event = {
             title,
             detail,
@@ -3284,8 +3300,14 @@ function buildCloudflareReportSignals(inputData = null) {
             category,
             timestamp
         };
-        events.push(event);
-        if (problem) {
+        if (posture) {
+            postureFindings.push({ ...event, status: 'posture' });
+        } else if (coverage) {
+            coverageWarnings.push({ ...event, status: status || 'unavailable' });
+        } else {
+            events.push(event);
+        }
+        if (problem && !posture && !coverage) {
             problems.push({
                 title,
                 detail,
@@ -3295,7 +3317,7 @@ function buildCloudflareReportSignals(inputData = null) {
                 asset: category
             });
         }
-        if (recommendation) {
+        if (recommendation && !coverage) {
             recommendations.push({
                 priority: severity === 'critical' ? 'critical' : severity === 'high' ? 'high' : 'medium',
                 title: recommendation,
@@ -3310,54 +3332,59 @@ function buildCloudflareReportSignals(inputData = null) {
             title: 'Cloudflare One evidence unavailable',
             detail: data.message || 'Cloudflare Zero Trust evidence could not be collected.',
             severity: 'high',
-            status: 'failed',
+            status: 'unavailable',
             category: 'Cloudflare API',
-            problem: true,
-            recommendation: 'Restore Cloudflare API evidence collection'
+            coverage: true
         });
     }
 
     [
-        !overview.gatewayProxyEnabled && {
+        overview.gatewayProxyEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'gatewayProxyEnabled') && {
             title: 'Cloudflare Gateway proxy disabled',
             detail: 'Gateway traffic inspection is not currently enabled in the Cloudflare One snapshot.',
             severity: 'high',
             category: 'Gateway',
+            posture: true,
             recommendation: 'Enable Cloudflare Gateway proxy or document the exception'
         },
-        !overview.tlsDecryptEnabled && {
+        overview.tlsDecryptEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'tlsDecryptEnabled') && {
             title: 'Cloudflare TLS decrypt disabled',
             detail: 'TLS inspection is disabled, limiting visibility into encrypted web traffic.',
             severity: 'medium',
             category: 'Gateway',
+            posture: true,
             recommendation: 'Review TLS decrypt policy readiness'
         },
-        !overview.udpProxyEnabled && {
+        overview.udpProxyEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'udpProxyEnabled') && {
             title: 'Cloudflare UDP proxy disabled',
             detail: 'UDP proxy support is disabled, which may leave selected traffic outside Gateway inspection.',
             severity: 'medium',
             category: 'Gateway',
+            posture: true,
             recommendation: 'Validate whether UDP proxy should be enabled'
         },
-        !overview.dlpProfiles && {
+        overview.dlpProfiles === 0 && sectionEvidenceAvailable('dlpProfiles', 'dlpProfiles') && {
             title: 'Cloudflare DLP profiles missing',
             detail: 'No DLP profiles were returned, so sensitive data detection is not evidenced.',
             severity: 'medium',
             category: 'DLP',
+            posture: true,
             recommendation: 'Create or verify Cloudflare DLP profiles'
         },
-        !overview.protectedApps && {
+        overview.protectedApps === 0 && sectionEvidenceAvailable('apps', 'protectedApps') && {
             title: 'No Cloudflare protected apps evidenced',
             detail: 'Cloudflare Access did not return protected applications for this snapshot.',
             severity: 'medium',
             category: 'Access',
+            posture: true,
             recommendation: 'Confirm Cloudflare Access app coverage'
         },
-        !overview.identityProviders && {
+        overview.identityProviders === 0 && sectionEvidenceAvailable('identityProviders', 'identityProviders') && {
             title: 'Cloudflare identity provider not evidenced',
             detail: 'No Cloudflare Access identity provider was returned in the latest snapshot.',
             severity: 'high',
             category: 'Identity',
+            posture: true,
             recommendation: 'Connect or verify the Cloudflare Access identity provider'
         }
     ].filter(Boolean).forEach(signal => addSignal({ ...signal, problem: signal.severity === 'high' }));
@@ -3380,13 +3407,12 @@ function buildCloudflareReportSignals(inputData = null) {
     Object.entries(data.sections || {}).forEach(([key, section]) => {
         if (!section || !['error', 'permission_unavailable'].includes(section.status)) return;
         addSignal({
-            title: `Cloudflare ${section.label || key} evidence needs attention`,
+            title: `Cloudflare ${section.label || key} evidence unavailable`,
             detail: section.message || 'Cloudflare returned an incomplete section for this control.',
             severity: section.status === 'error' ? 'high' : 'medium',
             status: section.status,
             category: 'Cloudflare API',
-            problem: section.status === 'error',
-            recommendation: 'Review Cloudflare API permissions for this evidence section'
+            coverage: true
         });
     });
 
@@ -3406,6 +3432,8 @@ function buildCloudflareReportSignals(inputData = null) {
         },
         events,
         problems,
+        postureFindings,
+        coverageWarnings,
         recommendations
     };
 }
@@ -4473,7 +4501,10 @@ async function buildSunbirdReportPayload(companyId, periodStart, periodEnd, incl
             title: 'Device compliance clear',
             detail: `${deviceTotal} managed device${deviceTotal === 1 ? '' : 's'} with no non-compliant devices reported.`
         }] : []),
-        ...(cloudflareSignals.hasReportableEvidence && !cloudflareSignals.problems.length ? [{
+        ...(cloudflareSignals.hasReportableEvidence
+            && !cloudflareSignals.problems.length
+            && !cloudflareSignals.postureFindings.length
+            && !cloudflareSignals.coverageWarnings.length ? [{
             title: 'Cloudflare One evidence reviewed',
             detail: `${cloudflareSignals.summary.protectedApps} protected app${cloudflareSignals.summary.protectedApps === 1 ? '' : 's'}, ${cloudflareSignals.summary.gatewayPolicies} Gateway polic${cloudflareSignals.summary.gatewayPolicies === 1 ? 'y' : 'ies'}, and ${cloudflareSignals.summary.dlpProfiles} DLP profile${cloudflareSignals.summary.dlpProfiles === 1 ? '' : 's'} were evidenced.`
         }] : [])
@@ -4530,7 +4561,9 @@ async function buildSunbirdReportPayload(companyId, periodStart, periodEnd, incl
         summary: {
             healthScore,
             status: failures.some(item => item.severity === 'critical') ? 'critical' :
-                failures.some(item => item.severity === 'high') ? 'attention' : 'healthy',
+                failures.some(item => item.severity === 'high')
+                    || cloudflareSignals.postureFindings.length
+                    || cloudflareSignals.coverageWarnings.length ? 'attention' : 'healthy',
             totalEvents: filteredEvents.length,
             failures: failures.length,
             successes: successes.length,
@@ -4551,6 +4584,8 @@ async function buildSunbirdReportPayload(companyId, periodStart, periodEnd, incl
             score: cloudflareSignals.score,
             summary: cloudflareSignals.summary,
             problems: cloudflareSignals.problems,
+            postureFindings: cloudflareSignals.postureFindings,
+            coverageWarnings: cloudflareSignals.coverageWarnings,
             recommendations: cloudflareSignals.recommendations,
             events: cloudflareSignals.events.slice(0, 10)
         } : null,
@@ -14486,7 +14521,7 @@ function extractInternalSecurityThreatIndicators({ alerts = [], incidents = [], 
             action: 'Review',
             confidence,
             source: 'internal_security_alerts',
-            description: 'Extracted from Security Alerts evidence because external threat indicators were unavailable.',
+            description: 'Observed in an explicit IOC field in Security Alerts evidence; reputation and maliciousness are not assessed.',
             created: getSecurityEventTime(source),
             relatedAlerts: [],
             relatedUsers: [],
@@ -14514,33 +14549,8 @@ function extractInternalSecurityThreatIndicators({ alerts = [], incidents = [], 
     for (const row of [...alerts, ...incidents, ...signIns]) {
         if (!row || typeof row !== 'object') continue;
 
-        add('IPAddress', row.ipAddress || row.clientIpAddress || row.sourceIpAddress || row.ip, row, 'high');
-        add('UserPrincipalName', row.userPrincipalName || row.userEmail || row.mail || row.email || row.user, row);
-        add('DeviceName', row.deviceName || row.hostName || row.hostname || row.machineName || row.computerName, row);
-        add('AlertTitle', row.title || row.alertName || row.displayName || row.name, row);
-        add('RiskType', row.riskType || row.riskLevel || row.riskLevelDuringSignIn || row.riskDetail || row.category || row.classification, row);
-
-        const serialized = JSON.stringify(row).slice(0, 12000);
-
-        for (const ip of serialized.match(/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g) || []) {
-            add('IPAddress', ip, row, 'high');
-        }
-
-        for (const url of serialized.match(/\bhttps?:\/\/[^\s"'<>]+/gi) || []) {
-            add('URL', url.replace(/[),.;]+$/g, ''), row, 'high');
-        }
-
-        for (const hash of serialized.match(/\b[a-f0-9]{64}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{32}\b/gi) || []) {
-            add('FileHash', hash, row, 'high');
-        }
-
-        for (const email of serialized.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || []) {
-            add('UserPrincipalName', email, row);
-        }
-
-        const keywords = serialized.match(/\b(?:malware|phishing|phish|ransomware|trojan|credential theft|bec|spoof|impossible travel|anonymous ip|risky sign[-\s]?in|brute force|password spray|suspicious inbox rule)\b/gi) || [];
-        for (const keyword of keywords.slice(0, 10)) {
-            add('ThreatKeyword', keyword, row);
+        for (const { type, value } of getExplicitSecurityIocs(row)) {
+            add(type, value, row, 'medium');
         }
     }
 
@@ -14865,6 +14875,36 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
         highSeverityAlerts: alerts.filter(alert => ['critical', 'high'].includes(normalizeWhatsAppSeverity(alert.severity))).length
     };
     return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, summary };
+}
+
+function sanitizeCachedSecurityIndicators(payload = {}) {
+    const threats = (Array.isArray(payload.threats) ? payload.threats : []).flatMap(threat => {
+        if (!threat || typeof threat !== 'object') return [];
+        const observable = normalizeTypedSecurityIoc(
+            threat.indicatorType || threat.type,
+            threat.indicatorValue || threat.indicator || threat.value
+        );
+        if (!observable) return [];
+        return [{
+            ...threat,
+            indicator: observable.value,
+            value: observable.value,
+            type: observable.type,
+            indicatorType: observable.type,
+            ...(threat.source === 'internal_security_alerts'
+                || /Extracted from Security Alerts evidence because external threat indicators were unavailable/i.test(String(threat.description || ''))
+                ? { description: 'Observed in an explicit IOC field; reputation and maliciousness are not assessed.' }
+                : {})
+        }];
+    });
+    return {
+        ...payload,
+        threats,
+        summary: { ...(payload.summary || {}), threatIndicators: threats.length },
+        ...(payload.dashboardMetrics
+            ? { dashboardMetrics: { ...payload.dashboardMetrics, threatIndicators: threats.length } }
+            : {})
+    };
 }
 
 async function getSecurityWebhookConfig() {
@@ -15243,37 +15283,23 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         }
     });
 
-    const externalThreats = externalThreatIndicators.map(threat => ({
-        id: threat.id,
-        indicator: threat.networkIPv4 || threat.networkIPv6 || threat.domainName || threat.fileHashValue || threat.url || 'Unknown',
-        value: threat.networkIPv4 || threat.networkIPv6 || threat.domainName || threat.fileHashValue || threat.url || 'Unknown',
-        type: threat.networkIPv4
-            ? 'IPv4'
-            : threat.networkIPv6
-                ? 'IPv6'
-                : threat.domainName
-                    ? 'Domain'
-                    : threat.url
-                        ? 'URL'
-                        : 'FileHash',
-        indicatorType: threat.networkIPv4
-            ? 'IPv4'
-            : threat.networkIPv6
-                ? 'IPv6'
-                : threat.domainName
-                    ? 'Domain'
-                    : threat.url
-                        ? 'URL'
-                        : 'FileHash',
-        severity: normalizeSecuritySeverity(threat.severity),
-        action: threat.action || null,
-        apiCategory: threat.threatType || threat.indicatorType || null,
-        apiSource: threat.targetProduct || null,
-        description: threat.description || 'External threat indicator from Microsoft Graph',
-        created: threat.createdDateTime || new Date().toISOString(),
-        source: 'microsoft_graph_tiIndicators',
-        confidence: threat.confidence || 'medium'
-    }));
+    const externalThreats = externalThreatIndicators.flatMap(threat => {
+        return getMicrosoftThreatIndicatorIocs(threat).map(observable => ({
+            id: threat.id,
+            indicator: observable.value,
+            value: observable.value,
+            type: observable.type,
+            indicatorType: observable.type,
+            severity: normalizeSecuritySeverity(threat.severity),
+            action: threat.action || null,
+            apiCategory: threat.threatType || threat.indicatorType || null,
+            apiSource: threat.targetProduct || null,
+            description: threat.description || 'External threat indicator from Microsoft Graph',
+            created: threat.createdDateTime || new Date().toISOString(),
+            source: 'microsoft_graph_tiIndicators',
+            confidence: threat.confidence || 'medium'
+        }));
+    });
 
     const internalThreats = extractInternalSecurityThreatIndicators({
         alerts: processedAlerts,
@@ -15791,7 +15817,9 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
             try {
                 const payload = JSON.parse(rows[0].Payload);
                 if (payload && typeof payload === 'object') {
-                    const mergedPayload = await mergeStoredRealtimeSecurityAlerts(context.companyId, payload);
+                    const mergedPayload = sanitizeCachedSecurityIndicators(
+                        await mergeStoredRealtimeSecurityAlerts(context.companyId, payload)
+                    );
                     if (mergedPayload.success) {
                         return res.json({ ...mergedPayload, source: 'db', fetchedAt: rows[0].LastUpdated });
                     }
@@ -15805,7 +15833,9 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
              VALUES (?, ?, NOW())`,
             [context.companyId, JSON.stringify(api)]
         );
-        const mergedApi = await mergeStoredRealtimeSecurityAlerts(context.companyId, api);
+        const mergedApi = sanitizeCachedSecurityIndicators(
+            await mergeStoredRealtimeSecurityAlerts(context.companyId, api)
+        );
         return res.json({ ...mergedApi, source: 'api-fallback' });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -15862,6 +15892,62 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         res.status(500).json({ 
             error: 'Failed to fetch security events data',
             message: error.message
+        });
+    }
+});
+
+app.post('/api/security-events/hunting-query', authenticateToken, async (req, res) => {
+    const tenant = getTenantByEmail(req.user?.email);
+    if (!tenant || tenant.clientId !== 'sunbird') {
+        return res.status(403).json({
+            success: false,
+            error: 'Access denied',
+            message: 'This feature is only available for Sunbird client'
+        });
+    }
+
+    const queryId = String(req.body?.queryId || '');
+    try {
+        const token = await getMicrosoftGraphToken({ securityAlerts: true });
+        const result = await runMicrosoftSecurityHuntingQuery({
+            token,
+            queryId
+        });
+
+        return res.json({
+            success: true,
+            tenant: tenant.clientId,
+            source: 'Microsoft Graph security/runHuntingQuery',
+            fetchedAt: new Date().toISOString(),
+            ...result,
+            warnings: result.isResultLimitReached
+                ? [`The result limit of ${result.resultLimit} rows was reached; additional rows may exist.`]
+                : []
+        });
+    } catch (error) {
+        if (error.code === 'UNSUPPORTED_SECURITY_HUNTING_QUERY') {
+            return res.status(400).json({
+                success: false,
+                error: error.code,
+                message: error.message
+            });
+        }
+
+        const status = Number(error.status) === 403 ? 403
+            : error.code === 'SECURITY_HUNTING_QUERY_TIMEOUT' ? 504
+                : error.code === 'INVALID_SECURITY_HUNTING_RESPONSE' ? 502
+                    : 502;
+        console.warn('[Security Hunting] Microsoft Graph query failed:', {
+            queryId,
+            code: error.code || 'SECURITY_HUNTING_QUERY_FAILED',
+            status: error.status || null,
+            message: error.message
+        });
+        return res.status(status).json({
+            success: false,
+            error: error.code || 'SECURITY_HUNTING_QUERY_FAILED',
+            message: error.message,
+            source: 'Microsoft Graph security/runHuntingQuery'
         });
     }
 });

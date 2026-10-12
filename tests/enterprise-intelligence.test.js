@@ -3358,6 +3358,9 @@ test('Security Alerts selected-domain analysis sends compact groups and keeps ou
     assert.ok(packages[0].evidenceGroups.repeatedAlertPatterns.length <= 10);
     assert.ok(packages[0].evidenceGroups.threatIndicators.length > 0);
     assert.ok(packages[0].evidenceGroups.threatIndicators.some(row => row.data?.internalOnly === true));
+    assert.ok(packages[0].evidenceGroups.threatIndicators.every(row =>
+        ['IPAddress', 'URL', 'Domain', 'FileHash', 'SenderAddress'].includes(row.data?.indicatorType)
+    ));
     assert.doesNotMatch(JSON.stringify(packages[0].sourceHealth.warnings), /threat_indicators_unavailable/);
     assert.equal(result.domains[0].analysis.keyFindings.length, 5);
     assert.equal(result.domains[0].analysis.risks.length, 5);

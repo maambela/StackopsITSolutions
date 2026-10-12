@@ -5447,7 +5447,11 @@ function normalizeSunbirdSecurityData(data = {}) {
     const payload = augmentedData.payload && typeof augmentedData.payload === 'object' ? augmentedData.payload : augmentedData;
     const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
     const incidents = Array.isArray(payload.incidents) ? payload.incidents : [];
-    const threats = Array.isArray(payload.threats) ? payload.threats : [];
+    const postureFindings = Array.isArray(payload.postureFindings) ? payload.postureFindings : [];
+    const sourceCoverage = Array.isArray(payload.sourceCoverage) ? payload.sourceCoverage : [];
+    const threats = (Array.isArray(payload.threats) ? payload.threats : [])
+        .map(normalizeSunbirdSecurityIndicator)
+        .filter(Boolean);
     const suspiciousSignIns = Array.isArray(payload.signIns?.suspicious) ? payload.signIns.suspicious : [];
     const usersUnderAttack = Array.isArray(payload.signIns?.usersUnderAttack) ? payload.signIns.usersUnderAttack : [];
     const summary = payload.summary || {};
@@ -5459,6 +5463,8 @@ function normalizeSunbirdSecurityData(data = {}) {
         ...payload,
         alerts,
         incidents,
+        postureFindings,
+        sourceCoverage,
         threats,
         signIns: { ...(payload.signIns || {}), suspicious: suspiciousSignIns, usersUnderAttack },
         activityFeed: Array.isArray(payload.activityFeed) ? payload.activityFeed : [],
@@ -5475,11 +5481,73 @@ function normalizeSunbirdSecurityData(data = {}) {
             activeIncidents,
             highSeverityAlerts,
             totalAlerts,
-            threatIndicators: summary.threatIndicators ?? threats.length,
+            threatIndicators: threats.length,
             usersUnderAttack: summary.usersUnderAttack ?? usersUnderAttack.length,
             securityScore
         }
     };
+}
+
+function normalizeSunbirdSecurityIndicator(indicator) {
+    if (!indicator || typeof indicator !== 'object') return null;
+    const rawType = String(indicator.indicatorType || indicator.type || '').toLowerCase().replace(/[^a-z]/g, '');
+    const typeMap = {
+        ip: 'IPAddress',
+        ipaddress: 'IPAddress',
+        ipv4: 'IPAddress',
+        ipv6: 'IPAddress',
+        url: 'URL',
+        uri: 'URL',
+        domain: 'Domain',
+        domainname: 'Domain',
+        filehash: 'FileHash',
+        sha256: 'FileHash',
+        sha1: 'FileHash',
+        md5: 'FileHash',
+        senderaddress: 'SenderAddress'
+    };
+    const type = Object.prototype.hasOwnProperty.call(typeMap, rawType) ? typeMap[rawType] : null;
+    const value = String(indicator.indicatorValue || indicator.indicator || indicator.value || '').trim().replace(/[),.;]+$/g, '');
+    if (!type || !value || value.length > 500) return null;
+
+    let valid = false;
+    if (type === 'IPAddress') {
+        const octets = value.split('.');
+        if (octets.length === 4) {
+            valid = octets.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+        } else if (value.includes(':')) {
+            try {
+                valid = Boolean(new URL(`http://[${value}]/`).hostname);
+            } catch {
+                valid = false;
+            }
+        }
+    } else if (type === 'URL') {
+        try {
+            valid = ['http:', 'https:'].includes(new URL(value).protocol);
+        } catch {
+            valid = false;
+        }
+    } else if (type === 'Domain') {
+        valid = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(value);
+    } else if (type === 'FileHash') {
+        valid = /^(?:[a-f\d]{32}|[a-f\d]{40}|[a-f\d]{64})$/i.test(value);
+    } else if (type === 'SenderAddress') {
+        valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+    return valid
+        ? {
+            ...indicator,
+            indicator: value,
+            value,
+            indicatorType: type,
+            type,
+            ...(indicator.source === 'internal_security_alerts'
+                || /Extracted from Security Alerts evidence because external threat indicators were unavailable/i.test(String(indicator.description || ''))
+                ? { description: 'Observed in an explicit IOC field; reputation and maliciousness are not assessed.' }
+                : {})
+        }
+        : null;
 }
 
 function buildSunbirdSecurityModel(data = sunbirdSecurityDashboardData) {
@@ -5497,6 +5565,8 @@ function buildSunbirdSecurityModel(data = sunbirdSecurityDashboardData) {
             cloudflareAlerts: normalized.alerts.filter(a => a.cloudflareOneSignal || /cloudflare/i.test(String(a.source || a.vendor || ''))),
             cloudflareIncidents: normalized.incidents.filter(i => i.cloudflareOneSignal || /cloudflare/i.test(String(i.source || ''))),
             threatIndicators: normalized.threats,
+            postureFindings: normalized.postureFindings,
+            sourceCoverage: normalized.sourceCoverage,
             suspiciousSignIns: normalized.signIns.suspicious,
             usersUnderAttack: normalized.signIns.usersUnderAttack,
             mitre: normalized.mitre,
@@ -11218,11 +11288,22 @@ function saveSunbirdNetworkSecuritySnapshot(data) {
 
 function normalizeNetworkSecurityData(data = {}) {
     const overview = data.overview || {};
+    const priorObservedFields = data.overviewObservedFields || {};
+    const booleanValue = value => typeof value === 'boolean' ? value : null;
     return {
         success: data.success !== false,
         fetchedAt: data.fetchedAt || new Date().toISOString(),
         message: data.message || '',
         account: data.account || {},
+        overviewObservedFields: Object.fromEntries([
+            'protectedApps', 'identityProviders', 'dlpProfiles',
+            'gatewayProxyEnabled', 'udpProxyEnabled', 'tlsDecryptEnabled'
+        ].map(field => [
+            field,
+            Object.prototype.hasOwnProperty.call(priorObservedFields, field)
+                ? priorObservedFields[field] === true
+                : Object.prototype.hasOwnProperty.call(overview, field)
+        ])),
         overview: {
             securityStatus: overview.securityStatus || 'No data configured',
             protectedApps: Number(overview.protectedApps || 0),
@@ -11238,10 +11319,10 @@ function normalizeNetworkSecurityData(data = {}) {
             warpProfiles: Number(overview.warpProfiles || 0),
             virtualNetworks: Number(overview.virtualNetworks || 0),
             appCategories: Number(overview.appCategories || 0),
-            gatewayProxyEnabled: Boolean(overview.gatewayProxyEnabled),
-            udpProxyEnabled: Boolean(overview.udpProxyEnabled),
+            gatewayProxyEnabled: booleanValue(overview.gatewayProxyEnabled),
+            udpProxyEnabled: booleanValue(overview.udpProxyEnabled),
             certificateEnabled: Boolean(overview.certificateEnabled),
-            tlsDecryptEnabled: Boolean(overview.tlsDecryptEnabled),
+            tlsDecryptEnabled: booleanValue(overview.tlsDecryptEnabled),
             zonesAvailable: Number(overview.zonesAvailable || 0),
             endpointFamilies: Number(overview.endpointFamilies || 0),
             endpointFamiliesAvailable: Number(overview.endpointFamiliesAvailable || 0),
@@ -11320,6 +11401,8 @@ function getEmptyCloudflareSecuritySignals() {
     return {
         alerts: [],
         incidents: [],
+        postureFindings: [],
+        sourceCoverage: [],
         recommendations: [],
         activityFeed: [],
         reportProblems: [],
@@ -11344,13 +11427,56 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
     if (!hasEvidence) return getEmptyCloudflareSecuritySignals();
     const data = normalizeNetworkSecurityData(inputData || {});
     const overview = data.overview;
+    const sectionEvidenceAvailable = (key, observedField) => {
+        const status = String(data.sections?.[key]?.status || '').toLowerCase();
+        if (['error', 'permission_unavailable', 'unavailable'].includes(status)) return false;
+        if (['ok', 'empty'].includes(status)) return true;
+        return data.success !== false && data.overviewObservedFields[observedField] === true;
+    };
     const now = data.fetchedAt || new Date().toISOString();
     const alerts = [];
     const incidents = [];
+    const postureFindings = [];
+    const sourceCoverage = [];
     const recommendations = [];
     const activityFeed = [];
     const reportProblems = [];
     const reportEvents = [];
+    const addPostureFinding = ({ id, title, description, severity = 'medium', category = 'Cloudflare One', recommendation }) => {
+        postureFindings.push({
+            id: `cloudflare-posture-${id}`,
+            title,
+            description,
+            severity,
+            status: 'posture',
+            source: 'Cloudflare One',
+            vendor: 'Cloudflare',
+            category,
+            created: now,
+            cloudflareOnePosture: true
+        });
+        if (recommendation) {
+            recommendations.push({
+                priority: severity === 'critical' ? 'critical' : severity === 'high' ? 'high' : 'medium',
+                title: recommendation,
+                detail: description,
+                source: 'Cloudflare One',
+                cloudflareOneSignal: true
+            });
+        }
+    };
+    const addCoverageWarning = ({ id, title, description, status = 'unavailable', category = 'Cloudflare API' }) => {
+        sourceCoverage.push({
+            id: `cloudflare-coverage-${id}`,
+            title,
+            description,
+            status,
+            source: 'Cloudflare One',
+            category,
+            checkedAt: now,
+            cloudflareOneCoverage: true
+        });
+    };
     const addAlert = ({ id, title, description, severity = 'medium', category = 'Cloudflare One', status = 'newAlert', incident = false, recommendation }) => {
         const alert = {
             id: `cloudflare-${id}`,
@@ -11419,29 +11545,25 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
     };
 
     if (data.success === false) {
-        addAlert({
+        addCoverageWarning({
             id: 'data-unavailable',
             title: 'Cloudflare One evidence unavailable',
             description: data.message || 'The Cloudflare Zero Trust API did not return current evidence.',
-            severity: 'high',
-            category: 'Cloudflare API',
-            incident: true,
-            recommendation: 'Restore Cloudflare API evidence collection'
+            status: 'unavailable'
         });
     }
-    if (overview.gatewayProxyEnabled === false) {
-        addAlert({
+    if (overview.gatewayProxyEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'gatewayProxyEnabled')) {
+        addPostureFinding({
             id: 'gateway-proxy-disabled',
             title: 'Cloudflare Gateway proxy disabled',
             description: 'Gateway traffic inspection is not currently enabled in the Cloudflare One snapshot.',
             severity: 'high',
             category: 'Gateway',
-            incident: true,
             recommendation: 'Enable Cloudflare Gateway proxy or document the exception'
         });
     }
-    if (overview.tlsDecryptEnabled === false) {
-        addAlert({
+    if (overview.tlsDecryptEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'tlsDecryptEnabled')) {
+        addPostureFinding({
             id: 'tls-decrypt-disabled',
             title: 'Cloudflare TLS decrypt disabled',
             description: 'TLS inspection is disabled, limiting visibility into encrypted web traffic.',
@@ -11450,8 +11572,8 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
             recommendation: 'Review TLS decrypt policy readiness'
         });
     }
-    if (overview.udpProxyEnabled === false) {
-        addAlert({
+    if (overview.udpProxyEnabled === false && sectionEvidenceAvailable('gatewayConfig', 'udpProxyEnabled')) {
+        addPostureFinding({
             id: 'udp-proxy-disabled',
             title: 'Cloudflare UDP proxy disabled',
             description: 'UDP proxy support is disabled, which may leave selected traffic outside Gateway inspection.',
@@ -11460,8 +11582,8 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
             recommendation: 'Validate whether UDP proxy should be enabled'
         });
     }
-    if (overview.dlpProfiles === false) {
-        addAlert({
+    if (overview.dlpProfiles === 0 && sectionEvidenceAvailable('dlpProfiles', 'dlpProfiles')) {
+        addPostureFinding({
             id: 'dlp-missing',
             title: 'Cloudflare DLP profiles missing',
             description: 'No DLP profiles are available, so sensitive data detection is not evidenced.',
@@ -11470,8 +11592,8 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
             recommendation: 'Create or verify Cloudflare DLP profiles'
         });
     }
-    if (overview.protectedApps === false) {
-        addAlert({
+    if (overview.protectedApps === 0 && sectionEvidenceAvailable('apps', 'protectedApps')) {
+        addPostureFinding({
             id: 'access-apps-missing',
             title: 'No Cloudflare protected apps evidenced',
             description: 'Cloudflare Access did not provide protected applications for this snapshot.',
@@ -11480,14 +11602,13 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
             recommendation: 'Confirm Cloudflare Access app coverage'
         });
     }
-    if (overview.identityProviders === false) {
-        addAlert({
+    if (overview.identityProviders === 0 && sectionEvidenceAvailable('identityProviders', 'identityProviders')) {
+        addPostureFinding({
             id: 'identity-provider-missing',
             title: 'Cloudflare identity provider not evidenced',
             description: 'No Cloudflare Access identity provider is available in the latest snapshot.',
             severity: 'high',
             category: 'Identity',
-            incident: true,
             recommendation: 'Connect or verify the Cloudflare Access identity provider'
         });
     }
@@ -11509,14 +11630,12 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
 
     Object.entries(data.sections || {}).forEach(([key, section]) => {
         if (!section || !['error', 'permission_unavailable'].includes(section.status)) return;
-        addAlert({
+        addCoverageWarning({
             id: `section-${key}`,
-            title: `Cloudflare ${section.label || key} evidence needs attention`,
+            title: `Cloudflare ${section.label || key} evidence unavailable`,
             description: section.message || 'Cloudflare data for this control is incomplete or unavailable.',
-            severity: section.status === 'error' ? 'high' : 'medium',
-            category: 'Cloudflare API',
-            incident: section.status === 'error',
-            recommendation: 'Review Cloudflare API permissions for this evidence section'
+            status: section.status,
+            category: 'Cloudflare API'
         });
     });
 
@@ -11525,31 +11644,28 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
         .filter(family => ['permission_unavailable', 'error'].includes(String(family.status || '')))
         .slice(0, 4)
         .forEach(family => {
-            addAlert({
+            addCoverageWarning({
                 id: `permission-${family.key || family.id}`,
-                title: `${family.module || 'Cloudflare'} evidence gap`,
+                title: `${family.module || 'Cloudflare'} evidence unavailable`,
                 description: `${family.endpointFamily || family.permission || 'Cloudflare API'} is ${family.status === 'error' ? 'temporarily unavailable' : 'not available with current permissions'}.`,
-                severity: family.status === 'error' ? 'high' : 'medium',
+                status: family.status,
                 category: family.module || 'Cloudflare API',
-                incident: family.status === 'error',
-                recommendation: 'Review Cloudflare API token permissions for this evidence family'
             });
         });
 
     data.casbFindings.slice(0, 3).forEach((finding, index) => {
-        addAlert({
+        addPostureFinding({
             id: `casb-${finding.id || finding.uuid || index}`,
             title: finding.name || finding.title || 'Cloudflare CASB finding',
             description: finding.description || finding.status || 'CASB reported a SaaS posture finding.',
             severity: /critical|high/i.test(String(finding.severity || finding.priority || '')) ? 'high' : 'medium',
             category: 'CASB Dashboard',
-            incident: /critical|high/i.test(String(finding.severity || finding.priority || '')),
             recommendation: 'Review Cloudflare CASB findings in Security Alerts'
         });
     });
 
     data.securityInsights.slice(0, 3).forEach((finding, index) => {
-        addAlert({
+        addPostureFinding({
             id: `security-insight-${finding.id || index}`,
             title: finding.title || finding.name || 'Cloudflare security insight',
             description: finding.description || finding.status || 'Cloudflare Security Insights reported a posture finding.',
@@ -11558,10 +11674,22 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
             recommendation: 'Review Cloudflare Security Insights evidence'
         });
     });
+    data.applicationSecurityReports.slice(0, 3).forEach((finding, index) => {
+        addPostureFinding({
+            id: `application-security-${finding.id || index}`,
+            title: finding.title || finding.name || 'Cloudflare application security finding',
+            description: finding.description || finding.status || 'Cloudflare application security reported a posture finding.',
+            severity: /critical|high/i.test(String(finding.severity || finding.priority || '')) ? 'high' : 'medium',
+            category: 'Application Security',
+            recommendation: 'Review Cloudflare application security evidence'
+        });
+    });
     const highCount = alerts.filter(alert => ['critical', 'high'].includes(String(alert.severity || '').toLowerCase())).length;
     return {
         alerts,
         incidents,
+        postureFindings,
+        sourceCoverage,
         recommendations,
         activityFeed,
         reportProblems,
@@ -11570,13 +11698,14 @@ function buildCloudflareSecuritySignals(inputData = getCurrentNetworkSecurityDat
         notificationCount: alerts.length + incidents.length,
         highCount,
         primaryLabel: alerts[0]?.title || 'Cloudflare One clean',
-        scorePenalty: highCount * 6 + Math.max(0, alerts.length - highCount) * 3
+        scorePenalty: highCount * 6 + Math.max(0, alerts.length - highCount) * 3 +
+            postureFindings.reduce((penalty, finding) => penalty + (finding.severity === 'high' ? 3 : 1), 0)
     };
 }
 
 function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
     const signals = buildCloudflareSecuritySignals();
-    if (!signals.notificationCount) return data;
+    if (!signals.notificationCount && !signals.postureFindings.length && !signals.sourceCoverage.length) return data;
     const payload = data.payload && typeof data.payload === 'object' ? data.payload : data;
     // API-polled Cloudflare findings are authoritative. Do not show the same
     // categories again as locally generated snapshot signals.
@@ -11588,6 +11717,7 @@ function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
     );
     const generatedAlerts = signals.alerts.filter(alert => !polledCloudflareCategories.has(String(alert.category || '').toLowerCase()));
     const generatedIncidents = signals.incidents.filter(incident => !polledCloudflareCategories.has(String(incident.category || '').toLowerCase()));
+    const generatedPostureFindings = signals.postureFindings.filter(finding => !polledCloudflareCategories.has(String(finding.category || '').toLowerCase()));
     // Retain any older webhook alerts, while replacing only the generated
     // snapshot signals and collapsing equivalent rows.
     const stripGeneratedCloudflare = row => !(row?.cloudflareOneSignal && !row?.cloudflareWebhook);
@@ -11606,6 +11736,14 @@ function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
     };
     const alerts = dedupeRows([...generatedAlerts, ...(Array.isArray(payload.alerts) ? payload.alerts.filter(stripGeneratedCloudflare) : [])]);
     const incidents = dedupeRows([...generatedIncidents, ...(Array.isArray(payload.incidents) ? payload.incidents.filter(stripGeneratedCloudflare) : [])]);
+    const postureFindings = dedupeRows([
+        ...generatedPostureFindings,
+        ...(Array.isArray(payload.postureFindings) ? payload.postureFindings.filter(row => !row?.cloudflareOnePosture) : [])
+    ]);
+    const sourceCoverage = dedupeRows([
+        ...signals.sourceCoverage,
+        ...(Array.isArray(payload.sourceCoverage) ? payload.sourceCoverage.filter(row => !row?.cloudflareOneCoverage) : [])
+    ]);
     const baseAlerts = alerts.filter(alert => !alert.cloudflareOneSignal || alert.cloudflareWebhook);
     const baseIncidents = incidents.filter(incident => !incident.cloudflareOneSignal || incident.cloudflareWebhook);
     const generatedCloudflareAlerts = alerts.filter(alert => alert.cloudflareOneSignal && !alert.cloudflareWebhook);
@@ -11627,6 +11765,8 @@ function augmentSunbirdSecurityDataWithCloudflare(data = {}) {
         ...payload,
         alerts,
         incidents,
+        postureFindings,
+        sourceCoverage,
         activityFeed,
         recommendations,
         sourceDistribution: null,
@@ -11673,7 +11813,13 @@ function formatNetworkSecurityDate(value) {
 }
 
 function networkSecurityBoolLabel(value) {
-    return value ? 'Enabled' : 'Disabled';
+    if (value === true) return 'Enabled';
+    if (value === false) return 'Disabled';
+    return 'Not evidenced';
+}
+
+function networkSecurityBoolTone(value) {
+    return value === true ? 'good' : value === false ? 'warn' : 'neutral';
 }
 
 function compactNetworkIdentityProvider(value) {
@@ -11818,13 +11964,13 @@ function renderNetworkSecurityCardPanel(project) {
     const overview = data.overview;
     const isLoading = project.status === 'loading' && !latestNetworkSecurityData;
     const lastEvent = formatNetworkSecurityDate(overview.lastAccessEvent);
-    const gatewayTone = overview.gatewayProxyEnabled ? 'good' : 'warn';
+    const gatewayTone = networkSecurityBoolTone(overview.gatewayProxyEnabled);
     const identityTone = /not configured/i.test(overview.identityProvider) ? 'warn' : 'good';
     const dlpTone = overview.dlpProfiles > 0 ? 'good' : 'neutral';
     const warpTone = overview.warpProfiles > 0 ? 'good' : 'neutral';
     const privateNetworkTone = overview.virtualNetworks > 0 ? 'good' : 'warn';
-    const udpTone = overview.udpProxyEnabled ? 'good' : 'warn';
-    const tlsTone = overview.tlsDecryptEnabled ? 'good' : 'neutral';
+    const udpTone = networkSecurityBoolTone(overview.udpProxyEnabled);
+    const tlsTone = networkSecurityBoolTone(overview.tlsDecryptEnabled);
     const cloudflareSignals = buildCloudflareSecuritySignals(data);
     const logRecords = data.accessLogs.length + data.auditLogs.length + data.accountLogs.length;
     const notificationTone = cloudflareSignals.highCount ? 'bad' : cloudflareSignals.notificationCount ? 'warn' : 'good';
@@ -16234,6 +16380,168 @@ async function fetchBackupCardData() {
     }
 }
 
+function sunbirdSecurityDisplayText(value, fallback = 'Not recorded') {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value === 'object') {
+        const readable = value.displayName || value.userPrincipalName || value.name || value.title || value.summary || value.message || value.id;
+        return readable ? String(readable) : fallback;
+    }
+    return String(value);
+}
+
+function sunbirdSecurityEscape(value, fallback = 'Not recorded') {
+    return escapeIdentityText(sunbirdSecurityDisplayText(value, fallback));
+}
+
+function sunbirdSecurityStatusClass(value) {
+    const normalized = String(value || '').toLowerCase();
+    if (/unavailable|not_assessed|needs_investigation|warning|error/.test(normalized)) return 'attention';
+    if (/partial|related_evidence/.test(normalized)) return 'partial';
+    if (/correlated|evaluated|complete|active|open/.test(normalized)) return 'observed';
+    return 'neutral';
+}
+
+function sunbirdSecuritySeverityClass(value) {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'critical' || normalized === 'high') return 'high';
+    if (normalized === 'medium') return 'medium';
+    if (normalized === 'low') return 'low';
+    return 'medium';
+}
+
+function sunbirdSecurityStatusLabel(value, fallback = 'Not recorded') {
+    const text = sunbirdSecurityDisplayText(value, fallback);
+    return text.replace(/[_-]+/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function sunbirdSecurityFormatTime(value) {
+    if (!value) return 'Not recorded';
+    const time = new Date(value);
+    if (Number.isNaN(time.getTime())) return 'Not recorded';
+    return time.toLocaleString();
+}
+
+function sunbirdSecurityEntityLabels(entities) {
+    if (!entities || typeof entities !== 'object') return [];
+    const labels = [];
+    const add = (type, values) => {
+        const list = Array.isArray(values) ? values : (values ? [values] : []);
+        list.forEach(value => {
+            const label = sunbirdSecurityDisplayText(value, '');
+            if (label) labels.push({ type, label });
+        });
+    };
+    add('User', entities.users);
+    add('Device', entities.devices);
+    add('IP address', entities.ipAddresses);
+    add('Entity', entities.entities);
+    return labels;
+}
+
+function renderSunbirdSecurityEvidenceDetails(evidence = []) {
+    const records = Array.isArray(evidence) ? evidence : [];
+    if (!records.length) {
+        return '<p class="sunbird-security-evidence-empty">No cited evidence references were returned for this finding.</p>';
+    }
+
+    return `<details class="sunbird-security-evidence-details">
+        <summary>View ${records.length} cited evidence reference${records.length === 1 ? '' : 's'}</summary>
+        <div class="sunbird-security-evidence-list">
+            ${records.map((record, index) => {
+                const details = record && typeof record.details === 'object' && !Array.isArray(record.details)
+                    ? Object.entries(record.details).filter(([, value]) => value !== null && value !== undefined && value !== '')
+                    : [];
+                const source = sunbirdSecurityStatusLabel(record?.sourceType || record?.type, 'Source not recorded');
+                const reference = record?.sourceId ? ` · ${sunbirdSecurityDisplayText(record.sourceId)}` : '';
+                return `<article class="sunbird-security-evidence-record">
+                    <p class="sunbird-security-evidence-kicker">${sunbirdSecurityEscape(source)}${sunbirdSecurityEscape(reference, '')}</p>
+                    <p class="sunbird-security-evidence-summary">${sunbirdSecurityEscape(record?.summary)}</p>
+                    <p class="sunbird-security-evidence-time"><i class="far fa-clock" aria-hidden="true"></i> ${sunbirdSecurityEscape(sunbirdSecurityFormatTime(record?.eventTime))}</p>
+                    ${details.length ? `<dl class="sunbird-security-evidence-fields">${details.map(([key, value]) => `<div><dt>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(key))}</dt><dd>${sunbirdSecurityEscape(sunbirdSecurityDisplayText(value))}</dd></div>`).join('')}</dl>` : '<p class="sunbird-security-evidence-empty">Readable record details were not returned.</p>'}
+                </article>`;
+            }).join('')}
+        </div>
+    </details>`;
+}
+
+function renderSunbirdSecurityFindings(findings = [], data = {}) {
+    const records = Array.isArray(findings) ? findings : [];
+    const scenarioCoverage = data?.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
+    const coverageIsLimited = Object.values(scenarioCoverage).some(item => /partial|unavailable|not_assessed/i.test(String(item?.status || '')));
+
+    if (!records.length) {
+        return `<div class="sunbird-security-findings-empty">
+            <i class="fas fa-circle-info" aria-hidden="true"></i>
+            <div><strong>No finding generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage below before treating this as a clean result.' : 'The returned evidence did not produce an evidence-backed finding.'}</p></div>
+        </div>`;
+    }
+
+    return `<div class="sunbird-security-findings-list">${records.map(finding => {
+        const affected = sunbirdSecurityEntityLabels(finding?.affectedEntities);
+        const candidateUsers = Array.isArray(finding?.candidateUsers) ? finding.candidateUsers.filter(Boolean) : [];
+        const providerValues = [
+            finding?.sourceSeverity ? ['Provider severity', finding.sourceSeverity] : null,
+            finding?.sourceRiskLevel ? ['Provider risk', finding.sourceRiskLevel] : null,
+            finding?.sourceRiskState ? ['Provider risk state', finding.sourceRiskState] : null
+        ].filter(Boolean);
+        const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
+        return `<article class="sunbird-security-finding">
+            <header class="sunbird-security-finding-header">
+                <div><p class="sunbird-security-eyebrow">Evidence-backed finding</p><h5>${sunbirdSecurityEscape(finding?.title, 'Untitled finding')}</h5></div>
+                <span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.status, 'Status not recorded'))}</span>
+            </header>
+            <div class="sunbird-security-assessment-grid">
+                <section><span>Stack CTRL assessment</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.severity, 'Unassessed'))}</strong><small>Severity</small></section>
+                <section><span>Confidence</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.confidence, 'Not recorded'))}</strong><small>${sunbirdSecurityEscape(finding?.confidenceReason)}</small></section>
+                ${providerValues.length ? `<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span>${providerValues.map(([label, value]) => `<p><b>${sunbirdSecurityEscape(label, '')}</b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(value))}</p>`).join('')}</section>` : '<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span><p>No provider severity or risk value returned.</p></section>'}
+            </div>
+            <div class="sunbird-security-finding-copy">
+                <p>${sunbirdSecurityEscape(finding?.description, 'No finding description was returned.')}</p>
+                <p><b>Impact:</b> ${sunbirdSecurityEscape(finding?.impact)}</p>
+                <p><b>Assessment basis:</b> ${sunbirdSecurityEscape(finding?.assessmentBasis)}</p>
+            </div>
+            <div class="sunbird-security-entity-row">
+                <span>Observed / affected</span>
+                <div>${affected.length ? affected.map(entity => `<span class="sunbird-security-entity"><b>${sunbirdSecurityEscape(entity.type, '')}:</b> ${sunbirdSecurityEscape(entity.label)}</span>`).join('') : '<span class="sunbird-security-missing">No affected entities were returned.</span>'}${candidateUsers.length ? `<span class="sunbird-security-candidates"><b>Candidate user${candidateUsers.length === 1 ? '' : 's'} observed:</b> ${candidateUsers.map(user => sunbirdSecurityEscape(user)).join(', ')}</span>` : ''}</div>
+            </div>
+            <p class="sunbird-security-recommendation"><i class="fas fa-arrow-right" aria-hidden="true"></i><span><b>Recommended next step:</b> ${sunbirdSecurityEscape(finding?.recommendedAction)}</span></p>
+            ${renderSunbirdSecurityEvidenceDetails(evidence)}
+        </article>`;
+    }).join('')}</div>`;
+}
+
+function renderSunbirdSecurityCoverage(data = {}) {
+    const coverage = data?.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
+    const scenarios = [
+        ['anonymousIpAuthentication', 'Anonymous IP + authentication activity'],
+        ['impossibleTravel', 'Impossible travel'],
+        ['riskyUserSuccessfulSignIn', 'Risky user + successful sign-in']
+    ];
+    const warningValues = [
+        ...(Array.isArray(data?.coverageWarnings) ? data.coverageWarnings : []),
+        ...(Array.isArray(data?.collection?.warnings) ? data.collection.warnings : []),
+        ...(Array.isArray(data?.warnings) ? data.warnings : [])
+    ];
+    const warnings = [...new Set(warningValues.map(item => sunbirdSecurityDisplayText(item?.detail || item?.description || item?.message || item?.reason || item, '')).filter(Boolean))];
+    const collectionStatus = data?.collectionStatus || data?.collection?.status;
+
+    return `<div class="sunbird-security-coverage">
+        <div class="sunbird-security-coverage-list">
+            ${scenarios.map(([key, title]) => {
+                const item = coverage[key] || {};
+                const count = Number.isFinite(Number(item.findingCount)) ? `<span>${Number(item.findingCount)} finding${Number(item.findingCount) === 1 ? '' : 's'}</span>` : '<span>Finding count not supplied</span>';
+                return `<article class="sunbird-security-coverage-row">
+                    <div><h5>${sunbirdSecurityEscape(title)}</h5><p>${sunbirdSecurityEscape(item.reason, 'Reason not supplied by collection.')}</p></div>
+                    <div class="sunbird-security-coverage-state"><span class="sunbird-security-status ${sunbirdSecurityStatusClass(item.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(item.status, 'Not assessed'))}</span>${count}</div>
+                </article>`;
+            }).join('')}
+        </div>
+        <div class="sunbird-security-collection-note ${sunbirdSecurityStatusClass(collectionStatus)}">
+            <i class="fas fa-database" aria-hidden="true"></i><div><strong>Collection coverage${collectionStatus ? `: ${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(collectionStatus))}` : ''}</strong>${warnings.length ? `<ul>${warnings.map(warning => `<li>${sunbirdSecurityEscape(warning)}</li>`).join('')}</ul>` : '<p>No collection warning was returned with this result.</p>'}</div>
+        </div>
+    </div>`;
+}
+
 async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
     const billingCard = document.getElementById('billing-card');
     if (!billingCard) return;
@@ -16255,6 +16563,15 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                         <div class="sunbird-mini-stat">
                             <span>Security Incidents</span>
                             <strong>0</strong>
+                        </div>
+                    </div>
+                    <div class="sunbird-section-container sunbird-security-findings-section" aria-busy="true">
+                        <h4 class="sunbird-section-heading">
+                            <i class="fas fa-magnifying-glass-chart"></i> Evidence-Backed Findings
+                        </h4>
+                        <div class="sunbird-security-findings-empty">
+                            <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+                            <div><strong>Assessing returned evidence</strong><p>Findings and detection coverage will appear when the current collection is available.</p></div>
                         </div>
                     </div>
                     <div class="sunbird-section-container">
@@ -16302,10 +16619,10 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
         const rowsHtml = incidents.length
             ? incidents.map(incident => `
                 <tr>
-                    <td>${incident.displayName || 'Unknown Incident'}</td>
-                    <td><span class="sunbird-severity-pill ${String(incident.severity || 'medium').toLowerCase()}">${incident.severity || 'medium'}</span></td>
-                    <td>${incident.status || 'active'}</td>
-                    <td>${incident.assignedTo || 'Unassigned'}</td>
+                    <td>${sunbirdSecurityEscape(incident.displayName, 'Unknown incident')}</td>
+                    <td><span class="sunbird-severity-pill ${sunbirdSecuritySeverityClass(incident.severity)}">${sunbirdSecurityEscape(incident.severity, 'Not recorded')}</span></td>
+                    <td>${sunbirdSecurityEscape(incident.status, 'Not recorded')}</td>
+                    <td>${sunbirdSecurityEscape(incident.assignedTo, 'Unassigned')}</td>
                 </tr>
             `).join('')
             : '<tr><td colspan="4" class="sunbird-empty-row">No incidents found</td></tr>';
@@ -16319,14 +16636,16 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
         
         const activityFeedHtml = activityFeed.length
             ? activityFeed.map(item => {
-                const severityColor = item.severity === 'critical' ? '#ff6b6b' : item.severity === 'high' ? '#ff9f40' : '#ffc107';
+                const itemSeverity = String(item?.severity || '').toLowerCase();
+                const severityColor = itemSeverity === 'critical' ? '#ff6b6b' : itemSeverity === 'high' ? '#ff9f40' : '#ffc107';
+                const itemTime = sunbirdSecurityFormatTime(item?.timestamp);
                 const itemIcon = /cloudflare/i.test(`${item.type || ''} ${item.source || ''}`) ? 'CF' : item.type === 'incident' ? '🔴' : item.type === 'alert' ? '⚠️' : item.type === 'signin' ? '🔑' : '•';
                 return `
                     <div class="sunbird-activity-item">
                         <span class="sunbird-activity-severity" style="background-color: ${severityColor}"></span>
                         <div class="sunbird-activity-content">
-                            <p class="sunbird-activity-title">${itemIcon} ${item.message || 'Activity detected'}</p>
-                            <p class="sunbird-activity-meta">${new Date(item.timestamp).toLocaleTimeString()} • ${item.type}</p>
+                            <p class="sunbird-activity-title">${itemIcon} ${sunbirdSecurityEscape(item?.message, 'Activity detected')}</p>
+                            <p class="sunbird-activity-meta">${sunbirdSecurityEscape(itemTime)} • ${sunbirdSecurityEscape(item?.type, 'Type not recorded')}</p>
                         </div>
                     </div>
                 `;
@@ -16350,6 +16669,20 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                         <span>Security Incidents</span>
                         <strong>${activeIncidents}</strong>
                     </div>
+                </div>
+
+                <div class="sunbird-section-container sunbird-security-findings-section">
+                    <h4 class="sunbird-section-heading">
+                        <i class="fas fa-magnifying-glass-chart"></i> Evidence-Backed Findings
+                    </h4>
+                    ${renderSunbirdSecurityFindings(data.findings, data)}
+                </div>
+
+                <div class="sunbird-section-container sunbird-security-coverage-section">
+                    <h4 class="sunbird-section-heading">
+                        <i class="fas fa-satellite-dish"></i> Detection Coverage
+                    </h4>
+                    ${renderSunbirdSecurityCoverage(data)}
                 </div>
                 
                 <!-- Security Incidents Table Section -->

@@ -1,0 +1,492 @@
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 100,
+  timestamp: '2026-10-12T19:24:08.452Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 100,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 100,
+  snapshotId: 76,
+  timestamp: '2026-10-12T19:24:08.453Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 100,
+  snapshotId: 76,
+  timestamp: '2026-10-12T19:24:08.453Z'
+}
+[StackCTRL Enterprise] Identity batch plan: basePackageTokens=2940, evidenceTokens=193, identityTableTokens=193, totalEstimatedTokens=3133, safeTokenLimit=25000, plannedBatchCount=1, reasonForBatchCount=all_identity_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Identity Protection in 1 batch(es)
+[StackCTRL Enterprise] Identity Protection batch 1 failed: Expected values to be strictly equal:
+
+1 !== 3
+
+[StackCTRL Enterprise] Stopping Identity Protection after batch 1 failed with failed_storage; remaining evidence is retained and recorded as omitted for this attempt.
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  timestamp: '2026-10-12T19:24:08.685Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 800,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 800,
+  snapshotId: 701,
+  timestamp: '2026-10-12T19:24:08.685Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  snapshotId: 701,
+  timestamp: '2026-10-12T19:24:08.686Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  snapshotId: 701,
+  status: 'completed_with_warnings',
+  timestamp: '2026-10-12T19:24:08.688Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  timestamp: '2026-10-12T19:24:08.689Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 800,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 800,
+  snapshotId: 702,
+  timestamp: '2026-10-12T19:24:08.689Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  snapshotId: 702,
+  timestamp: '2026-10-12T19:24:08.689Z'
+}
+[StackCTRL Enterprise] Identity Protection evidence is stale (180 minutes old); latest stored evidence was used from 2026-06-22T05:00:00.000Z.
+[StackCTRL Enterprise] Identity batch plan: basePackageTokens=3129, evidenceTokens=199, identityTableTokens=199, totalEstimatedTokens=3328, safeTokenLimit=37500, plannedBatchCount=1, reasonForBatchCount=all_identity_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Identity Protection in 1 batch(es)
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 800,
+  snapshotId: 702,
+  status: 'completed',
+  timestamp: '2026-10-12T19:24:08.694Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 300,
+  timestamp: '2026-10-12T19:24:10.746Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 300,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 300,
+  snapshotId: 77,
+  timestamp: '2026-10-12T19:24:10.747Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 300,
+  snapshotId: 77,
+  timestamp: '2026-10-12T19:24:10.747Z'
+}
+[StackCTRL Enterprise] Identity batch plan: basePackageTokens=2973, evidenceTokens=194, identityTableTokens=194, totalEstimatedTokens=3167, safeTokenLimit=37500, plannedBatchCount=1, reasonForBatchCount=all_identity_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Identity Protection in 1 batch(es)
+[StackCTRL Enterprise] Batch 1 JSON parsing failed, attempting one Azure repair. Error: Unexpected end of JSON input
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 300,
+  snapshotId: 77,
+  status: 'completed',
+  timestamp: '2026-10-12T19:24:10.754Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 400,
+  timestamp: '2026-10-12T19:24:10.762Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_creation_started',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 400,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 400,
+  timestamp: '2026-10-12T19:24:10.762Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 400,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 400,
+  snapshotId: 78,
+  timestamp: '2026-10-12T19:24:10.762Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 400,
+  snapshotId: 78,
+  timestamp: '2026-10-12T19:24:10.762Z'
+}
+[StackCTRL Enterprise] Identity batch plan: basePackageTokens=2973, evidenceTokens=194, identityTableTokens=194, totalEstimatedTokens=3167, safeTokenLimit=37500, plannedBatchCount=1, reasonForBatchCount=all_identity_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Identity Protection in 1 batch(es)
+[StackCTRL Enterprise] Batch 1 JSON parsing failed, attempting one Azure repair. Error: Unexpected end of JSON input
+[StackCTRL Enterprise] Device batch plan: basePackageTokens=2886, deviceTableTokens=156, evidenceTokens=156, totalEstimatedTokens=3042, safeTokenLimit=37500, plannedBatchCount=1, reasonForBatchCount=all_device_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Device Protection in 1 batch(es)
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 400,
+  snapshotId: 78,
+  status: 'completed_with_warnings',
+  timestamp: '2026-10-12T19:24:10.775Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'scheduled_tenant_discovery',
+  cadence: 'hourly',
+  scheduleKey: '2026062208',
+  enterpriseIds: [],
+  enterpriseCount: 0,
+  timestamp: '2026-10-12T19:24:10.780Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'scheduled_tenant_discovery',
+  cadence: 'daily',
+  scheduleKey: '20260622',
+  enterpriseIds: [],
+  enterpriseCount: 0,
+  timestamp: '2026-10-12T19:24:10.781Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  timestamp: '2026-10-12T19:24:10.791Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 900,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 900,
+  snapshotId: 911,
+  timestamp: '2026-10-12T19:24:10.791Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  snapshotId: 911,
+  timestamp: '2026-10-12T19:24:10.791Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  snapshotId: 911,
+  status: 'completed_with_warnings',
+  timestamp: '2026-10-12T19:24:10.792Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'pipeline_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  timestamp: '2026-10-12T19:24:10.792Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'snapshot_verified',
+  companyId: 1,
+  enterpriseId: 1,
+  runId: 900,
+  pipelineExecutionId: null,
+  scheduleKey: null,
+  analysisExecutionId: 900,
+  snapshotId: 912,
+  timestamp: '2026-10-12T19:24:10.792Z'
+}
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_started',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  snapshotId: 912,
+  timestamp: '2026-10-12T19:24:10.792Z'
+}
+[StackCTRL Enterprise] Device Protection source is stale. Latest stored evidence was used from 2026-06-22T05:00:00.000Z.
+[StackCTRL Enterprise] Device batch plan: basePackageTokens=3038, deviceTableTokens=150, evidenceTokens=150, totalEstimatedTokens=3188, safeTokenLimit=37500, plannedBatchCount=1, reasonForBatchCount=all_device_rows_fit_safe_token_limit
+[StackCTRL Enterprise] Processing Device Protection in 1 batch(es)
+[StackCTRL Enterprise Pipeline] {
+  event: 'analysis_completed',
+  enterpriseId: 1,
+  pipelineExecutionId: null,
+  analysisExecutionId: 900,
+  snapshotId: 912,
+  status: 'completed',
+  timestamp: '2026-10-12T19:24:10.797Z'
+}
+✔ enterprise domain order keeps governance and compliance active with operations disabled (2.0381ms)
+✔ operations remains visible but cannot be selected while governance and compliance are active (1.6672ms)
+✔ heavy domains and large inputs enforce automation-safe cooldowns (0.2203ms)
+✔ enterprise output keeps real entity IDs and readable business values while isolating source paths (6.9614ms)
+✔ Email Security adapter freshness comes from Email evidence freshness (2.8961ms)
+✔ Email Security adapter surfaces latest collection error when refresh has failed (0.8948ms)
+✔ selected-domain visible output removes curated warning noise, positive risks, and empty fields (3.0167ms)
+✔ Cloudflare selected-domain entity fields are cleaned by entityType (1.2681ms)
+✔ selected-domain evidence linking keeps Backup and Applications risks on matching evidence groups (3.2145ms)
+✔ strict selected-domain packages keep curated-reference warnings internal when evidence exists (50.3743ms)
+✔ Security Alerts semantic batching preserves every record in a reasonable batch count (23.0399ms)
+✖ enterprise pipeline queues domain analysis, stores audit rows, then synthesizes stored intelligence (28.3359ms)
+✔ Identity sends 57 normal users as one compact Azure table even when the global item cap is one (89.8623ms)
+✔ Device Protection sends 17 devices as one compact Azure table and keeps readable device output (25.8968ms)
+✖ Email Security selected-domain stops cleanly on Azure 429 without synthesis or evidence omission (69.1968ms)
+✖ Cloudflare selected-domain prompt and output stay readable and domain-specific (23.9444ms)
+✔ Backup selected-domain preparation uses one strict compact exposure package (2.3385ms)
+✔ Applications selected-domain preparation uses one strict compact governance package (3.1619ms)
+✔ normalizeMysqlDate stores only real MySQL dates for enterprise AI date fields (0.111ms)
+✔ repairTruncatedJson closes a long unterminated Azure string without discarding completed fields (1.4334ms)
+✔ Enterprise Identity currentMetrics follow dynamic dashboard metrics and detect source mismatches (2.869ms)
+✖ Enterprise warns on missing Identity evidence and continues with stale saved evidence (11.3965ms)
+✔ enterprise batching splits 3,590 evidence items by count and byte budget (32.2017ms)
+✔ Identity domain packages keep user rows compact and include shared context only in the first batch (48.3477ms)
+✔ enterprise rate-limit circuit stops remaining batches and records zero analysed items (1969.9604ms)
+✖ enterprise invalid JSON triggers repair retry and stores repaired batch details (9.1802ms)
+✔ enterprise domain batch locally recovers a long unterminated Azure string (6.8704ms)
+✔ enterprise invalid JSON fallback stores diagnostics, continues domains, and runs synthesis (13.4634ms)
+✔ Enterprise synthesis recovers a long unterminated JSON string and completes with warnings (3.1999ms)
+✔ enterprise automation checks for an hourly run outside the former daily window (1.972ms)
+✔ enterprise daily automation waits until the configured Johannesburg hour, then catches up (0.7184ms)
+✔ Enterprise Device currentMetrics follow stored dashboard metrics and flatten per-device evidence (1.1481ms)
+✖ Enterprise Email currentMetrics follow stored dashboard metrics and prepare compact threat-focused evidence (1.3328ms)
+✔ Enterprise Network currentMetrics follow stored dashboard metrics and flatten row-level evidence (2.4336ms)
+✔ Enterprise Governance, Compliance, and Operations use saved API rows and document manual exclusions (4.2196ms)
+✔ Enterprise warns on missing Device evidence and continues with stale saved Device evidence (6.6838ms)
+✖ Enterprise pipeline continues to later domains when one domain has limited data (5.6748ms)
+✔ enterprise synthesis uses stored successful domain intelligence only (1.3274ms)
+✔ enterprise evidence flattening preserves entity rows and builds categorized evidence catalog (0.301ms)
+✔ all required enterprise domain modes are registered (0.4243ms)
+✖ enterprise token threshold switches later domains to safe batches instead of skipping Applications (7.8267ms)
+✔ Power BI read model returns full domain outputs, synthesis, raw labels, and evidence tables (10.8684ms)
+✔ admin enterprise progress excludes heavy JSON and returns polling counters only (1.303ms)
+✔ Security Alerts selected-domain analysis sends compact groups and keeps output report-ready (255.5592ms)
+✔ Security Alerts adapter uses actual evidence freshness timestamp (10.9295ms)
+✔ Security Alerts adapter surfaces latest failed collection error (2.2393ms)
+✔ Security Alerts stale warning uses stored evidence timestamp (12.7211ms)
+✔ Security Alerts visible output removes nulls and positive observations from risks (3.8651ms)
+✔ Security Alerts affected entities are matched to the inferred evidence group (2.8437ms)
+✔ Security Alerts Power BI flattening keeps risk, recommendation, entity, and evidence rows (4.4728ms)
+✔ an active enterprise run is returned immediately without creating a second run (4.3035ms)
+✔ a completed manual enterprise run automatically publishes its report record (11.3816ms)
+✔ scheduled enterprise pipeline creates and verifies a fresh snapshot before analysis and report persistence (6.1648ms)
+✔ scheduled enterprise pipeline stops after snapshot failure and persists the failure stage (0.8441ms)
+✔ collector timeout produces a terminal failed run with snapshot failure progress (0.7053ms)
+✔ scheduled enterprise pipeline reports analysis failure and does not publish a report (1.5863ms)
+✔ duplicate scheduled delivery reuses the existing run without another snapshot or analysis (0.842ms)
+✔ manual Enterprise Deep Analysis still uses an explicitly selected snapshot without creating another one (3.3555ms)
+ℹ tests 58
+ℹ suites 0
+ℹ pass 50
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3072.3873
+
+✖ failing tests:
+
+test at tests\enterprise-intelligence.test.js:570:1
+✖ enterprise pipeline queues domain analysis, stores audit rows, then synthesizes stored intelligence (28.3359ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'failed_storage'
+  - 'completed'
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:621:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'failed_storage',
+    expected: 'completed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:1052:1
+✖ Email Security selected-domain stops cleanly on Azure 429 without synthesis or evidence omission (69.1968ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  10000 !== 6000
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:1131:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 10000,
+    expected: 6000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:1147:1
+✖ Cloudflare selected-domain prompt and output stay readable and domain-specific (23.9444ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(preparedRows.some(row => row.evidenceType === 'coverageSummaries' && row.sourceMetric === 'accessLogCount' && row.data.coverageStatus === 'sampled_compact_rows'))
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:1262:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:1532:1
+✖ Enterprise warns on missing Identity evidence and continues with stale saved evidence (11.3965ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /source_stale.*180.*2026-06-22T05:00:00.000Z/i. Input:
+  
+  'Identity Protection evidence is stale; latest stored evidence was used from 2026-06-22T05:00:00.000Z.'
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:1597:20)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Identity Protection evidence is stale; latest stored evidence was used from 2026-06-22T05:00:00.000Z.',
+    expected: /source_stale.*180.*2026-06-22T05:00:00.000Z/i,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:1799:1
+✖ enterprise invalid JSON triggers repair retry and stores repaired batch details (9.1802ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'completed_with_warnings'
+              ^
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:1838:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'completed_with_warnings',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:2170:1
+✖ Enterprise Email currentMetrics follow stored dashboard metrics and prepare compact threat-focused evidence (1.3328ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  59 !== 23
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:2239:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 59,
+    expected: 23,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:2658:1
+✖ Enterprise pipeline continues to later domains when one domain has limited data (5.6748ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:2732:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\enterprise-intelligence.test.js:2851:1
+✖ enterprise token threshold switches later domains to safe batches instead of skipping Applications (7.8267ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 3
+  
+      at TestContext.<anonymous> (D:\Websites\Github\StackOpsITSolutions\tests\enterprise-intelligence.test.js:2902:12)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

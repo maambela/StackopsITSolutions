@@ -1,5 +1,6 @@
 const { DateTime } = require('luxon');
 const { buildDashboardIntelligenceContext } = require('./intelligence/dashboard-context');
+const { getExplicitSecurityIocs } = require('./intelligence/security-ioc');
 
 const ENTERPRISE_DOMAINS = Object.freeze([
     { key: 'identity', name: 'Identity Protection', sourceKey: 'identity', mode: 'enterprise_domain_identity', riskKey: 'identity', healthKey: 'identityHealth', focus: ['MFA coverage', 'users without MFA', 'privileged accounts', 'admin roles', 'legacy authentication', 'risky sign-ins', 'external users', 'Conditional Access gaps'] },
@@ -931,46 +932,10 @@ function addThreatIndicator(map, type, value, sourceRow, sourceField = null, ext
 function extractSecurityThreatIndicators(flattenedEvidence = []) {
     const indicatorMap = new Map();
     const rows = array(flattenedEvidence);
-    const keywordPattern = /\b(?:malware|phishing|phish|ransomware|trojan|credential theft|credential harvesting|bec|spoof|impossible travel|anonymous ip|risky sign[-\s]?in|brute force|password spray|suspicious inbox rule)\b/gi;
     for (const row of rows) {
         const data = row?.data && typeof row.data === 'object' ? row.data : {};
-        const serialized = JSON.stringify(data).slice(0, 12000);
-        for (const ip of serialized.match(/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g) || []) {
-            addThreatIndicator(indicatorMap, 'IPAddress', ip, row, 'text.ipAddress', { confidence: 'high' });
-        }
-        for (const url of serialized.match(/\bhttps?:\/\/[^\s"'<>]+/gi) || []) {
-            addThreatIndicator(indicatorMap, 'URL', url.replace(/[),.;]+$/g, ''), row, 'text.url', { confidence: 'high' });
-        }
-        for (const hash of serialized.match(/\b[a-f0-9]{64}\b|\b[a-f0-9]{40}\b|\b[a-f0-9]{32}\b/gi) || []) {
-            addThreatIndicator(indicatorMap, 'FileHash', hash, row, 'text.fileHash', { confidence: 'high' });
-        }
-        for (const email of serialized.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || []) {
-            const fieldType = /sender|from/i.test(serialized.slice(Math.max(0, serialized.indexOf(email) - 80), serialized.indexOf(email) + 80))
-                ? 'SenderAddress'
-                : 'UserPrincipalName';
-            addThreatIndicator(indicatorMap, fieldType, email, row, 'text.email', { confidence: 'medium' });
-        }
-        for (const domain of serialized.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi) || []) {
-            if (/microsoft\.com|windows\.net|example\.com|contoso\.com/i.test(domain)) continue;
-            addThreatIndicator(indicatorMap, 'Domain', domain, row, 'text.domain', { confidence: 'medium' });
-        }
-        const structuredFields = [
-            ['IPAddress', firstReadableValue(data.ipAddress, data.clientIpAddress, data.sourceIpAddress, data.ip)],
-            ['URL', firstReadableValue(data.url, data.uri, data.link, data.maliciousUrl)],
-            ['Domain', firstReadableValue(data.domain, data.senderDomain, data.urlDomain, data.hostname)],
-            ['FileHash', firstReadableValue(data.fileHash, data.sha256, data.sha1, data.md5)],
-            ['SenderAddress', firstReadableValue(data.senderAddress, data.senderEmail, data.sender, data.fromAddress, data.from)],
-            ['UserPrincipalName', firstReadableValue(data.userPrincipalName, data.userEmail, data.mail, data.email, data.user)],
-            ['DeviceName', firstReadableValue(data.deviceName, data.hostName, data.hostname, data.machineName, data.computerName)],
-            ['AlertTitle', firstReadableValue(data.title, data.alertName, data.displayName, data.name)],
-            ['RiskType', firstReadableValue(data.riskType, data.riskLevel, data.riskDetail, data.category, data.classification, data.detectionSource)],
-            ['SignInLocation', firstReadableValue(data.location, data.city, data.countryOrRegion, data.country)]
-        ];
-        for (const [type, value] of structuredFields) {
-            addThreatIndicator(indicatorMap, type, value, row, type, { confidence: ['IPAddress', 'URL', 'FileHash'].includes(type) ? 'high' : 'medium' });
-        }
-        for (const match of serialized.match(keywordPattern) || []) {
-            addThreatIndicator(indicatorMap, 'Keyword', match.toLowerCase(), row, 'text.keyword', { confidence: 'low' });
+        for (const { type, value, sourceField } of getExplicitSecurityIocs(data)) {
+            addThreatIndicator(indicatorMap, type, value, row, sourceField, { confidence: 'medium' });
         }
     }
     return [...indicatorMap.values()]
@@ -997,8 +962,8 @@ function extractSecurityThreatIndicators(flattenedEvidence = []) {
                 relatedDevices: [...indicator.relatedDevices].slice(0, 5),
                 relatedAlerts: [...indicator.relatedAlerts].slice(0, 5),
                 internalOnly: true,
-                businessReason: 'Indicator was extracted from Security Alerts evidence for internal triage context.',
-                recommendation: 'Use this indicator to correlate affected alerts, sign-ins, users, and devices before external enrichment is available.'
+                businessReason: 'Observable was read from an explicit IOC field in Security Alerts evidence; maliciousness is not assessed.',
+                recommendation: 'Correlate this observable with its source alert and external reputation data before taking action.'
             })
         }));
 }

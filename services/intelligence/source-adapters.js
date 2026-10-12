@@ -1,3 +1,5 @@
+const { normalizeTypedSecurityIoc } = require('./security-ioc');
+
 function parseJsonValue(value) {
     if (value == null || typeof value !== 'string') return value;
     const trimmed = value.trim();
@@ -932,6 +934,27 @@ async load(pool, companyId, capability) {
             else if (row.EvidenceKind === 'security_finding') grouped.securityFindings.push(item);
             else if (row.EvidenceKind === 'risk_detection') grouped.riskDetections.push(item);
             else if (row.EvidenceKind === 'risky_user') grouped.riskyUsers.push(item);
+        });
+
+        grouped.threatIndicators = grouped.threatIndicators.flatMap(item => {
+            if (!item || typeof item !== 'object') return [];
+            const observable = normalizeTypedSecurityIoc(
+                item.indicatorType || item.type,
+                item.indicatorValue || item.indicator || item.value
+            );
+            return observable
+                ? [{
+                    ...item,
+                    indicator: observable.value,
+                    value: observable.value,
+                    indicatorType: observable.type,
+                    type: observable.type,
+                    ...(item.source === 'internal_security_alerts'
+                        || /Extracted from Security Alerts evidence because external threat indicators were unavailable/i.test(String(item.description || ''))
+                        ? { description: 'Observed in an explicit IOC field; reputation and maliciousness are not assessed.' }
+                        : {})
+                }]
+                : [];
         });
 
         const dashboardMetrics = snapshot.DashboardMetricsJson || {};
