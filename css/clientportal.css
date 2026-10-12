@@ -17325,3 +17325,236 @@ body .project-card[data-project-id="10"]:focus-within {
 body:has(#dashboard-section) .site-header {
   box-shadow: 0 0 25px rgba(252, 116, 38, 0.85) !important;
 }
+
+/* Security alerts: keep the project-card preview calm and transparent. Details
+   deliberately live in the full dashboard rather than recreating a blue SOC UI
+   inside the liquid-glass billing card. */
+.billing-card[data-sunbird-view="security"] .sunbird-panel-view {
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.billing-card[data-sunbird-view="security"] .sunbird-mini-stats {
+  gap: 10px;
+}
+
+.billing-card[data-sunbird-view="security"] .sunbird-mini-stat {
+  min-height: 0;
+  padding: 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(14, 13, 15, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px) saturate(118%);
+  -webkit-backdrop-filter: blur(12px) saturate(118%);
+}
+
+.billing-card[data-sunbird-view="security"] .sunbird-mini-stat span {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.billing-card[data-sunbird-view="security"] .sunbird-mini-stat strong {
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.14);
+}
+
+.sunbird-security-card-summary {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(12, 11, 13, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 12px 28px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(15px) saturate(120%);
+  -webkit-backdrop-filter: blur(15px) saturate(120%);
+}
+
+.sunbird-security-card-intro {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.sunbird-security-card-rows {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.sunbird-security-card-rows li {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.11);
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.69rem;
+}
+
+.sunbird-security-card-rows li:last-child { border-bottom: 0; padding-bottom: 0; }
+.sunbird-security-card-rows i { color: rgba(165, 243, 252, 0.86); font-size: 0.68rem; }
+.sunbird-security-card-rows strong { color: rgba(255, 255, 255, 0.91); font-weight: 600; text-align: right; }
+
+/* Ordered investigation content on the full dashboard. */
+.sunbird-security-dashboard .sunbird-security-investigation {
+  display: grid;
+  gap: 16px;
+  margin: 18px 0 22px;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary,
+.sunbird-security-dashboard .sunbird-security-investigation-section {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(12, 13, 16, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 16px 34px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(16px) saturate(115%);
+  -webkit-backdrop-filter: blur(16px) saturate(115%);
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.9fr);
+  gap: 20px;
+  padding: 18px;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary h3,
+.sunbird-security-dashboard .sunbird-security-section-title h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary > div > p:last-child,
+.sunbird-security-dashboard .sunbird-security-section-title > p:last-child {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary dl div {
+  padding-left: 10px;
+  border-left: 1px solid rgba(165, 243, 252, 0.28);
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary dt,
+.sunbird-security-dashboard .sunbird-security-sources-list span {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.62rem;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-summary dd {
+  margin: 5px 0 0;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sunbird-security-dashboard .sunbird-security-investigation-section { padding: 18px; }
+.sunbird-security-dashboard .sunbird-security-section-title { margin-bottom: 13px; }
+.sunbird-security-dashboard .sunbird-security-section-title .sunbird-security-eyebrow { color: rgba(165, 243, 252, 0.82); }
+
+.sunbird-security-dashboard .sunbird-security-finding,
+.sunbird-security-dashboard .sunbird-security-findings-empty,
+.sunbird-security-dashboard .sunbird-security-coverage,
+.sunbird-security-dashboard .sunbird-security-collection-note {
+  border-color: rgba(255, 255, 255, 0.17);
+  background: rgba(4, 5, 7, 0.24);
+}
+
+.sunbird-security-dashboard .sunbird-security-finding { box-shadow: inset 2px 0 0 rgba(165, 243, 252, 0.52); }
+.sunbird-security-dashboard .sunbird-security-assessment-grid section { background: rgba(255, 255, 255, 0.035); border-left-color: rgba(165, 243, 252, 0.42); }
+.sunbird-security-dashboard .sunbird-security-recommendation { background: rgba(255, 255, 255, 0.045); }
+.sunbird-security-dashboard .sunbird-security-collection-note { background: rgba(255, 255, 255, 0.035); }
+
+/* The findings are a primary investigation surface here, not a compact card.
+   Keep these overrides dashboard-scoped so the Billing Card stays concise. */
+.sunbird-security-dashboard .sunbird-security-eyebrow,
+.sunbird-security-dashboard .sunbird-security-evidence-kicker { font-size: 0.68rem; }
+.sunbird-security-dashboard .sunbird-security-finding h5,
+.sunbird-security-dashboard .sunbird-security-coverage-row h5 { font-size: 0.94rem; }
+.sunbird-security-dashboard .sunbird-security-status { font-size: 0.7rem; }
+.sunbird-security-dashboard .sunbird-security-assessment-grid span,
+.sunbird-security-dashboard .sunbird-security-entity-row > span,
+.sunbird-security-dashboard .sunbird-security-provider-values > span { font-size: 0.69rem; }
+.sunbird-security-dashboard .sunbird-security-assessment-grid strong { font-size: 0.86rem; }
+.sunbird-security-dashboard .sunbird-security-assessment-grid small,
+.sunbird-security-dashboard .sunbird-security-provider-values p,
+.sunbird-security-dashboard .sunbird-security-finding-copy p,
+.sunbird-security-dashboard .sunbird-security-coverage-row p,
+.sunbird-security-dashboard .sunbird-security-collection-note p,
+.sunbird-security-dashboard .sunbird-security-evidence-empty { font-size: 0.8rem; }
+.sunbird-security-dashboard .sunbird-security-provider-values b { font-size: 0.72rem; }
+.sunbird-security-dashboard .sunbird-security-entity,
+.sunbird-security-dashboard .sunbird-security-candidates,
+.sunbird-security-dashboard .sunbird-security-missing { font-size: 0.76rem; }
+.sunbird-security-dashboard .sunbird-security-recommendation { font-size: 0.8rem; }
+.sunbird-security-dashboard .sunbird-security-evidence-details summary { font-size: 0.8rem; }
+.sunbird-security-dashboard .sunbird-security-evidence-summary,
+.sunbird-security-dashboard .sunbird-security-evidence-time { font-size: 0.78rem; }
+.sunbird-security-dashboard .sunbird-security-evidence-fields dt { font-size: 0.67rem; }
+.sunbird-security-dashboard .sunbird-security-evidence-fields dd { font-size: 0.76rem; }
+.sunbird-security-dashboard .sunbird-security-findings-empty strong,
+.sunbird-security-dashboard .sunbird-security-collection-note strong { font-size: 0.88rem; }
+.sunbird-security-dashboard .sunbird-security-findings-empty p,
+.sunbird-security-dashboard .sunbird-security-collection-note ul { font-size: 0.8rem; }
+.sunbird-security-dashboard .sunbird-security-coverage-state { font-size: 0.72rem; }
+
+.sunbird-security-sources-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.sunbird-security-sources-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sunbird-security-sources-list li:last-child { border-bottom: 0; }
+.sunbird-security-sources-list strong { display: block; color: rgba(255, 255, 255, 0.92); font-size: 0.78rem; }
+.sunbird-security-sources-list p { margin: 3px 0 0; color: rgba(255, 255, 255, 0.62); font-size: 0.71rem; }
+.sunbird-security-sources-list li > div:last-child { display: grid; align-content: start; justify-items: end; gap: 4px; text-align: right; }
+.sunbird-security-sources-list b { color: rgba(165, 243, 252, 0.94); font-size: 0.72rem; font-weight: 600; }
+.sunbird-security-sources-empty { padding: 13px; border: 1px dashed rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.67); font-size: 0.75rem; line-height: 1.5; }
+
+@media (max-width: 700px) {
+  .sunbird-security-dashboard .sunbird-security-investigation-summary { grid-template-columns: 1fr; }
+  .sunbird-security-dashboard .sunbird-security-investigation-summary dl { grid-template-columns: 1fr; }
+  .sunbird-security-dashboard .sunbird-security-investigation-summary dl div { padding: 8px 0 0; border-left: 0; border-top: 1px solid rgba(165, 243, 252, 0.22); }
+  .sunbird-security-sources-list li { flex-direction: column; gap: 8px; }
+  .sunbird-security-sources-list li > div:last-child { justify-items: start; text-align: left; }
+}
+
+@media (max-width: 420px) {
+  .sunbird-security-card-rows li { grid-template-columns: 16px minmax(0, 1fr); }
+  .sunbird-security-card-rows strong { grid-column: 2; text-align: left; }
+}

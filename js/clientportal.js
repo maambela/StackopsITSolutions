@@ -5211,6 +5211,7 @@ function renderSunbirdSecurityShell() {
             </div>
 
             <div class="sunbird-id-metrics" id="sunbird-security-metrics"></div>
+            <section class="sunbird-security-investigation" id="sunbird-security-investigation" aria-live="polite"></section>
             <div class="sunbird-id-insights" id="sunbird-security-insights"></div>
             <div class="sunbird-id-charts" id="sunbird-security-charts"></div>
             <div class="sunbird-id-signins" id="sunbird-security-panels"></div>
@@ -5582,10 +5583,99 @@ function buildSunbirdSecurityModel(data = sunbirdSecurityDashboardData) {
 function renderSunbirdSecurityDashboard() {
     const model = buildSunbirdSecurityModel();
     renderSunbirdSecurityMetrics(model);
+    renderSunbirdSecurityInvestigation(model);
     renderSunbirdSecurityInsights(model);
     renderSunbirdSecurityCharts(model);
     renderSunbirdSecurityPanels(model);
     renderSunbirdSecurityTable(model);
+}
+
+function getSunbirdSecurityIntegrationSources(data = {}) {
+    const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+    const incidents = Array.isArray(data.incidents) ? data.incidents : [];
+    const threats = Array.isArray(data.threats) ? data.threats : [];
+    const suspiciousSignIns = Array.isArray(data.signIns?.suspicious) ? data.signIns.suspicious : [];
+    const identityRisk = data.identityRisk && typeof data.identityRisk === 'object' ? data.identityRisk : {};
+    const riskyUsers = Array.isArray(identityRisk.riskyUsers) ? identityRisk.riskyUsers : [];
+    const riskDetections = Array.isArray(identityRisk.riskDetections) ? identityRisk.riskDetections : [];
+    const postureFindings = Array.isArray(data.postureFindings) ? data.postureFindings : [];
+    const sourceCoverage = Array.isArray(data.sourceCoverage) ? data.sourceCoverage : [];
+    const deviceEvidence = Array.isArray(data.deviceEvidence) ? data.deviceEvidence : [];
+    const hasCoverage = matcher => sourceCoverage.some(item => matcher.test(`${item?.title || ''} ${item?.source || ''} ${item?.provider || ''} ${item?.description || ''}`));
+    const sources = [];
+    const sourceText = record => `${record?.reportingSecuritySystem || ''} ${record?.source || ''} ${record?.vendor || ''} ${record?.provider || ''} ${record?.apiSource || ''} ${record?.serviceSource || ''} ${record?.vendorInformation?.provider || ''}`.toLowerCase();
+    const isCloudflareRecord = record => Boolean(record?.cloudflareOneSignal || record?.cloudflareApiSignal || record?.cloudflareWebhook) || /cloudflare|\bwarp\b|\bgateway\b/.test(sourceText(record));
+    const isMicrosoftGraphRecord = record => !isCloudflareRecord(record) && /microsoft|graph|defender|entra|azure/.test(sourceText(record));
+    const activityRecords = [...alerts, ...incidents];
+    const microsoftActivity = activityRecords.filter(isMicrosoftGraphRecord);
+    const unattributedActivity = activityRecords.filter(record => !isCloudflareRecord(record) && !isMicrosoftGraphRecord(record));
+    const internalThreats = threats.filter(threat => threat?.source === 'internal_security_alerts'
+        || /observed in an explicit ioc field|extracted from security alerts evidence/i.test(String(threat?.description || '')));
+    const externalThreats = threats.filter(threat => !internalThreats.includes(threat));
+    const microsoftThreats = externalThreats.filter(threat => /microsoft|graph|defender|microsoft_graph_tiindicators/i.test(sourceText(threat)) || /microsoft graph/i.test(String(threat?.description || '')));
+    const unattributedThreats = externalThreats.filter(threat => !microsoftThreats.includes(threat));
+
+    if (microsoftActivity.length || hasCoverage(/microsoft.*(security|graph).*(alert|incident)|(alert|incident).*microsoft.*(security|graph)/i)) {
+        sources.push({ name: 'Microsoft Graph security alerts & incidents', count: microsoftActivity.length, state: microsoftActivity.length ? 'activity returned' : 'coverage reported', type: 'Incident activity' });
+    }
+    if (unattributedActivity.length) {
+        sources.push({ name: 'Other reported security alerts & incidents', count: unattributedActivity.length, state: 'activity returned; provider not supplied', type: 'Source attribution' });
+    }
+    if (suspiciousSignIns.length || riskyUsers.length || riskDetections.length || hasCoverage(/entra|identity|sign.?in|risk/i)) {
+        const identityCount = suspiciousSignIns.length + riskyUsers.length + riskDetections.length;
+        sources.push({ name: 'Entra sign-ins & identity risk', count: identityCount, state: identityCount ? 'evidence returned' : 'coverage reported', type: 'Identity evidence' });
+    }
+    if (microsoftThreats.length || hasCoverage(/microsoft.*(threat|indicator)|(threat|indicator).*microsoft/i)) {
+        sources.push({ name: 'Microsoft threat indicators', count: microsoftThreats.length, state: microsoftThreats.length ? 'indicators returned' : 'coverage reported', type: 'Indicator evidence' });
+    }
+    if (internalThreats.length) {
+        sources.push({ name: 'Observed indicators from alert evidence', count: internalThreats.length, state: 'extracted from returned alerts; reputation not assessed', type: 'Observed indicator' });
+    }
+    if (unattributedThreats.length) {
+        sources.push({ name: 'Other reported threat indicators', count: unattributedThreats.length, state: 'indicators returned; provider not supplied', type: 'Source attribution' });
+    }
+    const cloudflareActivity = activityRecords.filter(isCloudflareRecord).length;
+    const cloudflareCoverage = postureFindings.filter(item => item?.cloudflareOnePosture || /cloudflare/i.test(`${item?.source || ''} ${item?.provider || ''}`)).length
+        + sourceCoverage.filter(item => item?.cloudflareOneCoverage || /cloudflare/i.test(`${item?.title || ''} ${item?.source || ''} ${item?.provider || ''}`)).length;
+    if (cloudflareActivity || cloudflareCoverage) {
+        sources.push({ name: 'Cloudflare One', count: cloudflareActivity || cloudflareCoverage, state: cloudflareActivity ? 'activity returned' : 'posture / coverage reported', type: cloudflareActivity ? 'Incident activity' : 'Posture coverage' });
+    }
+    if (deviceEvidence.length || hasCoverage(/intune|managed device|device evidence/i)) {
+        sources.push({ name: 'Intune / managed-device evidence', count: deviceEvidence.length, state: deviceEvidence.length ? 'device evidence returned' : 'coverage reported', type: 'Device evidence' });
+    }
+    return sources;
+}
+
+function renderSunbirdSecurityInvestigationSummary(data = {}) {
+    const findings = Array.isArray(data.findings) ? data.findings : [];
+    const coverage = data.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
+    const statuses = Object.values(coverage).map(item => String(item?.status || '').toLowerCase());
+    const limited = statuses.some(status => /partial|unavailable|not_assessed/.test(status));
+    const collection = data.collectionStatus || data.collection?.status;
+    const collectionText = collection ? sunbirdSecurityStatusLabel(collection) : 'Collection status not supplied';
+    return `<section class="sunbird-security-investigation-summary">
+        <div><p class="sunbird-security-eyebrow">Investigation summary</p><h3>${findings.length} evidence-backed finding${findings.length === 1 ? '' : 's'}</h3><p>${limited ? 'Detection coverage is limited or incomplete; absence of a finding is not a clean result.' : 'Findings are based on the returned evidence and retain provider values separately.'}</p></div>
+        <dl><div><dt>High severity alerts</dt><dd>${sunbirdSecurityEscape(data.summary?.highSeverityAlerts ?? 0)}</dd></div><div><dt>Active incidents</dt><dd>${sunbirdSecurityEscape(data.summary?.activeIncidents ?? 0)}</dd></div><div><dt>Collection state</dt><dd>${sunbirdSecurityEscape(collectionText)}</dd></div></dl>
+    </section>`;
+}
+
+function renderSunbirdSecuritySources(data = {}) {
+    const sources = getSunbirdSecurityIntegrationSources(data);
+    if (!sources.length) {
+        return '<div class="sunbird-security-sources-empty">No connected security source was represented in this result. This does not confirm that a source is disabled.</div>';
+    }
+    return `<ol class="sunbird-security-sources-list">${sources.map(source => `<li><div><strong>${sunbirdSecurityEscape(source.name)}</strong><p>${sunbirdSecurityEscape(source.state)}</p></div><div><span>${sunbirdSecurityEscape(source.type)}</span><b>${sunbirdSecurityEscape(source.count)} record${source.count === 1 ? '' : 's'}</b></div></li>`).join('')}</ol>`;
+}
+
+function renderSunbirdSecurityInvestigation(model) {
+    const el = document.getElementById('sunbird-security-investigation');
+    if (!el) return;
+    el.innerHTML = `
+        ${renderSunbirdSecurityInvestigationSummary(model)}
+        <section class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Evidence-backed findings</h3><p>Assessment, affected entities, action, and cited evidence.</p></div>${renderSunbirdSecurityFindings(model.findings, model)}</section>
+        <section class="sunbird-security-investigation-section sunbird-security-coverage-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">02</p><h3>Detection coverage</h3><p>Scenario-specific availability and limitations.</p></div>${renderSunbirdSecurityCoverage(model)}</section>
+        <section class="sunbird-security-investigation-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">03</p><h3>Connected security evidence</h3><p>Only sources represented in the returned security model are shown.</p></div>${renderSunbirdSecuritySources(model)}</section>
+    `;
 }
 
 function renderSunbirdSecurityMetrics(model) {
@@ -5867,7 +5957,7 @@ function renderSunbirdSecurityFeedPanel(title, rows) {
 function renderSunbirdSecuritySummaryPanel(model) {
     return `
         <article class="sunbird-id-signin-card sunbird-security-ai-card">
-            <h3>AI security summary</h3>
+            <h3>Security summary</h3>
             <p>${escapeIdentityText(model.aiSummary)}</p>
             <div class="sunbird-id-signin-list">
                 ${model.recommendations.slice(0, 6).map(item => `
@@ -16542,6 +16632,33 @@ function renderSunbirdSecurityCoverage(data = {}) {
     </div>`;
 }
 
+function renderSunbirdSecurityBillingSummary(data = {}) {
+    const findings = Array.isArray(data.findings) ? data.findings : [];
+    const coverage = data.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
+    const coverageStates = Object.values(coverage).map(item => String(item?.status || '').toLowerCase());
+    const limitedCoverage = coverageStates.some(state => /partial|unavailable|not_assessed/.test(state));
+    const integrations = getSunbirdSecurityIntegrationSources(data);
+    const hasReturnedData = Boolean(data && (data.summary || data.collectionStatus || data.collection || findings.length || Object.keys(coverage).length || integrations.length));
+    const plainSummary = !hasReturnedData
+        ? 'Collecting current security evidence. A successful empty response is not treated as a clean result.'
+        : findings.length
+            ? `${findings.length} evidence-backed finding${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} review from the returned evidence.`
+            : limitedCoverage
+                ? 'No finding was generated, but one or more detection scenarios are limited or unavailable.'
+                : 'No evidence-backed finding was generated from the returned collection.';
+    const findingState = findings.length ? `${findings.length} to review` : 'No finding generated';
+    const coverageState = !Object.keys(coverage).length ? 'Not yet reported' : limitedCoverage ? 'Limited / incomplete' : 'Reported';
+    const integrationState = integrations.length ? `${integrations.length} source${integrations.length === 1 ? '' : 's'} represented` : 'No source represented';
+    return `<div class="sunbird-security-card-summary">
+        <p class="sunbird-security-card-intro">${sunbirdSecurityEscape(plainSummary)}</p>
+        <ol class="sunbird-security-card-rows">
+            <li><i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i><span>Findings</span><strong>${sunbirdSecurityEscape(findingState)}</strong></li>
+            <li><i class="fas fa-satellite-dish" aria-hidden="true"></i><span>Detection coverage</span><strong>${sunbirdSecurityEscape(coverageState)}</strong></li>
+            <li><i class="fas fa-link" aria-hidden="true"></i><span>Connected evidence</span><strong>${sunbirdSecurityEscape(integrationState)}</strong></li>
+        </ol>
+    </div>`;
+}
+
 async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
     const billingCard = document.getElementById('billing-card');
     if (!billingCard) return;
@@ -16565,41 +16682,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                             <strong>0</strong>
                         </div>
                     </div>
-                    <div class="sunbird-section-container sunbird-security-findings-section" aria-busy="true">
-                        <h4 class="sunbird-section-heading">
-                            <i class="fas fa-magnifying-glass-chart"></i> Evidence-Backed Findings
-                        </h4>
-                        <div class="sunbird-security-findings-empty">
-                            <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
-                            <div><strong>Assessing returned evidence</strong><p>Findings and detection coverage will appear when the current collection is available.</p></div>
-                        </div>
-                    </div>
-                    <div class="sunbird-section-container">
-                        <h4 class="sunbird-section-heading">
-                            <i class="fas fa-exclamation-triangle"></i> Security Incidents
-                        </h4>
-                        <div class="sunbird-incidents-table-wrap">
-                            <table class="sunbird-incidents-table">
-                                <thead>
-                                    <tr>
-                                        <th>Incident Name</th>
-                                        <th>Severity</th>
-                                        <th>Status</th>
-                                        <th>Assigned To</th>
-                                    </tr>
-                                </thead>
-                                <tbody><tr><td colspan="4" class="sunbird-empty-row">Refreshing latest security evidence...</td></tr></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sunbird-section-container">
-                        <h4 class="sunbird-section-heading">
-                            <i class="fas fa-stream"></i> Real-Time Activity Feed
-                        </h4>
-                        <div class="sunbird-activity-feed">
-                            <div class="sunbird-activity-empty">Refreshing latest activity</div>
-                        </div>
-                    </div>
+                    ${renderSunbirdSecurityBillingSummary()}
                     ${renderSunbirdFullDashboardButton('security')}
                 </div>
             `;
@@ -16671,50 +16754,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                     </div>
                 </div>
 
-                <div class="sunbird-section-container sunbird-security-findings-section">
-                    <h4 class="sunbird-section-heading">
-                        <i class="fas fa-magnifying-glass-chart"></i> Evidence-Backed Findings
-                    </h4>
-                    ${renderSunbirdSecurityFindings(data.findings, data)}
-                </div>
-
-                <div class="sunbird-section-container sunbird-security-coverage-section">
-                    <h4 class="sunbird-section-heading">
-                        <i class="fas fa-satellite-dish"></i> Detection Coverage
-                    </h4>
-                    ${renderSunbirdSecurityCoverage(data)}
-                </div>
-                
-                <!-- Security Incidents Table Section -->
-                <div class="sunbird-section-container">
-                    <h4 class="sunbird-section-heading">
-                        <i class="fas fa-exclamation-triangle"></i> Security Incidents
-                    </h4>
-                    <div class="sunbird-incidents-table-wrap">
-                        <table class="sunbird-incidents-table">
-                            <thead>
-                                <tr>
-                                    <th>Incident Name</th>
-                                    <th>Severity</th>
-                                    <th>Status</th>
-                                    <th>Assigned To</th>
-                                </tr>
-                            </thead>
-                            <tbody>${rowsHtml}</tbody>
-                        </table>
-                    </div>
-                </div>
-                
-                <!-- Real-Time Activity Feed Section -->
-                <div class="sunbird-section-container">
-                    <h4 class="sunbird-section-heading">
-                        <i class="fas fa-stream"></i> Real-Time Activity Feed
-                    </h4>
-                    <div class="sunbird-activity-feed">
-                        ${activityFeedHtml}
-                    </div>
-                </div>
-                
+                ${renderSunbirdSecurityBillingSummary(data)}
                 ${renderSunbirdFullDashboardButton('security')}
             </div>
         `;
