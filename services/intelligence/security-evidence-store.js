@@ -80,6 +80,10 @@ function deriveSecurityEvidence(payload = {}) {
         incidentsRows: payload.incidents || [],
         threatsRows: payload.threats || payload.threatIndicators || [],
         suspiciousSignInsRows: payload.signIns?.suspicious || payload.suspiciousSignIns || [],
+        findingsRows: payload.findings || [],
+        scenarioCoverage: payload.scenarioCoverage || {},
+        riskDetectionsRows: payload.identityRisk?.riskDetections || [],
+        riskyUsersRows: payload.identityRisk?.riskyUsers || [],
         summary: payload.summary || payload.dashboardMetrics || {},
         recommendations: payload.recommendations,
         warnings: rawWarnings
@@ -134,13 +138,38 @@ function deriveSecurityEvidence(payload = {}) {
             severity: threat.severity || 'medium',
             status: threat.action || threat.status || 'Review',
             processed: threat
+        })),
+        ...dashboardSource.findings.map((finding, index) => ({
+            kind: 'security_finding',
+            sourceId: String(finding.id || `finding-${index + 1}`).slice(0, 255),
+            title: finding.title || finding.detectionId || 'Security finding',
+            severity: finding.severity || 'unassessed',
+            status: finding.status || 'needs_investigation',
+            processed: finding
+        })),
+        ...dashboardSource.riskDetections.map((detection, index) => ({
+            kind: 'risk_detection',
+            sourceId: String(detection.id || detection.requestId || `risk-detection-${index + 1}`).slice(0, 255),
+            title: detection.riskEventType || 'Identity risk detection',
+            severity: detection.riskLevel || 'unassessed',
+            status: detection.riskState || 'unknown',
+            processed: detection
+        })),
+        ...dashboardSource.riskyUsers.map((user, index) => ({
+            kind: 'risky_user',
+            sourceId: String(user.id || user.userPrincipalName || `risky-user-${index + 1}`).slice(0, 255),
+            title: user.userPrincipalName || user.userDisplayName || 'Risky user',
+            severity: user.riskLevel || 'unassessed',
+            status: user.riskState || 'unknown',
+            processed: user
         }))
     ];
 
     const hasPrimaryEvidence = Boolean(
         dashboardSource.alerts.length ||
         dashboardSource.incidents.length ||
-        dashboardSource.suspiciousSignIns.length
+        dashboardSource.suspiciousSignIns.length ||
+        dashboardSource.findings.length
     );
 
     const hasAnyEvidence = Boolean(evidenceRows.length);
@@ -187,7 +216,8 @@ function deriveSecurityEvidence(payload = {}) {
             warnings: dashboardSource.warnings,
             internalThreatIndicatorsExtracted: dashboardSource.internalThreatIndicators?.length || 0,
             hasPrimaryEvidence,
-            hasAnyEvidence
+            hasAnyEvidence,
+            scenarioCoverage: dashboardSource.scenarioCoverage
         },
         incompleteReason: dashboardSource.warnings.length
             ? dashboardSource.warnings.join('; ')

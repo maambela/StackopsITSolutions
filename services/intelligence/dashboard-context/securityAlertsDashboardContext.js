@@ -7,6 +7,11 @@ function buildSecurityAlertsDashboardContext(source) {
     const alerts = asArray(payload.alerts);
     const incidents = asArray(payload.incidents);
     const suspiciousSignIns = asArray(payload.signIns?.suspicious);
+    const storedEvidence = asArray(source.evidence);
+    const findings = asArray(payload.findings).length
+        ? asArray(payload.findings)
+        : storedEvidence.filter(item => item?.evidenceType === 'securityFindings').flatMap(item => asArray(item.data));
+    const scenarioCoverage = payload.scenarioCoverage || source.sourceLineage?.scenarioCoverage || {};
     const highSeverityAlerts = alerts.filter(alert => ['critical', 'high'].includes(String(alert.severity || '').toLowerCase()));
     const activeIncidents = incidents.filter(incident => ['active', 'inprogress', 'newalert'].includes(String(incident.status || '').toLowerCase()));
 
@@ -24,6 +29,7 @@ function buildSecurityAlertsDashboardContext(source) {
         },
         calculatedIndicators: {
             highRiskSignalCount: highSeverityAlerts.length + activeIncidents.length + suspiciousSignIns.length,
+            securityFindingCount: findings.length,
             incidentResponseRequired: activeIncidents.length > 0,
             attackTechniqueCount: asArray(payload.mitre).length,
             attackRegionCount: asArray(payload.regionDistribution).length
@@ -33,6 +39,10 @@ function buildSecurityAlertsDashboardContext(source) {
             highSeverityAlerts,
             activeIncidents,
             suspiciousSignIns,
+            securityFindings: findings,
+            scenarioCoverage,
+            identityRiskDetections: storedEvidence.filter(item => item?.evidenceType === 'riskDetections').flatMap(item => asArray(item.data)),
+            riskyUsers: storedEvidence.filter(item => item?.evidenceType === 'riskyUsers').flatMap(item => asArray(item.data)),
             threats: asArray(payload.threats),
             usersUnderAttack: asArray(payload.signIns?.usersUnderAttack),
             mitreTechniques: asArray(payload.mitre),

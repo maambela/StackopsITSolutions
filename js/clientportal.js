@@ -15967,6 +15967,8 @@ function renderSunbirdReportsCenter(data) {
 
     ${renderSunbirdReportVisualPanel(data, evidenceBuckets)}
 
+        ${renderSunbirdReportIdentityFieldSection(data)}
+
         ${renderSunbirdReportDomainBreakdown(data)}
 
         ${sectionCards ? `<div class="sunbird-report-main-grid">${sectionCards}</div>` : ''}

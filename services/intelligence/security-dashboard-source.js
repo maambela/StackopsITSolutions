@@ -113,7 +113,13 @@ function extractInternalThreatIndicators({ alerts = [], incidents = [], suspicio
         .slice(0, 25);
 }
 
-function cleanSecurityWarnings(warnings = [], { hasAlertEvidence, hasIncidentEvidence, hasSignInEvidence, hasThreatIndicators }) {
+function cleanSecurityWarnings(warnings = [], {
+    hasAlertEvidence,
+    hasIncidentEvidence,
+    hasSignInEvidence,
+    hasFindingEvidence = false,
+    hasThreatIndicators
+}) {
     const unique = [...new Set(arrayValue(warnings).map(warning => String(warning || '').trim()).filter(Boolean))];
 
     return unique.filter(warning => {
@@ -136,7 +142,7 @@ function cleanSecurityWarnings(warnings = [], { hasAlertEvidence, hasIncidentEvi
         }
 
         if (lower === 'partial_source_collection' || lower.includes('partial_source_collection')) {
-            return !(hasAlertEvidence || hasIncidentEvidence || hasSignInEvidence);
+            return !(hasAlertEvidence || hasIncidentEvidence || hasSignInEvidence || hasFindingEvidence);
         }
 
         return true;
@@ -194,6 +200,10 @@ function buildSecurityDashboardSource({
     incidentsRows = [],
     threatsRows = [],
     suspiciousSignInsRows = [],
+    findingsRows = [],
+    scenarioCoverage = {},
+    riskDetectionsRows = [],
+    riskyUsersRows = [],
     summary = {},
     recommendations: inputRecommendations = null,
     warnings: inputWarnings = []
@@ -201,6 +211,9 @@ function buildSecurityDashboardSource({
     const alerts = arrayValue(alertsRows);
     const incidents = arrayValue(incidentsRows);
     const suspiciousSignIns = arrayValue(suspiciousSignInsRows);
+    const findings = arrayValue(findingsRows);
+    const riskDetections = arrayValue(riskDetectionsRows);
+    const riskyUsers = arrayValue(riskyUsersRows);
 
     const internalThreats = extractInternalThreatIndicators({
         alerts,
@@ -257,6 +270,7 @@ function buildSecurityDashboardSource({
         usersUnderAttack,
         securityScore: numberValue(summary.securityScore),
         suspiciousSignIns: numberValue(summary.suspiciousSignIns, suspiciousSignIns.length),
+        securityFindings: findings.length,
         recommendationsCount: recommendations.length
     };
 
@@ -264,6 +278,7 @@ function buildSecurityDashboardSource({
         hasAlertEvidence: alerts.length > 0,
         hasIncidentEvidence: incidents.length > 0,
         hasSignInEvidence: suspiciousSignIns.length > 0,
+        hasFindingEvidence: findings.length > 0,
         hasThreatIndicators: threats.length > 0
     });
 
@@ -272,6 +287,10 @@ function buildSecurityDashboardSource({
         incidents,
         threats,
         suspiciousSignIns,
+        findings,
+        riskDetections,
+        riskyUsers,
+        scenarioCoverage,
         recommendations,
         dashboardMetrics,
         warnings,

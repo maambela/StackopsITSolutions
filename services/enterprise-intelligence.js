@@ -890,6 +890,7 @@ function collectSecurityEvidenceRows(flattenedEvidence = []) {
         incidents: rows.filter(row => /incident/i.test(String(row.evidenceType || row.sourceLabel || row.evidenceCategory || ''))),
         signIns: rows.filter(row => /sign/i.test(String(row.evidenceType || row.sourceLabel || row.evidenceCategory || ''))),
         threatIndicators: rows.filter(row => /threat.?indicator|indicator/i.test(String(row.evidenceType || row.sourceLabel || row.evidenceCategory || ''))),
+        findings: rows.filter(row => /security.?finding/i.test(String(row.evidenceType || row.sourceLabel || row.evidenceCategory || ''))),
         recommendations: rows.filter(row => /recommend/i.test(String(row.evidenceType || row.sourceLabel || row.evidenceCategory || '')))
     };
 }
@@ -1003,7 +1004,7 @@ function extractSecurityThreatIndicators(flattenedEvidence = []) {
 }
 
 function compactSecurityAlertsEvidenceRows(flattenedEvidence, current = {}) {
-    const { alerts, incidents, signIns, threatIndicators, recommendations } = collectSecurityEvidenceRows(flattenedEvidence);
+    const { alerts, incidents, signIns, threatIndicators, findings, recommendations } = collectSecurityEvidenceRows(flattenedEvidence);
     const metricSource = { ...(current.metrics || {}), ...(current.dashboardMetrics || {}), ...(current.calculatedIndicators || {}) };
     const alertData = alerts.map(row => ({ row, data: row.data || {} }));
     const signInData = signIns.map(row => ({ row, data: row.data || {} }));
@@ -1137,6 +1138,9 @@ function compactSecurityAlertsEvidenceRows(flattenedEvidence, current = {}) {
         })
     ].slice(0, 25);
     const recommendationRows = recommendations.slice(0, 10).map((row, index) => securityEvidenceRow(row, 'recommendations', row.data || {}, index, 'recommendations'));
+    const securityFindingRows = findings.slice(0, 25).map((row, index) =>
+        securityEvidenceRow(row, 'securityFindings', row.data || {}, index, 'securityFindings')
+    );
     const summaryMetrics = {
         internalSourcePath: 'security_alerts.compact.summaryMetrics',
         sourceLabel: 'summaryMetrics',
@@ -1160,6 +1164,7 @@ function compactSecurityAlertsEvidenceRows(flattenedEvidence, current = {}) {
             internalThreatIndicators: internalThreatIndicators.length,
             externalThreatIndicators: externalThreatIndicators.length,
             threatIndicatorSource: externalThreatIndicators.length ? 'external' : (internalThreatIndicators.length ? 'internal_security_alerts' : 'unavailable'),
+            securityFindings: numberOrNull(metricSource.securityFindings) ?? findings.length,
             usersUnderAttack: numberOrNull(metricSource.usersUnderAttack),
             securityScore: numberOrNull(metricSource.securityScore),
             healthScore: numberOrNull(current.healthScore),
@@ -1181,6 +1186,7 @@ function compactSecurityAlertsEvidenceRows(flattenedEvidence, current = {}) {
         ...affectedDevices,
         ...unresolvedAlerts,
         ...recentResolvedAlerts,
+        ...securityFindingRows,
         ...recommendationRows
     ];
 }

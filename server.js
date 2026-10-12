@@ -61,6 +61,8 @@ const { createApplicationsEvidenceAutomation } = require('./services/intelligenc
 const { buildSecurityDashboardPayload } = require('./services/intelligence/security-dashboard-processor');
 const { createSecurityEvidenceStore } = require('./services/intelligence/security-evidence-store');
 const { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');
+const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
+const { buildSecurityFindings } = require('./services/intelligence/security-findings');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
 const { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');
@@ -14268,6 +14270,7 @@ async function fetchGraphJsonWithTimeout({
 
         const data = await response.json();
         const value = Array.isArray(data?.value) ? data.value : [];
+        const hasMore = Boolean(data?.['@odata.nextLink']);
 
         console.log(`[security_alerts:${stage}:complete] ${label} retrieved ${value.length} record(s).`);
 
@@ -14276,7 +14279,8 @@ async function fetchGraphJsonWithTimeout({
             optional,
             status: response.status,
             value,
-            warnings: [],
+            hasMore,
+            warnings: hasMore ? [`${label} returned the first ${value.length} records; Microsoft Graph has additional pages.`] : [],
             recordsFetched: value.length
         };
     } catch (error) {
@@ -15011,7 +15015,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             warnings: [],
             recordsFetched: 0,
             ok: true
-        }))
+        })),
+        fetchMicrosoftIdentityRiskEvidence(token)
     ]);
 
     function resolvedSource(index, fallback) {
@@ -15034,6 +15039,15 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     const threatIndicatorsResult = resolvedSource(2, { label: 'Threat indicators', threats: [], optional: true });
     const signInsResult = resolvedSource(3, { label: 'Sign-ins fetch', signIns: [] });
     const cloudflareResult = resolvedSource(4, { label: 'Cloudflare security polling', summary: null, optional: true });
+    const identityRiskResult = resolvedSource(5, {
+        label: 'Identity risk',
+        riskDetections: [],
+        riskyUsers: [],
+        sources: {
+            riskDetections: { status: 'unavailable', recordsFetched: 0 },
+            riskyUsers: { status: 'unavailable', recordsFetched: 0 }
+        }
+    });
 
     stages.push(
         {
@@ -15065,6 +15079,12 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             status: cloudflareResult.warnings?.length ? 'warning' : 'complete',
             recordsFetched: cloudflareResult.recordsFetched || 0,
             at: new Date().toISOString()
+        },
+        {
+            stage: 'microsoft_graph_identity_risk:complete_or_warning',
+            status: identityRiskResult.warnings?.length ? 'warning' : 'complete',
+            recordsFetched: (identityRiskResult.riskDetections?.length || 0) + (identityRiskResult.riskyUsers?.length || 0),
+            at: new Date().toISOString()
         }
     );
 
@@ -15072,6 +15092,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     const incidents = Array.isArray(incidentsResult.incidents) ? incidentsResult.incidents : [];
     const externalThreatIndicators = Array.isArray(threatIndicatorsResult.threats) ? threatIndicatorsResult.threats : [];
     const signIns = Array.isArray(signInsResult.signIns) ? signInsResult.signIns : [];
+    const riskDetections = Array.isArray(identityRiskResult.riskDetections) ? identityRiskResult.riskDetections : [];
+    const riskyUsers = Array.isArray(identityRiskResult.riskyUsers) ? identityRiskResult.riskyUsers : [];
     const cloudflareAlerts = cloudflareResult.summary
         ? buildCloudflarePollingSecurityAlerts(cloudflareResult.summary)
         : [];
@@ -15081,6 +15103,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         (incidentsResult.recordsFetched || 0) +
         (threatIndicatorsResult.recordsFetched || 0) +
         (signInsResult.recordsFetched || 0) +
+        riskDetections.length +
+        riskyUsers.length +
         cloudflareAlerts.length;
 
     stages.push({
@@ -15096,6 +15120,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         title: alert.title || alert.alertName || alert.displayName || 'Unknown Alert',
         description: alert.description || '',
         severity: normalizeSecuritySeverity(alert.severity),
+        sourceSeverity: alert.severity || null,
         status: normalizeSecurityStatus(alert.status),
         created: alert.createdDateTime || new Date().toISOString(),
         eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
@@ -15131,23 +15156,36 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         source: getSecurityReportingSystem(incident)
     }));
 
-    const suspiciousSignIns = signIns
-        .filter(signIn => {
-            const riskLevel = signIn.riskLevelDuringSignIn || signIn.riskLevelAggregated || signIn.riskState;
-            const status = signIn.status?.errorCode === 0 ? 'Success' : 'Failed';
-            return (riskLevel && !['none', 'hidden', 'unknownfuturevalue'].includes(String(riskLevel).toLowerCase())) || status === 'Failed';
-        })
-        .map(signIn => ({
+    const normalizedSignIns = signIns.map(signIn => {
+        const errorCode = signIn.status?.errorCode;
+        const hasOutcome = errorCode !== null && errorCode !== undefined && errorCode !== '';
+        const numericErrorCode = hasOutcome ? Number(errorCode) : null;
+        const latitudeValue = signIn.location?.geoCoordinates?.latitude;
+        const longitudeValue = signIn.location?.geoCoordinates?.longitude;
+        const latitude = Number(latitudeValue);
+        const longitude = Number(longitudeValue);
+        const hasValidCoordinates = latitudeValue !== null && latitudeValue !== undefined && latitudeValue !== '' &&
+            longitudeValue !== null && longitudeValue !== undefined && longitudeValue !== '' &&
+            Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
+            Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+        const outcome = numericErrorCode === null || !Number.isFinite(numericErrorCode)
+            ? 'Unknown'
+            : numericErrorCode === 0 ? 'Success' : 'Failed';
+        return ({
             id: signIn.id,
+            userId: signIn.userId || null,
             user: signIn.userPrincipalName || 'Unknown',
             userPrincipalName: signIn.userPrincipalName || 'Unknown',
             timestamp: signIn.createdDateTime || new Date().toISOString(),
+            eventTime: signIn.createdDateTime || null,
             ipAddress: signIn.ipAddress || 'Unknown',
             location: signIn.location?.city
                 ? `${signIn.location.city}, ${signIn.location.countryOrRegion}`
                 : (signIn.location?.countryOrRegion || 'Unknown Location'),
+            locationCoordinates: hasValidCoordinates
+                ? { latitude, longitude }
+                : null,
             country: signIn.location?.countryOrRegion || 'Unknown',
-            riskLevel: signIn.riskLevelDuringSignIn || signIn.riskLevelAggregated || signIn.riskState || 'none',
             category: signIn.riskDetail || signIn.riskState || signIn.conditionalAccessStatus || null,
             apiCategory: signIn.riskDetail || signIn.riskState || signIn.conditionalAccessStatus || null,
             apiSource: signIn.appDisplayName || signIn.resourceDisplayName || signIn.clientAppUsed || null,
@@ -15155,11 +15193,55 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             resourceDisplayName: signIn.resourceDisplayName || null,
             clientAppUsed: signIn.clientAppUsed || null,
             riskDetail: signIn.riskDetail || null,
+            riskLevel: signIn.riskLevelDuringSignIn || signIn.riskLevelAggregated || signIn.riskState || null,
             conditionalAccessStatus: signIn.conditionalAccessStatus || null,
-            status: signIn.status?.errorCode === 0 ? 'Success' : 'Failed',
-            errorCode: signIn.status?.errorCode || 0,
-            failureReason: signIn.status?.failureReason || (signIn.status?.errorCode ? `Sign-in error ${signIn.status.errorCode}` : 'Suspicious sign-in')
-        }));
+            outcome,
+            status: outcome,
+            errorCode: hasOutcome ? numericErrorCode : null,
+            failureReason: outcome === 'Failed'
+                ? signIn.status?.failureReason || `Sign-in error ${numericErrorCode}`
+                : null
+        });
+    });
+    const suspiciousSignIns = normalizedSignIns.filter(signIn => {
+        return (signIn.riskLevel && !['none', 'hidden', 'unknownfuturevalue'].includes(String(signIn.riskLevel).toLowerCase())) ||
+            signIn.outcome === 'Failed';
+    });
+    const processedRiskyUsers = riskyUsers.map(user => ({
+        id: user.id || null,
+        userPrincipalName: user.userPrincipalName || null,
+        userDisplayName: user.userDisplayName || null,
+        riskLevel: user.riskLevel || null,
+        riskState: user.riskState || null,
+        riskDetail: user.riskDetail || null,
+        isDeleted: Boolean(user.isDeleted),
+        isProcessing: Boolean(user.isProcessing)
+    }));
+    const processedRiskDetections = riskDetections.map(detection => ({
+        id: detection.id || null,
+        requestId: detection.requestId || null,
+        userId: detection.userId || null,
+        userPrincipalName: detection.userPrincipalName || null,
+        riskEventType: detection.riskEventType || null,
+        riskLevel: detection.riskLevel || null,
+        riskState: detection.riskState || null,
+        riskDetail: detection.riskDetail || null,
+        activityDateTime: detection.activityDateTime || null,
+        detectedDateTime: detection.detectedDateTime || null,
+        ipAddress: detection.ipAddress || null,
+        location: detection.location || null
+    }));
+    const { findings, scenarioCoverage } = buildSecurityFindings({
+        alerts: processedAlerts,
+        signIns: normalizedSignIns,
+        riskyUsers: processedRiskyUsers,
+        riskDetections: processedRiskDetections,
+        sourceStatuses: {
+            alerts: !alertsResult.ok ? 'unavailable' : alertsResult.warnings?.length ? 'partial' : 'complete',
+            signIns: !signInsResult.ok ? 'unavailable' : signInsResult.warnings?.length ? 'partial' : 'complete',
+            riskyUsers: identityRiskResult.sources?.riskyUsers?.status || 'unavailable'
+        }
+    });
 
     const externalThreats = externalThreatIndicators.map(threat => ({
         id: threat.id,
@@ -15213,7 +15295,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ...(incidentsResult.warnings || []),
         ...(threatIndicatorsResult.warnings || []),
         ...(signInsResult.warnings || []),
-        ...(cloudflareResult.warnings || [])
+        ...(cloudflareResult.warnings || []),
+        ...(identityRiskResult.warnings || [])
     ];
 
     rawWarnings = cleanSecurityCollectionWarnings(rawWarnings, {
@@ -15223,7 +15306,12 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         threats: processedThreats
     });
 
-    const hasPrimaryEvidence = Boolean(processedAlerts.length || processedIncidents.length || suspiciousSignIns.length);
+    const hasPrimaryEvidence = Boolean(
+        processedAlerts.length ||
+        processedIncidents.length ||
+        suspiciousSignIns.length ||
+        findings.length
+    );
 
     const allWarnings = [...new Set([
         ...(!hasPrimaryEvidence && rawWarnings.length ? ['partial_source_collection'] : []),
@@ -15475,6 +15563,17 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsPrepared: suspiciousSignIns.length,
                     status: signInsResult.warnings?.length && !suspiciousSignIns.length ? 'warning' : 'complete'
                 },
+                identityRisk: {
+                    riskDetections: {
+                        ...(identityRiskResult.sources?.riskDetections || {}),
+                        recordsPrepared: processedRiskDetections.length
+                    },
+                    riskyUsers: {
+                        ...(identityRiskResult.sources?.riskyUsers || {}),
+                        recordsPrepared: processedRiskyUsers.length
+                    },
+                    status: identityRiskResult.warnings?.length ? 'warning' : 'complete'
+                },
                 cloudflare: {
                     recordsFetched: cloudflareAlerts.length,
                     recordsPrepared: cloudflareAlerts.length,
@@ -15498,6 +15597,13 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         alerts: processedAlerts,
         threats: processedThreats,
         threatIndicators: processedThreats,
+        findings,
+        scenarioCoverage,
+        identityRisk: {
+            riskDetections: processedRiskDetections,
+            riskyUsers: processedRiskyUsers,
+            sources: identityRiskResult.sources || {}
+        },
         signIns: {
             all: signIns.length,
             suspicious: suspiciousSignIns,
@@ -15518,7 +15624,10 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         processedAlerts.length +
         processedIncidents.length +
         suspiciousSignIns.length +
-        processedThreats.length;
+        processedThreats.length +
+        processedRiskDetections.length +
+        processedRiskyUsers.length +
+        findings.length;
 
     allMetrics.recordsStored = allMetrics.recordsPrepared;
     allMetrics.recordsOmitted = Math.max(0, allMetrics.recordsFetched - allMetrics.recordsPrepared);

@@ -21,6 +21,10 @@ function buildSecurityDashboardPayload({
         incidentsRows: payload.incidents || [],
         threatsRows: payload.threats || payload.threatIndicators || [],
         suspiciousSignInsRows: payload.signIns?.suspicious || payload.suspiciousSignIns || [],
+        findingsRows: payload.findings || [],
+        scenarioCoverage: payload.scenarioCoverage || {},
+        riskDetectionsRows: payload.identityRisk?.riskDetections || [],
+        riskyUsersRows: payload.identityRisk?.riskyUsers || [],
         summary: payload.summary || {},
         recommendations: payload.recommendations,
         warnings: rawWarnings
@@ -29,7 +33,8 @@ function buildSecurityDashboardPayload({
     const hasPrimaryEvidence = Boolean(
         dashboardSource.alerts.length ||
         dashboardSource.incidents.length ||
-        dashboardSource.suspiciousSignIns.length
+        dashboardSource.suspiciousSignIns.length ||
+        dashboardSource.findings.length
     );
 
     return {
@@ -45,6 +50,13 @@ function buildSecurityDashboardPayload({
         incidents: dashboardSource.incidents,
         threats: dashboardSource.threats,
         threatIndicators: dashboardSource.threats,
+        findings: dashboardSource.findings,
+        scenarioCoverage: dashboardSource.scenarioCoverage,
+        identityRisk: {
+            ...(payload.identityRisk || {}),
+            riskDetections: dashboardSource.riskDetections,
+            riskyUsers: dashboardSource.riskyUsers
+        },
         signIns: payload.signIns || {
             suspicious: dashboardSource.suspiciousSignIns
         },

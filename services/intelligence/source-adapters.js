@@ -916,7 +916,10 @@ async load(pool, companyId, capability) {
             alerts: [],
             incidents: [],
             signIns: [],
-            threatIndicators: []
+            threatIndicators: [],
+            securityFindings: [],
+            riskDetections: [],
+            riskyUsers: []
         };
 
         evidenceRows.forEach(row => {
@@ -926,6 +929,9 @@ async load(pool, companyId, capability) {
             else if (row.EvidenceKind === 'incident') grouped.incidents.push(item);
             else if (row.EvidenceKind === 'sign_in') grouped.signIns.push(item);
             else if (row.EvidenceKind === 'threat_indicator') grouped.threatIndicators.push(item);
+            else if (row.EvidenceKind === 'security_finding') grouped.securityFindings.push(item);
+            else if (row.EvidenceKind === 'risk_detection') grouped.riskDetections.push(item);
+            else if (row.EvidenceKind === 'risky_user') grouped.riskyUsers.push(item);
         });
 
         const dashboardMetrics = snapshot.DashboardMetricsJson || {};
@@ -935,7 +941,8 @@ async load(pool, companyId, capability) {
         const hasPrimaryEvidence = Boolean(
             grouped.alerts.length ||
             grouped.incidents.length ||
-            grouped.signIns.length
+            grouped.signIns.length ||
+            grouped.securityFindings.length
         );
 
         const hasThreatIndicators = grouped.threatIndicators.length > 0;
@@ -1019,10 +1026,11 @@ async load(pool, companyId, capability) {
                 } : null,
                 stages: sourceAudit?.collection?.stages || sourceAudit?.stages || [],
                 internalThreatIndicatorsAvailable: hasThreatIndicators,
+                scenarioCoverage: sourceAudit?.scenarioCoverage || {},
                 hasPrimaryEvidence
             },
             evidence: Object.entries(grouped).map(([evidenceType, data]) => ({
-                evidenceType,
+                evidenceType: evidenceType === 'riskDetections' ? 'riskDetections' : evidenceType === 'riskyUsers' ? 'riskyUsers' : evidenceType,
                 data
             })),
             warnings,

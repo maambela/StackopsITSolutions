@@ -1,0 +1,127 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { buildSecurityFindings, getSignInOutcome } = require('../services/intelligence/security-findings');
+const { buildSecurityDashboardPayload } = require('../services/intelligence/security-dashboard-processor');
+const { deriveSecurityEvidence } = require('../services/intelligence/security-evidence-store');
+const buildSecurityAlertsDashboardContext = require('../services/intelligence/dashboard-context/securityAlertsDashboardContext');
+
+test('anonymous IP alert correlates exact IP sign-ins without asserting compromise', () => {
+    const result = buildSecurityFindings({
+        alerts: [{ id: 'alert-1', title: 'Anonymous IP sign-in detected', severity: 'medium', ipAddress: '203.0.113.8' }],
+        signIns: [
+            { id: 'signin-1', userId: 'user-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' },
+            { id: 'signin-2', userPrincipalName: 'other@example.com', ipAddress: '198.51.100.1', outcome: 'success' }
+        ]
+    });
+
+    const [finding] = result.findings;
+    assert.equal(finding.detectionId, 'anonymous_ip_authentication');
+    assert.equal(finding.status, 'related_evidence');
+    assert.equal(finding.severity, 'unassessed');
+    assert.equal(finding.sourceSeverity, 'medium');
+    assert.deepEqual(finding.affectedEntities.users, []);
+    assert.deepEqual(finding.candidateUsers, ['user@example.com']);
+    assert.equal(finding.evidence.filter(item => item.sourceType === 'sign_in').length, 1);
+    assert.match(finding.description, /IP equality alone does not prove/);
+});
+
+test('anonymous IP indicator remains an observation when no sign-in evidence matches', () => {
+    const result = buildSecurityFindings({
+        alerts: [{ id: 'alert-1', title: 'Anonymous IP address observed', severity: 'high' }],
+        signIns: []
+    });
+
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0].status, 'needs_investigation');
+    assert.equal(result.findings[0].confidence, 'low');
+    assert.deepEqual(result.findings[0].affectedEntities.users, []);
+    assert.match(result.findings[0].description, /no matching sign-in record/);
+});
+
+test('risky user and successful sign-in correlate by stable user ID, while risk levels stay source evidence', () => {
+    const result = buildSecurityFindings({
+        riskyUsers: [{ id: 'user-1', userPrincipalName: 'person@example.com', riskLevel: 'high', riskState: 'atRisk' }],
+        riskDetections: [{ id: 'risk-1', userId: 'user-1', riskEventType: 'anonymousIpAddress', riskLevel: 'high' }],
+        signIns: [
+            { id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success', ipAddress: '203.0.113.8' },
+            { id: 'signin-2', userId: 'user-2', userPrincipalName: 'other@example.com', outcome: 'success' }
+        ]
+    });
+
+    const [finding] = result.findings;
+    assert.equal(finding.detectionId, 'risky_user_successful_sign_in');
+    assert.equal(finding.status, 'correlated');
+    assert.equal(finding.severity, 'unassessed');
+    assert.equal(finding.sourceRiskLevel, 'high');
+    assert.equal(finding.evidence.filter(item => item.sourceType === 'sign_in').length, 1);
+    assert.equal(finding.evidence.filter(item => item.sourceType === 'risk_detection').length, 1);
+    assert.match(finding.description, /not proof/);
+});
+
+test('sign-in outcome stays unknown when Graph omits status and impossible travel is explicitly unassessed', () => {
+    assert.equal(getSignInOutcome({}), 'unknown');
+    assert.equal(getSignInOutcome({ status: { errorCode: 0 } }), 'success');
+    assert.equal(getSignInOutcome({ status: { errorCode: 50126 } }), 'failed');
+
+    const result = buildSecurityFindings();
+    assert.equal(result.scenarioCoverage.impossibleTravel.status, 'not_assessed');
+    assert.match(result.scenarioCoverage.impossibleTravel.reason, /VPN\/proxy limitations/);
+});
+
+test('empty but successfully collected identity-risk feeds count as evaluated, not unavailable', () => {
+    const result = buildSecurityFindings({
+        sourceStatuses: {
+            alerts: 'complete',
+            signIns: 'complete',
+            riskyUsers: 'complete'
+        }
+    });
+
+    assert.equal(result.scenarioCoverage.anonymousIpAuthentication.status, 'evaluated');
+    assert.equal(result.scenarioCoverage.riskyUserSuccessfulSignIn.status, 'evaluated');
+    assert.equal(result.scenarioCoverage.riskyUserSuccessfulSignIn.reason, null);
+});
+
+test('dashboard and evidence store preserve finding details and source coverage', () => {
+    const detection = buildSecurityFindings({
+        riskyUsers: [{ id: 'user-1', userPrincipalName: 'person@example.com', riskLevel: 'high', riskState: 'atRisk' }],
+        signIns: [{ id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success' }]
+    });
+    const payload = buildSecurityDashboardPayload({
+        payload: {
+            identityRisk: { riskyUsers: [{ id: 'user-1', userPrincipalName: 'person@example.com', riskLevel: 'high' }] },
+            findings: detection.findings,
+            scenarioCoverage: detection.scenarioCoverage
+        }
+    });
+    const evidence = deriveSecurityEvidence(payload);
+
+    assert.equal(payload.findings.length, 1);
+    assert.equal(payload.collection.hasPrimaryEvidence, true);
+    assert.equal(payload.scenarioCoverage.impossibleTravel.status, 'not_assessed');
+    assert.ok(evidence.evidenceRows.some(row => row.kind === 'security_finding'));
+    assert.ok(evidence.evidenceRows.some(row => row.kind === 'risky_user'));
+});
+
+test('stored dashboard context exposes findings and scenario coverage', () => {
+    const finding = {
+        id: 'finding-1',
+        detectionId: 'risky_user_successful_sign_in',
+        title: 'Successful sign-in observed for risky user'
+    };
+    const context = buildSecurityAlertsDashboardContext({
+        sourceKey: 'security_alerts',
+        status: 'available',
+        evidence: [
+            { evidenceType: 'securityFindings', data: [finding] }
+        ],
+        sourceLineage: {
+            scenarioCoverage: { impossibleTravel: { status: 'not_assessed' } }
+        }
+    });
+    const dashboardEvidence = context.evidence.find(item => item.evidenceType === 'dashboard_evidence_lists');
+
+    assert.deepEqual(dashboardEvidence.data.securityFindings, [finding]);
+    assert.equal(dashboardEvidence.data.scenarioCoverage.impossibleTravel.status, 'not_assessed');
+});
