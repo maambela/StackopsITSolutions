@@ -5824,7 +5824,12 @@ function renderSunbirdSecurityCharts(model) {
 }
 
 function renderSunbirdSecurityChartWithAction(chart, targetId, label) {
-    return `<div class="sunbird-security-chart-group">${chart}<button class="sunbird-security-chart-evidence-action" type="button" onclick="focusSunbirdSecurityInvestigation('${targetId}')"><i class="fas fa-arrow-right" aria-hidden="true"></i>${escapeIdentityText(label)}</button></div>`;
+    const action = `<footer class="sunbird-security-chart-action"><button class="sunbird-security-chart-evidence-action" type="button" onclick="focusSunbirdSecurityInvestigation('${targetId}')"><i class="fas fa-arrow-right" aria-hidden="true"></i><span>${escapeIdentityText(label)}</span></button></footer>`;
+    // Keep the evidence navigation with the chart that it describes.  The
+    // chart renderers each return one article, so the footer is inserted before
+    // its closing tag rather than leaving an action stranded below the card.
+    const chartWithAction = String(chart).replace(/<\/article>\s*$/, `${action}</article>`);
+    return `<div class="sunbird-security-chart-group">${chartWithAction}</div>`;
 }
 
 function renderSunbirdSecurityRiskTrendChart(model) {
@@ -16591,7 +16596,125 @@ function sunbirdSecurityEntityLabels(entities) {
     return labels;
 }
 
-function renderSunbirdSecurityEvidenceDetails(evidence = []) {
+function sunbirdSecurityFindingSource(finding = {}) {
+    const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
+    const firstEvidence = evidence.find(item => item && typeof item === 'object') || {};
+    return firstEvidence.sourceType || firstEvidence.type || finding?.sourceType || finding?.source || finding?.provider || 'Source not recorded';
+}
+
+function normalizeSunbirdSecurityGroupingText(value) {
+    return sunbirdSecurityDisplayText(value, '')
+        .toLowerCase()
+        .replace(/\b[0-9a-f]{24,}\b/g, '[reference]')
+        .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+        .replace(/\b[^\s@]+@[^\s@]+\b/g, '[identity]')
+        .replace(/\b\d{4}-\d{2}-\d{2}(?:t\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:z|[+-]\d{2}:?\d{2})?)?\b/g, '[time]')
+        .replace(/\b\d+\b/g, '[count]')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function sunbirdSecurityFindingProviderIdentity(finding = {}) {
+    const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
+    const firstEvidence = evidence.find(item => item && typeof item === 'object') || {};
+    return normalizeSunbirdSecurityGroupingText(
+        firstEvidence?.details?.sourceSystem || firstEvidence?.details?.provider || firstEvidence?.provider
+        || finding?.reportingSecuritySystem || finding?.provider || finding?.source || sunbirdSecurityFindingSource(finding)
+    ) || 'source-not-recorded';
+}
+
+function sunbirdSecurityFindingExplanatorySignature(finding = {}) {
+    return [
+        finding?.title,
+        finding?.description,
+        finding?.impact,
+        finding?.assessmentBasis,
+        finding?.recommendedAction,
+        finding?.severity,
+        finding?.sourceSeverity,
+        finding?.sourceRiskLevel,
+        finding?.sourceRiskState,
+        finding?.confidence,
+        finding?.confidenceReason
+    ].map(normalizeSunbirdSecurityGroupingText).join('|');
+}
+
+function sunbirdSecurityFindingCorrelationState(finding = {}) {
+    const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
+    const evidenceTypes = new Set(evidence.map(item => String(item?.sourceType || item?.type || '').toLowerCase()).filter(Boolean));
+    const successfulSignIns = evidence.filter(item => String(item?.sourceType || item?.type || '').toLowerCase() === 'sign_in'
+        && String(item?.details?.outcome || '').toLowerCase() === 'success').length;
+    const matchedSignIns = evidenceTypes.has('sign_in');
+
+    if (finding?.detectionId === 'anonymous_ip_authentication') {
+        return matchedSignIns ? (successfulSignIns ? 'matched_successful_authentication' : 'matched_authentication') : 'indicator_only';
+    }
+    if (finding?.detectionId === 'risky_user_successful_sign_in') {
+        return successfulSignIns ? 'risky_user_with_successful_authentication' : (matchedSignIns ? 'risky_user_with_non_successful_authentication' : 'identity_risk_only');
+    }
+    return `${sunbirdSecurityStatusLabel(finding?.status, 'not recorded').toLowerCase()}|${[...evidenceTypes].sort().join(',') || 'no_evidence_type'}`;
+}
+
+function groupSunbirdSecurityFindings(findings = []) {
+    const groups = new Map();
+    (Array.isArray(findings) ? findings : []).forEach((finding, index) => {
+        const sourceType = sunbirdSecurityFindingSource(finding);
+        const providerIdentity = sunbirdSecurityFindingProviderIdentity(finding);
+        const correlationState = sunbirdSecurityFindingCorrelationState(finding);
+        const explanatorySignature = sunbirdSecurityFindingExplanatorySignature(finding);
+        const key = [finding?.detectionId || 'unknown_detection', sourceType, providerIdentity, correlationState, finding?.status || 'not_recorded', explanatorySignature].join('|').toLowerCase();
+        if (!groups.has(key)) groups.set(key, { key, sourceType, providerIdentity, correlationState, explanatorySignature, findings: [] });
+        groups.get(key).findings.push({ finding, originalIndex: index });
+    });
+    return [...groups.values()];
+}
+
+function sunbirdSecurityFindingGroupTitle(group = {}) {
+    const first = group.findings?.[0]?.finding || {};
+    const count = group.findings?.length || 0;
+    const countNoun = first.detectionId === 'anonymous_ip_authentication' ? 'alert' : 'finding';
+    const countLabel = `${count} ${countNoun}${count === 1 ? '' : 's'}`;
+    const titles = {
+        anonymous_ip_authentication: group.correlationState === 'indicator_only'
+            ? 'Anonymous-IP indicators requiring investigation'
+            : 'Anonymous-IP indicators with related authentication evidence',
+        risky_user_successful_sign_in: group.correlationState === 'risky_user_with_successful_authentication'
+            ? 'Risky-user records with successful sign-ins'
+            : 'Risky-user records requiring investigation'
+    };
+    return `${titles[first.detectionId] || sunbirdSecurityStatusLabel(first.detectionId, 'Security findings')} — ${countLabel}`;
+}
+
+function sunbirdSecurityFindingGroupLimitation(group = {}) {
+    const first = group.findings?.[0]?.finding || {};
+    if (first.detectionId === 'anonymous_ip_authentication') {
+        return group.correlationState === 'indicator_only'
+            ? 'Each event is a provider-reported anonymous-IP indicator; no matching sign-in record is cited for this series.'
+            : 'Each event has related sign-in evidence from the same IP. That link is an investigation lead, not proof of account compromise.';
+    }
+    if (first.detectionId === 'risky_user_successful_sign_in') {
+        return group.correlationState === 'risky_user_with_successful_authentication'
+            ? 'Microsoft identity-risk state and successful sign-in records are cited separately. The correlation does not establish compromise.'
+            : 'Microsoft identity-risk records are available, but the expected successful sign-in correlation was not returned for this series.';
+    }
+    return 'Items are grouped only because their detection, source, and correlation state are the same. Each event retains its own cited evidence.';
+}
+
+function sunbirdSecurityFindingObservation(finding = {}) {
+    const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
+    const signIns = evidence.filter(item => String(item?.sourceType || item?.type || '').toLowerCase() === 'sign_in');
+    const successfulSignIns = signIns.filter(item => String(item?.details?.outcome || '').toLowerCase() === 'success');
+    const ipAddress = sunbirdSecurityEntityLabels(finding?.affectedEntities).find(item => item.type === 'IP address')?.label;
+    if (finding?.detectionId === 'anonymous_ip_authentication') {
+        return `${ipAddress ? `Observed IP: ${ipAddress}. ` : ''}${signIns.length ? `${signIns.length} related sign-in record${signIns.length === 1 ? '' : 's'} cited, ${successfulSignIns.length} successful.` : 'No matching sign-in record is cited.'}`;
+    }
+    if (finding?.detectionId === 'risky_user_successful_sign_in') {
+        return `${successfulSignIns.length} successful sign-in record${successfulSignIns.length === 1 ? '' : 's'} cited for the Microsoft risky-user record.`;
+    }
+    return sunbirdSecurityDisplayText(finding?.description, 'No observation summary was returned.');
+}
+
+function renderSunbirdSecurityEvidenceDetails(evidence = [], finding = {}) {
     const records = Array.isArray(evidence) ? evidence : [];
     if (!records.length) {
         return '<p class="sunbird-security-evidence-empty">No cited evidence references were returned for this finding.</p>';
@@ -16605,11 +16728,12 @@ function renderSunbirdSecurityEvidenceDetails(evidence = []) {
                     ? Object.entries(record.details).filter(([, value]) => value !== null && value !== undefined && value !== '')
                     : [];
                 const source = sunbirdSecurityReadableSourceLabel(record?.sourceType || record?.type, 'Source not recorded');
-                const reference = record?.sourceId ? ` · ${sunbirdSecurityDisplayText(record.sourceId)}` : '';
+                const reference = record?.sourceId ? sunbirdSecurityDisplayText(record.sourceId) : '';
                 return `<article class="sunbird-security-evidence-record">
-                    <p class="sunbird-security-evidence-kicker">${sunbirdSecurityEscape(source)}${sunbirdSecurityEscape(reference, '')}</p>
+                    <p class="sunbird-security-evidence-kicker">${sunbirdSecurityEscape(source)}</p>
                     <p class="sunbird-security-evidence-summary">${sunbirdSecurityEscape(record?.summary)}</p>
                     <p class="sunbird-security-evidence-time"><i class="far fa-clock" aria-hidden="true"></i> ${sunbirdSecurityEscape(sunbirdSecurityFormatTime(record?.eventTime))}</p>
+                    ${reference ? `<div class="sunbird-security-provider-reference"><span>Provider reference</span><code>${sunbirdSecurityEscape(reference, '')}</code><button type="button" class="sunbird-security-copy-reference" data-reference="${sunbirdSecurityEscape(reference, '')}" onclick="window.copySunbirdSecurityProviderReference(this)"><i class="far fa-copy" aria-hidden="true"></i> Copy reference</button></div>` : ''}
                     ${details.length ? `<dl class="sunbird-security-evidence-fields">${details.map(([key, value]) => `<div><dt>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(key))}</dt><dd>${sunbirdSecurityEscape(sunbirdSecurityDisplayText(value))}</dd></div>`).join('')}</dl>` : '<p class="sunbird-security-evidence-empty">Readable record details were not returned.</p>'}
                 </article>`;
             }).join('')}
@@ -16629,45 +16753,76 @@ function renderSunbirdSecurityFindings(findings = [], data = {}) {
         </div>`;
     }
 
-    return `<div class="sunbird-security-findings-list">${records.map(finding => {
+    const groups = groupSunbirdSecurityFindings(records);
+    return `<div class="sunbird-security-findings-list">${groups.map(group => {
+        const groupFirstFinding = group.findings[0]?.finding || {};
+        const sharedProviderValues = [
+            groupFirstFinding?.sourceSeverity ? ['Provider severity', groupFirstFinding.sourceSeverity] : null,
+            groupFirstFinding?.sourceRiskLevel ? ['Provider risk', groupFirstFinding.sourceRiskLevel] : null,
+            groupFirstFinding?.sourceRiskState ? ['Provider risk state', groupFirstFinding.sourceRiskState] : null
+        ].filter(Boolean);
+        return `<section class="sunbird-security-finding-series" aria-label="${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}">
+            <header class="sunbird-security-finding-series-header">
+                <div><p class="sunbird-security-eyebrow">Finding series</p><h4>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}</h4><p>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupLimitation(group))}</p></div>
+                <span class="sunbird-security-status ${sunbirdSecurityStatusClass(groupFirstFinding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(groupFirstFinding?.status, 'Status not recorded'))}</span>
+            </header>
+            <div class="sunbird-security-series-assessment">
+                <div class="sunbird-security-assessment-grid">
+                    <section><span>Stack CTRL assessment</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(groupFirstFinding?.severity, 'Unassessed'))}</strong><small>Severity</small></section>
+                    <section><span>Confidence</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(groupFirstFinding?.confidence, 'Not recorded'))}</strong><small>${sunbirdSecurityEscape(groupFirstFinding?.confidenceReason)}</small></section>
+                    ${sharedProviderValues.length ? `<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span>${sharedProviderValues.map(([label, value]) => `<p><b>${sunbirdSecurityEscape(label, '')}</b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(value))}</p>`).join('')}</section>` : '<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span><p>No provider severity or risk value returned.</p></section>'}
+                </div>
+                <p class="sunbird-security-recommendation"><i class="fas fa-arrow-right" aria-hidden="true"></i><span><b>Recommended next step:</b> ${sunbirdSecurityEscape(groupFirstFinding?.recommendedAction)}</span></p>
+                <details class="sunbird-security-assessment-details"><summary>Assessment basis</summary><div><p>${sunbirdSecurityEscape(groupFirstFinding?.assessmentBasis, 'No assessment basis was returned for this series.')}</p></div></details>
+            </div>
+            <div class="sunbird-security-series-events">${group.findings.map(({ finding }, eventIndex) => {
         const affected = sunbirdSecurityEntityLabels(finding?.affectedEntities);
         const candidateUsers = Array.isArray(finding?.candidateUsers) ? finding.candidateUsers.filter(Boolean) : [];
-        const providerValues = [
-            finding?.sourceSeverity ? ['Provider severity', finding.sourceSeverity] : null,
-            finding?.sourceRiskLevel ? ['Provider risk', finding.sourceRiskLevel] : null,
-            finding?.sourceRiskState ? ['Provider risk state', finding.sourceRiskState] : null
-        ].filter(Boolean);
         const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
-        const firstEvidence = evidence[0] && typeof evidence[0] === 'object' ? evidence[0] : {};
-        const sourceType = firstEvidence.sourceType || firstEvidence.type || finding?.sourceType || finding?.source || finding?.provider || 'Source not recorded';
-        const citedProviderReference = evidence.find(item => item?.sourceId);
-        const citedReference = citedProviderReference || evidence.find(item => item && (item.reference || item.id));
-        const sourceReference = citedProviderReference?.sourceId || finding?.sourceId || citedReference?.reference || citedReference?.id || finding?.reference || finding?.id || '';
-        const sourceReferenceLabel = citedProviderReference?.sourceId || finding?.sourceId ? 'Provider reference' : citedReference ? 'Cited evidence reference' : sourceReference ? 'Internal finding reference' : '';
+        const sourceType = sunbirdSecurityFindingSource(finding);
+        const hasProviderReference = evidence.some(item => item?.sourceId);
+        const eventTime = evidence.map(item => item?.eventTime).find(Boolean);
         return `<article class="sunbird-security-finding">
             <header class="sunbird-security-finding-header">
-                <div><p class="sunbird-security-eyebrow">Evidence-backed finding</p><h5>${sunbirdSecurityEscape(finding?.title, 'Untitled finding')}</h5><p class="sunbird-security-source-reference"><span>${sunbirdSecurityEscape(sunbirdSecurityReadableSourceLabel(sourceType))}</span>${sourceReference ? `<small>${sunbirdSecurityEscape(sourceReferenceLabel, '')}</small><code title="${sunbirdSecurityEscape(sourceReference, '')}">${sunbirdSecurityEscape(sourceReference, '')}</code>` : '<em>Source reference not returned</em>'}</p></div>
+                <div><p class="sunbird-security-eyebrow">Event ${eventIndex + 1} of ${group.findings.length}</p><h5>${sunbirdSecurityEscape(finding?.title, 'Untitled finding')}</h5><p class="sunbird-security-source-reference"><span>${sunbirdSecurityEscape(sunbirdSecurityReadableSourceLabel(sourceType))}</span>${hasProviderReference ? '<small>Reference available in evidence</small>' : '<em>Provider reference not returned</em>'}</p>${eventTime ? `<time class="sunbird-security-event-time"><i class="far fa-clock" aria-hidden="true"></i> ${sunbirdSecurityEscape(sunbirdSecurityFormatTime(eventTime))}</time>` : ''}</div>
                 <span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.status, 'Status not recorded'))}</span>
             </header>
-            <div class="sunbird-security-assessment-grid">
-                <section><span>Stack CTRL assessment</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.severity, 'Unassessed'))}</strong><small>Severity</small></section>
-                <section><span>Confidence</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.confidence, 'Not recorded'))}</strong><small>${sunbirdSecurityEscape(finding?.confidenceReason)}</small></section>
-                ${providerValues.length ? `<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span>${providerValues.map(([label, value]) => `<p><b>${sunbirdSecurityEscape(label, '')}</b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(value))}</p>`).join('')}</section>` : '<section class="sunbird-security-provider-values"><span>Microsoft/provider values</span><p>No provider severity or risk value returned.</p></section>'}
-            </div>
+            <p class="sunbird-security-event-meta"><span>Stack CTRL severity</span><b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.severity, 'Unassessed'))}</b>${finding?.sourceSeverity ? `<span>Provider severity</span><b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.sourceSeverity))}</b>` : ''}</p>
             <div class="sunbird-security-finding-copy">
-                <p>${sunbirdSecurityEscape(finding?.description, 'No finding description was returned.')}</p>
-                <p><b>Impact:</b> ${sunbirdSecurityEscape(finding?.impact)}</p>
-                <p><b>Assessment basis:</b> ${sunbirdSecurityEscape(finding?.assessmentBasis)}</p>
+                <p><b>Observation:</b> ${sunbirdSecurityEscape(sunbirdSecurityFindingObservation(finding))}</p>
             </div>
-            <div class="sunbird-security-entity-row">
-                <span>Observed / affected</span>
-                <div>${affected.length ? affected.map(entity => `<span class="sunbird-security-entity"><b>${sunbirdSecurityEscape(entity.type, '')}:</b> ${sunbirdSecurityEscape(entity.label)}</span>`).join('') : '<span class="sunbird-security-missing">No affected entities were returned.</span>'}${candidateUsers.length ? `<span class="sunbird-security-candidates"><b>Candidate user${candidateUsers.length === 1 ? '' : 's'} observed:</b> ${candidateUsers.map(user => sunbirdSecurityEscape(user)).join(', ')}</span>` : ''}</div>
-            </div>
-            <p class="sunbird-security-recommendation"><i class="fas fa-arrow-right" aria-hidden="true"></i><span><b>Recommended next step:</b> ${sunbirdSecurityEscape(finding?.recommendedAction)}</span></p>
-            ${renderSunbirdSecurityEvidenceDetails(evidence)}
+            <details class="sunbird-security-assessment-details"><summary>Event detail</summary><div><div class="sunbird-security-entity-row"><span>Observed / affected</span><div>${affected.length ? affected.map(entity => `<span class="sunbird-security-entity"><b>${sunbirdSecurityEscape(entity.type, '')}:</b> ${sunbirdSecurityEscape(entity.label)}</span>`).join('') : '<span class="sunbird-security-missing">No affected entities were returned.</span>'}${candidateUsers.length ? `<span class="sunbird-security-candidates"><b>Candidate user${candidateUsers.length === 1 ? '' : 's'} observed:</b> ${candidateUsers.map(user => sunbirdSecurityEscape(user)).join(', ')}</span>` : ''}</div></div><p><b>Event impact:</b> ${sunbirdSecurityEscape(finding?.impact)}</p><p><b>Full finding explanation:</b> ${sunbirdSecurityEscape(finding?.description, 'No finding description was returned.')}</p></div></details>
+            ${renderSunbirdSecurityEvidenceDetails(evidence, finding)}
         </article>`;
+    }).join('')}</div></section>`;
     }).join('')}</div>`;
 }
+
+async function copySunbirdSecurityProviderReference(button) {
+    const reference = String(button?.dataset?.reference || '');
+    if (!reference) return;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(reference);
+        } else {
+            const temporaryInput = document.createElement('textarea');
+            temporaryInput.value = reference;
+            temporaryInput.setAttribute('readonly', '');
+            temporaryInput.style.position = 'fixed';
+            temporaryInput.style.opacity = '0';
+            document.body.appendChild(temporaryInput);
+            temporaryInput.select();
+            document.execCommand('copy');
+            temporaryInput.remove();
+        }
+        button.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i> Copied';
+        setTimeout(() => { if (button) button.innerHTML = '<i class="far fa-copy" aria-hidden="true"></i> Copy reference'; }, 1600);
+    } catch (error) {
+        console.warn('[Security Alerts] Unable to copy provider reference', error);
+    }
+}
+
+window.copySunbirdSecurityProviderReference = copySunbirdSecurityProviderReference;
 
 function getSunbirdSecurityCollectionWarnings(data = {}) {
     const values = [
