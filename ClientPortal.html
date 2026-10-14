@@ -992,7 +992,7 @@
             </div>
         </nav>
 
-        <!-- Mobile / Tablet bottom navigation (phones & tablets only) -->
+        <!-- Phone bottom navigation: services remain a dedicated workspace. -->
         <nav class="portal-mobile-bottom-nav" id="portal-mobile-bottom-nav" aria-label="Portal navigation">
             <button type="button" class="portal-mobile-nav-item active" data-mobile-tab="home" aria-current="page">
                 <i class="fas fa-home" aria-hidden="true"></i>
@@ -1000,7 +1000,7 @@
             </button>
             <button type="button" class="portal-mobile-nav-item" data-mobile-tab="dashboard">
                 <i class="fas fa-th-large" aria-hidden="true"></i>
-                <span>Dashboard</span>
+                <span>Services</span>
             </button>
             <button type="button" class="portal-mobile-nav-item" data-mobile-tab="alerts">
                 <i class="fas fa-bell" aria-hidden="true"></i>
@@ -1091,6 +1091,11 @@
                         <span class="portal-mobile-domain-label">Total Storage</span>
                         <strong id="mobile-total-storage">0 GB</strong>
                     </div>
+                </div>
+                <div class="portal-mobile-workspace-heading" id="portal-mobile-workspace-heading" tabindex="-1">
+                    <p>Workspace</p>
+                    <h2>Services</h2>
+                    <span>Open a service to see its current detail</span>
                 </div>
                 <div class="projects-nav">
                     <div class="nav-counter">

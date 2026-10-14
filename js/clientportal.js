@@ -632,7 +632,7 @@ function goBackToProjects() {
     // Security peek cannot retain an off-screen width/position.
     requestAnimationFrame(() => {
         if (!projectsView || projectsView.style.display === 'none') return;
-        if (window.matchMedia('(max-width: 600px)').matches) {
+        if (window.matchMedia('(max-width: 1100px)').matches) {
             clearSidePeekCards();
             return;
         }
@@ -1147,6 +1147,15 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeGovernanceCard();
     initializeSupportCard();
     initializeSunbirdLeftMenu();
+    let responsiveWorkspace = window.matchMedia('(max-width: 1100px)').matches;
+    window.addEventListener('resize', () => {
+        const nextResponsiveWorkspace = window.matchMedia('(max-width: 1100px)').matches;
+        if (nextResponsiveWorkspace === responsiveWorkspace) return;
+        responsiveWorkspace = nextResponsiveWorkspace;
+        // Crossing the workspace breakpoint must swap the rendered card set,
+        // not merely restyle a desktop carousel.
+        displayCurrentProject();
+    });
     updateCopyrightYear();
 });
 
@@ -2398,7 +2407,7 @@ function enableClientDashboardButtonWobble() {
     dashboardView.addEventListener('pointerover', event => {
         const button = event.target.closest('button');
         if (!button || !dashboardView.contains(button) || button.contains(event.relatedTarget)) return;
-        if (button.closest('.project-card[data-project-id="9"]')) return;
+        if (button.closest('.project-card[data-project-id="9"], .project-card[data-project-id="10"]')) return;
 
         // Dynamically-rendered dashboards reuse the same root. Toggling this
         // class explicitly restarts the animation for every button hover.
@@ -11169,14 +11178,16 @@ function updatePortalMobileDomainSummary() {
 
 }
 function displayCurrentProject() {
-    const isPhoneProjectLayout = window.matchMedia('(max-width: 600px)').matches;
-    const carouselProjects = isPhoneProjectLayout ? getPhoneFilteredProjects() : getFilteredProjects();
+    // The responsive workspace is a complete service list, not a clipped
+    // desktop carousel. Keep the carousel/side-peek model desktop-only.
+    const isResponsiveWorkspace = window.matchMedia('(max-width: 1100px)').matches;
+    const carouselProjects = isResponsiveWorkspace ? getPhoneFilteredProjects() : getFilteredProjects();
     if (carouselProjects.length === 0) return;
     
     const projectsGrid = document.getElementById('projects-grid');
     projectsGrid.classList.toggle('project-grid-updating', projectGridHasRendered);
     projectsGrid.innerHTML = '';
-    const visibleProjects = isPhoneProjectLayout
+    const visibleProjects = isResponsiveWorkspace
         ? carouselProjects
         : carouselProjects.slice(currentProjectIndex, currentProjectIndex + 3);
     
@@ -11228,7 +11239,7 @@ function displayCurrentProject() {
         projectsGrid.appendChild(projectCard);
     });
 
-    if (isPhoneProjectLayout) {
+    if (isResponsiveWorkspace) {
         clearSidePeekCards();
     } else {
         renderSidePeekCards();
@@ -11251,7 +11262,7 @@ function clearSidePeekCards() {
 
 function moveProjectPreviewUnderCard(projectCard) {
     const previewSection = document.getElementById('project-preview-section');
-    if (!previewSection || !projectCard || !window.matchMedia('(max-width: 600px)').matches) return;
+    if (!previewSection || !projectCard || !window.matchMedia('(max-width: 1100px)').matches) return;
     projectCard.insertAdjacentElement('afterend', previewSection);
 }
 
@@ -14505,6 +14516,10 @@ async function initializeBillingCard() {
                     <span class="billing-summary-value" style="color: var(--primary);">${dueDateString}</span>
                 </div>
             </div>
+            <button type="button" class="billing-mobile-manage" onclick="window.openSunbirdBillingDetails()">
+                <span>View billing statement</span>
+                <i class="fas fa-arrow-right" aria-hidden="true"></i>
+            </button>
             <div class="billing-items">
                 ${billingItemsHtml}
             </div>
@@ -14688,7 +14703,9 @@ function ensureSunbirdBillingCardDimensions() {
 
     clearLockedHeights();
 
-    if (window.matchMedia('(max-width: 768px)').matches) {
+    // The responsive workspace owns the rail below the desktop breakpoint.
+    // Do not retain a desktop-calculated top offset in the tablet layout.
+    if (window.matchMedia('(max-width: 1100px)').matches) {
         return;
     }
 
@@ -17273,7 +17290,9 @@ function syncSunbirdLeftMenuHeight() {
     const wrapper = leftMenu?.parentElement;
     if (!billingCard || !leftMenu || !wrapper) return;
 
-    if (window.matchMedia('(max-width: 768px)').matches) {
+    // Height locking is only part of the desktop Control Center composition.
+    // Tablet and phone panels need to grow with their content instead.
+    if (window.matchMedia('(max-width: 1100px)').matches) {
         leftMenu.style.height = 'auto';
         leftMenu.style.top = 'auto';
         wrapper.style.removeProperty('--sunbird-connector-y');
@@ -18418,7 +18437,11 @@ window.openSunbirdOperationsModal = function(index) {
     document.getElementById('sunbird-operations-modal').classList.add('open');
 };
 function isPortalMobileLayout() {
-    return window.matchMedia('(max-width: 1024px)').matches;
+    return window.matchMedia('(max-width: 1100px)').matches;
+}
+
+function isPortalPhoneLayout() {
+    return window.matchMedia('(max-width: 700px)').matches;
 }
 
 function syncPortalMobileUserName() {
@@ -18440,9 +18463,38 @@ function setPortalMobileTab(tab) {
         if (active) button.setAttribute('aria-current', 'page');
     });
     if (tab === 'alerts') window.switchBillingMenu?.('security');
+    // Profile owns the small-screen account pulse. It is still the one live
+    // billing card, simply presented in a compact context on a phone/tablet.
+    if (tab === 'profile' && isPortalMobileLayout()) window.switchBillingMenu?.('billing');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (tab === 'control') window.switchBillingMenu?.('operations');
+
+    // Phone navigation reveals one task at a time. On tablets the same actions
+    // simply move focus into the always-visible workspace rather than hiding it.
+    const target = tab === 'home'
+        ? document.getElementById('portal-mobile-health-card')
+        : tab === 'dashboard'
+            ? document.getElementById('portal-mobile-workspace-heading')
+            : tab === 'alerts'
+                ? document.getElementById('billing-card')
+                : tab === 'profile'
+                    ? document.getElementById('portal-mobile-profile')
+                    : null;
+    if (target) {
+        target.setAttribute('tabindex', '-1');
+        window.setTimeout(() => target.focus({ preventScroll: true }), isPortalPhoneLayout() ? 180 : 0);
+    }
 }
+
+// Keep billing details in the existing Control Center flow rather than
+// duplicating invoice data into a second mobile component.
+window.openSunbirdBillingDetails = function() {
+    if (isPortalPhoneLayout()) {
+        setPortalMobileTab('control');
+    }
+    window.switchBillingMenu?.('billing');
+    window.setTimeout(() => document.getElementById('billing-card')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 40);
+};
 
 function renderPortalMobileHealth(health) {
     const value = Math.max(0, Math.min(100, Math.round(Number(health) || 0)));
