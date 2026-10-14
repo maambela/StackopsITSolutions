@@ -18294,7 +18294,7 @@ function renderSunbirdOperationsCard(billingCard, tasks, options = {}) {
             </div>
             <div class="sunbird-section-title" style="margin-bottom: 10px;">Live Remediation Required</div>
             
-            <div class="sunbird-incidents-table-wrap" style="max-height: 400px;">
+            <div class="sunbird-incidents-table-wrap" data-touch-table-label="Operations action queue" style="max-height: 400px;">
                 <table class="sunbird-incidents-table">
                     <thead>
                         <tr>
@@ -18489,7 +18489,10 @@ function setPortalMobileTab(tab) {
 // Keep billing details in the existing Control Center flow rather than
 // duplicating invoice data into a second mobile component.
 window.openSunbirdBillingDetails = function() {
-    if (isPortalPhoneLayout()) {
+    // Profile is intentionally only an account pulse across the complete
+    // responsive workspace. The complete statement remains in Control Center
+    // on both phones and tablets.
+    if (isPortalMobileLayout()) {
         setPortalMobileTab('control');
     }
     window.switchBillingMenu?.('billing');
@@ -18574,3 +18577,174 @@ function initializePortalMobileDashboard() {
     document.getElementById('portal-mobile-profile-logout')?.addEventListener('click', handleLogout);
     syncPortalMobileUserName(); updatePortalMobileDomainSummary(); refreshPortalMobileDashboard();
 }
+
+/* --------------------------------------------------------------------------
+ * Touch table viewports
+ * Dense operational data stays as a table on a phone.  These wrappers keep
+ * its horizontal pan local to the data instead of shrinking columns or
+ * turning semantic rows into a long stack of labelled fragments.
+ * -------------------------------------------------------------------------- */
+function getTouchTableMeta(table) {
+    const classes = table.classList;
+    if (classes.contains('sunbird-governance-table')) return { kind: 'governance', label: 'Governance and compliance controls' };
+    if (classes.contains('sunbird-risk-table')) return { kind: 'risk', label: 'Risk register' };
+    if (classes.contains('sunbird-incidents-table')) return {
+        kind: 'incidents',
+        label: table.closest('[data-touch-table-label]')?.dataset.touchTableLabel || 'Security incidents'
+    };
+    if (classes.contains('sunbird-devices-table')) return { kind: 'devices', label: 'Device inventory' };
+    if (classes.contains('sunbird-email-table')) return { kind: 'email', label: 'Email security events' };
+    if (classes.contains('sunbird-security-table')) return { kind: 'security', label: 'Security activity' };
+    if (classes.contains('sunbird-backup-table')) return { kind: 'backup', label: 'Backup recovery activity' };
+    if (classes.contains('sunbird-applications-table')) return { kind: 'applications', label: 'Applications inventory' };
+    if (classes.contains('sunbird-report-history-table')) return { kind: 'report-history', label: 'Report history' };
+    if (classes.contains('sunbird-report-events-table')) return { kind: 'report-events', label: 'Report events' };
+    if (classes.contains('sunbird-id-table')) return { kind: 'identity', label: 'Identity access records' };
+    if (classes.contains('identity-users-table')) return { kind: 'identity-users', label: 'Identity users' };
+    if (classes.contains('microsoft-users-table')) return { kind: 'microsoft-users', label: 'Microsoft users' };
+    if (classes.contains('network-evidence-table')) return { kind: 'network-evidence', label: 'Network evidence' };
+    if (classes.contains('network-dashboard-table')) return { kind: 'credential-activity', label: 'Credential security activity' };
+    if (classes.contains('apps-table')) return { kind: 'apps', label: 'Applications list' };
+    if (classes.contains('insights-table')) return { kind: 'insights', label: 'Sign-in locations' };
+    return null;
+}
+
+function getTouchTableViewport(table) {
+    return table.closest([
+        '.touch-table-viewport',
+        '.sunbird-governance-table-wrap',
+        '.sunbird-incidents-table-wrap',
+        '.sunbird-risk-list-wrap',
+        '.sunbird-id-table-wrap',
+        '.identity-users-table-container',
+        '.microsoft-users-table-wrap',
+        '.network-dashboard-table-wrap'
+    ].join(','));
+}
+
+function updateTouchTableViewport(viewport) {
+    const hasOverflow = viewport.scrollWidth > viewport.clientWidth + 8;
+    const hasVerticalOverflow = viewport.scrollHeight > viewport.clientHeight + 8;
+    viewport.classList.toggle('has-horizontal-overflow', hasOverflow);
+    viewport.classList.toggle('has-vertical-overflow', hasVerticalOverflow);
+    viewport.classList.toggle('is-scrolled', viewport.scrollLeft > 8);
+    viewport.classList.toggle('is-at-end', viewport.scrollLeft + viewport.clientWidth >= viewport.scrollWidth - 8);
+}
+
+function getTouchTableWheelDelta(event, viewport) {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * viewport.clientHeight;
+    return event.deltaY;
+}
+
+function canMoveTouchTableViewport(viewport, movement) {
+    const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const epsilon = 1;
+    const canMoveVertically = movement.top > 0
+        ? viewport.scrollTop < maxTop - epsilon
+        : movement.top < 0 && viewport.scrollTop > epsilon;
+    const canMoveHorizontally = movement.left > 0
+        ? viewport.scrollLeft < maxLeft - epsilon
+        : movement.left < 0 && viewport.scrollLeft > epsilon;
+    return canMoveVertically || canMoveHorizontally;
+}
+
+function initializeTouchTableViewports() {
+    // Do not decorate the desktop workspace. It already has its own layout
+    // and must remain visually and behaviorally unchanged above this point.
+    if (!window.matchMedia('(max-width: 1100px)').matches) return;
+
+    const selector = [
+        'table.sunbird-governance-table', 'table.sunbird-incidents-table',
+        'table.sunbird-id-table', 'table.identity-users-table',
+        'table.microsoft-users-table', 'table.network-dashboard-table',
+        'table.apps-table', 'table.insights-table',
+        'table.sunbird-risk-table', 'table.sunbird-devices-table',
+        'table.sunbird-email-table', 'table.sunbird-security-table',
+        'table.sunbird-backup-table', 'table.sunbird-applications-table',
+        'table.sunbird-report-history-table', 'table.sunbird-report-events-table'
+    ].join(',');
+
+    document.querySelectorAll(selector).forEach(table => {
+        const meta = getTouchTableMeta(table);
+        if (!meta) return;
+        let viewport = getTouchTableViewport(table);
+        if (!viewport) {
+            viewport = document.createElement('div');
+            viewport.className = 'touch-table-viewport touch-table-viewport--generated';
+            table.parentNode.insertBefore(viewport, table);
+            viewport.appendChild(table);
+        }
+        viewport.classList.add('touch-table-viewport');
+        viewport.dataset.tableKind = meta.kind;
+        viewport.setAttribute('role', 'region');
+        viewport.setAttribute('aria-label', `${meta.label}. Scrollable table data; use swipe or arrow keys to view more rows and columns.`);
+        viewport.tabIndex = 0;
+
+        let cue = viewport.querySelector(':scope > .touch-table-swipe-cue');
+        if (!cue) {
+            cue = document.createElement('span');
+            cue.className = 'touch-table-swipe-cue';
+            cue.setAttribute('aria-hidden', 'true');
+            cue.textContent = 'Swipe \u2194';
+        }
+        // Keep the affordance in a tiny, normal-flow strip above the table.
+        // It can never overlap the sticky header or the final data row.
+        if (cue.nextElementSibling !== table) viewport.insertBefore(cue, table);
+
+        if (!viewport.dataset.touchTableReady) {
+            viewport.addEventListener('scroll', () => updateTouchTableViewport(viewport), { passive: true });
+            viewport.addEventListener('wheel', event => {
+                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+                const deltaY = getTouchTableWheelDelta(event, viewport);
+                const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+                const atTop = viewport.scrollTop <= 1;
+                const atBottom = viewport.scrollTop >= maxTop - 1;
+                if (!((deltaY < 0 && atTop) || (deltaY > 0 && atBottom))) return;
+
+                // Chromium does not always hand a wheel gesture through from
+                // a nested overflow region. Hand it to the page ourselves at
+                // its vertical limits so a long table never becomes a trap.
+                event.preventDefault();
+                window.scrollBy({ top: deltaY, left: 0, behavior: 'auto' });
+            }, { passive: false });
+            viewport.addEventListener('keydown', event => {
+                if (event.target !== viewport) return;
+                const rowStep = Math.max(56, Math.round(viewport.clientHeight * 0.72));
+                const controls = {
+                    ArrowRight: { left: 96 },
+                    ArrowLeft: { left: -96 },
+                    ArrowDown: { top: 56 },
+                    ArrowUp: { top: -56 },
+                    PageDown: { top: rowStep },
+                    PageUp: { top: -rowStep },
+                    Home: { top: -viewport.scrollTop, left: -viewport.scrollLeft },
+                    End: { top: viewport.scrollHeight, left: viewport.scrollWidth }
+                };
+                const movement = controls[event.key];
+                if (!movement) return;
+                if (!canMoveTouchTableViewport(viewport, movement)) return;
+                event.preventDefault();
+                viewport.scrollBy({ ...movement, behavior: 'smooth' });
+            });
+            viewport.dataset.touchTableReady = 'true';
+        }
+        updateTouchTableViewport(viewport);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initializeTouchTableViewports();
+    let queued = false;
+    const schedule = () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+            queued = false;
+            initializeTouchTableViewports();
+        });
+    };
+    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule, { passive: true });
+});
