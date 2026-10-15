@@ -64,6 +64,7 @@ const { createSecurityEvidenceAutomation } = require('./services/intelligence/se
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
 const { buildSecurityFindings } = require('./services/intelligence/security-findings');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
+const { fetchGraphCollectionWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
@@ -14243,96 +14244,27 @@ async function fetchGraphJsonWithTimeout({
     optional = false,
     expectedUnavailableStatuses = []
 }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-        console.warn(`[security_alerts:${stage}:timeout] ${label} exceeded ${timeoutMs}ms`);
-        controller.abort();
-    }, timeoutMs);
-
     try {
         console.log(`[security_alerts:${stage}:start] ${label}...`);
-
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            signal: controller.signal
-        });
-
-        if (expectedUnavailableStatuses.includes(response.status)) {
-            console.log(`[security_alerts:${stage}:optional_unavailable] ${label} returned ${response.status}; continuing.`);
-            return {
-                ok: false,
-                optional,
-                unavailable: true,
-                status: response.status,
-                value: [],
-                warnings: [`${label} unavailable: Microsoft Graph returned ${response.status}`],
-                recordsFetched: 0
-            };
-        }
-
-        if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            const message = body
-                ? `${label} returned ${response.status}: ${body.slice(0, 300)}`
-                : `${label} returned ${response.status}`;
-
-            if (optional) {
-                console.warn(`[security_alerts:${stage}:optional_http_error] ${message}`);
-                return {
-                    ok: false,
-                    optional,
-                    status: response.status,
-                    value: [],
-                    warnings: [message],
-                    recordsFetched: 0
-                };
-            }
-
-            console.warn(`[security_alerts:${stage}:http_error] ${message}`);
-            return {
-                ok: false,
-                optional,
-                status: response.status,
-                value: [],
-                warnings: [message],
-                recordsFetched: 0
-            };
-        }
-
-        const data = await response.json();
-        const value = Array.isArray(data?.value) ? data.value : [];
-        const hasMore = Boolean(data?.['@odata.nextLink']);
-
-        console.log(`[security_alerts:${stage}:complete] ${label} retrieved ${value.length} record(s).`);
-
-        return {
-            ok: true,
+        const result = await fetchGraphCollectionWithRetry({
+            url,
+            token,
+            timeoutMs,
+            maxAttempts: 3,
+            expectedUnavailableStatuses,
             optional,
-            status: response.status,
-            value,
-            hasMore,
-            warnings: hasMore ? [`${label} returned the first ${value.length} records; Microsoft Graph has additional pages.`] : [],
-            recordsFetched: value.length
-        };
+            label
+        });
+        if (result.ok) {
+            console.log(`[security_alerts:${stage}:complete] ${label} retrieved ${result.value.length} record(s) in ${result.attempts} attempt(s).`);
+        } else if (result.httpStatus === 429) {
+            console.warn(`[security_alerts:${stage}:rate_limited] ${label} remained rate limited after ${result.attempts} attempt(s); retry-after ${result.retryAfterMs ?? 'not supplied'}ms.`);
+        } else {
+            console.warn(`[security_alerts:${stage}:unavailable_or_failed] ${result.errorCode || 'GRAPH_REQUEST_FAILED'}: ${result.errorDetail || result.warnings?.[0] || label}`);
+        }
+        return { ...result, status: result.httpStatus };
     } catch (error) {
         const message = graphAbortMessage(error, timeoutMs, label);
-
-        if (optional) {
-            console.warn(`[security_alerts:${stage}:optional_error] ${message}`);
-            return {
-                ok: false,
-                optional,
-                aborted: error?.name === 'AbortError' || /aborted/i.test(String(error?.message || '')),
-                value: [],
-                warnings: [`${label} unavailable: ${message}`],
-                recordsFetched: 0
-            };
-        }
-
         console.error(`[security_alerts:${stage}:error] ${message}`);
         return {
             ok: false,
@@ -14340,10 +14272,15 @@ async function fetchGraphJsonWithTimeout({
             aborted: error?.name === 'AbortError' || /aborted/i.test(String(error?.message || '')),
             value: [],
             warnings: [`${label} failed: ${message}`],
-            recordsFetched: 0
+            recordsFetched: 0,
+            attempts: 0,
+            httpStatus: null,
+            graphRequestId: null,
+            clientRequestId: null,
+            retryAfterMs: null,
+            errorCode: 'GRAPH_COLLECTION_UNEXPECTED_ERROR',
+            errorDetail: message
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
@@ -14362,7 +14299,13 @@ async function fetchSecurityAlertRows(token) {
         recordsFetched: result.recordsFetched,
         ok: result.ok,
         status: result.status,
-        aborted: result.aborted || false
+        aborted: result.aborted || false,
+        attempts: result.attempts || 0,
+        graphRequestId: result.graphRequestId || null,
+        clientRequestId: result.clientRequestId || null,
+        retryAfterMs: result.retryAfterMs ?? null,
+        errorCode: result.errorCode || null,
+        errorDetail: result.errorDetail || null
     };
 }
 
@@ -14381,7 +14324,13 @@ async function fetchSecurityIncidentRows(token) {
         recordsFetched: result.recordsFetched,
         ok: result.ok,
         status: result.status,
-        aborted: result.aborted || false
+        aborted: result.aborted || false,
+        attempts: result.attempts || 0,
+        graphRequestId: result.graphRequestId || null,
+        clientRequestId: result.clientRequestId || null,
+        retryAfterMs: result.retryAfterMs ?? null,
+        errorCode: result.errorCode || null,
+        errorDetail: result.errorDetail || null
     };
 }
 
@@ -14403,7 +14352,13 @@ async function fetchSecurityThreatIndicatorRows(token) {
         ok: result.ok,
         status: result.status,
         aborted: result.aborted || false,
-        optional: true
+        optional: true,
+        attempts: result.attempts || 0,
+        graphRequestId: result.graphRequestId || null,
+        clientRequestId: result.clientRequestId || null,
+        retryAfterMs: result.retryAfterMs ?? null,
+        errorCode: result.errorCode || null,
+        errorDetail: result.errorDetail || null
     };
 }
 
@@ -14445,7 +14400,13 @@ async function fetchSecuritySignInRows(token) {
         recordsFetched: result.recordsFetched,
         ok: result.ok,
         status: result.status,
-        aborted: result.aborted || false
+        aborted: result.aborted || false,
+        attempts: result.attempts || 0,
+        graphRequestId: result.graphRequestId || null,
+        clientRequestId: result.clientRequestId || null,
+        retryAfterMs: result.retryAfterMs ?? null,
+        errorCode: result.errorCode || null,
+        errorDetail: result.errorDetail || null
     };
 }
 
@@ -14594,6 +14555,23 @@ function cleanSecurityCollectionWarnings(warnings = [], { alerts = [], incidents
 
             return true;
         });
+}
+
+function securityCollectionSourceAudit(endpoint, result = {}) {
+    return {
+        endpoint,
+        httpStatus: Number.isFinite(Number(result.status)) ? Number(result.status) : null,
+        attempts: Number(result.attempts) || 0,
+        recordsFetched: Number(result.recordsFetched) || 0,
+        graphRequestId: result.graphRequestId || null,
+        clientRequestId: result.clientRequestId || null,
+        retryAfterMs: result.retryAfterMs ?? null,
+        errorCode: result.errorCode || null,
+        errorDetail: result.errorDetail || null,
+        completed: Boolean(result.ok),
+        unavailable: Boolean(result.unavailable),
+        partial: Boolean(result.hasMore || result.warnings?.length)
+    };
 }
 
 async function readWhatsAppConfigValue(name, fallback = null) {
@@ -15571,23 +15549,27 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 alerts: {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
-                    status: alertsResult.warnings?.length && !processedAlerts.length ? 'warning' : 'complete'
+                    status: alertsResult.warnings?.length && !processedAlerts.length ? 'warning' : 'complete',
+                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult)
                 },
                 incidents: {
                     recordsFetched: incidents.length,
                     recordsPrepared: processedIncidents.length,
-                    status: incidentsResult.warnings?.length && !processedIncidents.length ? 'warning' : 'complete'
+                    status: incidentsResult.warnings?.length && !processedIncidents.length ? 'warning' : 'complete',
+                    audit: securityCollectionSourceAudit('/v1.0/security/incidents', incidentsResult)
                 },
                 threatIndicators: {
                     recordsFetched: externalThreatIndicators.length,
                     recordsPrepared: processedThreats.length,
                     internalExtracted: internalThreats.length,
-                    status: processedThreats.length ? 'complete' : (threatIndicatorsResult.warnings?.length ? 'warning' : 'complete')
+                    status: processedThreats.length ? 'complete' : (threatIndicatorsResult.warnings?.length ? 'warning' : 'complete'),
+                    audit: securityCollectionSourceAudit('/v1.0/security/tiIndicators', threatIndicatorsResult)
                 },
                 signIns: {
                     recordsFetched: signIns.length,
                     recordsPrepared: suspiciousSignIns.length,
-                    status: signInsResult.warnings?.length && !suspiciousSignIns.length ? 'warning' : 'complete'
+                    status: signInsResult.warnings?.length && !suspiciousSignIns.length ? 'warning' : 'complete',
+                    audit: securityCollectionSourceAudit('/v1.0/auditLogs/signIns', signInsResult)
                 },
                 identityRisk: {
                     riskDetections: {
@@ -15891,6 +15873,81 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         
         res.status(500).json({ 
             error: 'Failed to fetch security events data',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * Route: POST /api/security-events/audit
+ * Performs an explicit, non-notifying source audit for the Sunbird tenant.
+ * This is intentionally separate from normal dashboard refreshes so operators
+ * can inspect Graph response metadata without producing WhatsApp traffic.
+ */
+app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
+    const tenant = getTenantByEmail(req.user?.email);
+    if (!tenant || tenant.clientId !== 'sunbird') {
+        return res.status(403).json({
+            success: false,
+            error: 'Access denied',
+            message: 'This feature is only available for Sunbird client'
+        });
+    }
+
+    const includeHunting = req.body?.includeHunting === true;
+    try {
+        const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
+        const audit = {
+            success: true,
+            tenant: tenant.clientId,
+            auditedAt: new Date().toISOString(),
+            collectionStatus: payload.collectionStatus,
+            warnings: payload.warnings || [],
+            sources: payload.collection?.sources || {},
+            scenarioCoverage: payload.scenarioCoverage || {},
+            hunting: {
+                requested: includeHunting,
+                status: 'not_requested',
+                message: 'Set includeHunting to true for a bounded, allow-listed hunting test.'
+            }
+        };
+
+        if (includeHunting) {
+            try {
+                const token = await getMicrosoftGraphToken({ securityAlerts: true });
+                const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'identityLogons30d' });
+                audit.hunting = {
+                    requested: true,
+                    status: 'complete',
+                    endpoint: '/v1.0/security/runHuntingQuery',
+                    httpStatus: 200,
+                    query: result.query,
+                    schemaColumns: result.schema.map(column => ({ name: column?.name || null, type: column?.type || null })),
+                    recordsFetched: result.recordsFetched,
+                    resultLimit: result.resultLimit,
+                    isResultLimitReached: result.isResultLimitReached,
+                    warnings: result.isResultLimitReached
+                        ? [`The result limit of ${result.resultLimit} rows was reached; additional records may exist.`]
+                        : []
+                };
+            } catch (error) {
+                audit.hunting = {
+                    requested: true,
+                    status: 'unavailable',
+                    endpoint: '/v1.0/security/runHuntingQuery',
+                    httpStatus: Number.isFinite(Number(error.status)) ? Number(error.status) : null,
+                    errorCode: error.code || 'SECURITY_HUNTING_QUERY_FAILED',
+                    errorDetail: String(error.message || error).slice(0, 600)
+                };
+            }
+        }
+
+        return res.json(audit);
+    } catch (error) {
+        console.error('[Security Audit] Source audit failed:', error.message);
+        return res.status(500).json({
+            success: false,
+            error: 'SECURITY_AUDIT_FAILED',
             message: error.message
         });
     }
