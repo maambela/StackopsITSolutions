@@ -119,6 +119,12 @@ Stack CTRL now extracts only explicit, typed entity fields from a Graph alert an
 
 The 18:13 UTC validation still returned no extractable entity for all eight anonymous-IP alerts. The audit now includes `sources.alerts.entityDiagnostics`: a value-free list of the Graph alert top-level field names, evidence types, nested evidence field names, and extraction counts. This is the next production check. It distinguishes a provider response that omits evidence from one where Sunbird's alerts use a different explicit field name, without exposing the alert's IPs or user data in the diagnostic.
 
+## Legacy alert endpoint migration — required
+
+The 19:06 UTC diagnostic confirmed that Sunbird's collector was using the legacy `GET /v1.0/security/alerts` schema: it returned `userStates`, `hostStates`, and `networkConnections`, with no typed `evidence` collection. This is not the current alert model and cannot provide the evidence-backed entity correlation required by Stack CTRL.
+
+Stack CTRL now uses `GET /v1.0/security/alerts_v2` and `GET /v1.0/security/alerts_v2/{id}`. The Entra consent already shown for `SecurityAlert.Read.All` is the required application permission. The new endpoint returns strongly typed evidence (including IP and user evidence) and is the Microsoft-recommended replacement. A fresh audit must confirm its response before it is used for a notification decision. The legacy endpoint is deprecated and Microsoft documents its retirement date as 15 October 2026.
+
 ## Risky-user scenario fallback
 
 The tenant returns `riskDetections` even though the licensed `riskyUsers` feed returns `403`. Stack CTRL therefore evaluates the available Microsoft identity-risk detections against successful sign-ins when, and only when, the risky-user feed is unavailable. Any resulting finding is explicitly labelled as an **identity-risk detection** correlation, retains Microsoft's risk values as source evidence, and does not claim the user is currently a risky user or that an account is compromised. This lets Scenario C progress while the licensing decision remains open.

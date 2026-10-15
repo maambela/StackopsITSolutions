@@ -14000,7 +14000,9 @@ async function fetchCompliancePolicies(token) {
  * Fetch security alerts
  */
 async function fetchSecurityAlerts(token) {
-    const url = 'https://graph.microsoft.com/v1.0/security/alerts?$top=50';
+    // `/security/alerts` is the retired legacy schema. alerts_v2 returns typed
+    // evidence and is required for reliable entity correlation.
+    const url = 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=50';
     
     try {
         const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph security alerts');
@@ -14297,7 +14299,8 @@ async function fetchGraphJsonWithTimeout({
 
 async function fetchSecurityAlertRows(token) {
     const result = await fetchGraphJsonWithTimeout({
-        url: 'https://graph.microsoft.com/v1.0/security/alerts?$top=50&$orderby=createdDateTime desc',
+        // alerts_v2 supports $top but not $orderby; Graph supplies the page order.
+        url: 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=50',
         token,
         timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
         stage: 'microsoft_graph_alerts_fetch',
@@ -15662,7 +15665,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
                     status: alertsResult.warnings?.length && !processedAlerts.length ? 'warning' : 'complete',
-                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult),
+                    audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', alertsResult),
                     entityDiagnostics: anonymousAlertEntityDiagnostics
                 },
                 incidents: {
@@ -15854,7 +15857,7 @@ app.post('/api/webhooks/microsoft-security-alerts', async (req, res) => {
                 try {
                     const token = await getMicrosoftGraphToken({ securityAlerts: true });
                     const graphAlert = await fetchMicrosoftGraphJson(
-                        `https://graph.microsoft.com/v1.0/security/alerts/${encodeURIComponent(id)}`,
+                        `https://graph.microsoft.com/v1.0/security/alerts_v2/${encodeURIComponent(id)}`,
                         token,
                         `Microsoft Graph webhook alert ${id}`,
                         { shared: false, retries: 1 }
