@@ -5,6 +5,24 @@ const { buildSecurityFindings, getSignInOutcome } = require('../services/intelli
 const { buildSecurityDashboardPayload } = require('../services/intelligence/security-dashboard-processor');
 const { deriveSecurityEvidence } = require('../services/intelligence/security-evidence-store');
 const buildSecurityAlertsDashboardContext = require('../services/intelligence/dashboard-context/securityAlertsDashboardContext');
+const { extractMicrosoftAlertEntities } = require('../services/intelligence/microsoft-alert-entities');
+
+test('Microsoft alert evidence exposes explicit nested IP and user entities without parsing alert text', () => {
+    const entities = extractMicrosoftAlertEntities({
+        title: 'Anonymous IP address detected',
+        description: 'A string that looks like 203.0.113.200 must not become evidence.',
+        evidence: [{
+            '@odata.type': '#microsoft.graph.security.ipEvidence',
+            ipAddress: '203.0.113.8'
+        }, {
+            '@odata.type': '#microsoft.graph.security.userEvidence',
+            userPrincipalName: 'person@example.com'
+        }]
+    });
+
+    assert.deepEqual(entities.ipAddresses, ['203.0.113.8']);
+    assert.equal(entities.userPrincipalName, 'person@example.com');
+});
 
 test('anonymous IP alert correlates exact IP sign-ins without asserting compromise', () => {
     const result = buildSecurityFindings({
@@ -24,6 +42,22 @@ test('anonymous IP alert correlates exact IP sign-ins without asserting compromi
     assert.deepEqual(finding.candidateUsers, ['user@example.com']);
     assert.equal(finding.evidence.filter(item => item.sourceType === 'sign_in').length, 1);
     assert.match(finding.description, /IP equality alone does not prove/);
+});
+
+test('anonymous IP finding correlates against all explicit IP evidence on an alert', () => {
+    const result = buildSecurityFindings({
+        alerts: [{
+            id: 'alert-1',
+            title: 'Anonymous IP sign-in detected',
+            ipAddresses: ['198.51.100.1', '203.0.113.8']
+        }],
+        signIns: [{ id: 'signin-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' }]
+    });
+
+    const [finding] = result.findings;
+    assert.equal(finding.status, 'related_evidence');
+    assert.deepEqual(finding.affectedEntities.ipAddresses, ['198.51.100.1', '203.0.113.8']);
+    assert.deepEqual(finding.candidateUsers, ['user@example.com']);
 });
 
 test('anonymous IP indicator remains an observation when no sign-in evidence matches', () => {
@@ -57,6 +91,28 @@ test('risky user and successful sign-in correlate by stable user ID, while risk 
     assert.equal(finding.evidence.filter(item => item.sourceType === 'sign_in').length, 1);
     assert.equal(finding.evidence.filter(item => item.sourceType === 'risk_detection').length, 1);
     assert.match(finding.description, /not proof/);
+});
+
+test('available identity-risk detections can be correlated when the licensed risky-user feed is unavailable', () => {
+    const result = buildSecurityFindings({
+        riskDetections: [{
+            id: 'risk-1',
+            userId: 'user-1',
+            userPrincipalName: 'person@example.com',
+            riskEventType: 'anonymousIpAddress',
+            riskLevel: 'high'
+        }],
+        signIns: [{ id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success' }],
+        sourceStatuses: { riskyUsers: 'unavailable', riskDetections: 'complete', signIns: 'partial' }
+    });
+
+    const [finding] = result.findings;
+    assert.equal(finding.detectionId, 'identity_risk_detection_successful_sign_in');
+    assert.equal(finding.status, 'correlated');
+    assert.equal(finding.sourceRiskLevel, 'high');
+    assert.match(finding.assessmentBasis, /risky-user feed is unavailable/);
+    assert.equal(result.scenarioCoverage.riskyUserSuccessfulSignIn.status, 'partial');
+    assert.match(result.scenarioCoverage.riskyUserSuccessfulSignIn.reason, /identity-risk detections/);
 });
 
 test('sign-in outcome stays unknown when Graph omits status and impossible travel is explicitly unassessed', () => {

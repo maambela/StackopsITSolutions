@@ -25,6 +25,14 @@ function getIp(record = {}) {
     return ['unknown', 'n/a', 'none', ''].includes(value) ? '' : value;
 }
 
+function getIps(record = {}) {
+    const supplied = Array.isArray(record.ipAddresses) ? record.ipAddresses : [];
+    return [...new Set([
+        ...supplied.map(value => normalizeIdentity(value)),
+        getIp(record)
+    ].filter(value => value && !['unknown', 'n/a', 'none'].includes(value)))];
+}
+
 function getSignInOutcome(signIn = {}) {
     const outcome = normalizeIdentity(signIn.outcome || signIn.status);
     if (outcome === 'success' || outcome === 'succeeded') return 'success';
@@ -98,14 +106,15 @@ function buildAnonymousIpFindings(alerts, signIns) {
         const description = [alert.title, alert.description, alert.category, alert.apiCategory].map(text).join(' ');
         return ANONYMOUS_IP_PATTERN.test(description);
     }).map(alert => {
-        const ipAddress = getIp(alert);
+        const ipAddresses = getIps(alert);
+        const ipAddress = ipAddresses[0] || '';
         const sourceSystem = text(alert.reportingSecuritySystem || alert.source || alert.vendor) || 'Security provider';
-        const relatedSignIns = ipAddress
-            ? signIns.filter(signIn => getIp(signIn) === ipAddress)
+        const relatedSignIns = ipAddresses.length
+            ? signIns.filter(signIn => ipAddresses.includes(getIp(signIn)))
             : [];
         const alertSummary = [
             text(alert.title) || `${sourceSystem} reported an anonymous-IP indicator`,
-            ipAddress ? `IP ${ipAddress}` : ''
+            ipAddresses.length ? `IP ${ipAddresses.join(', ')}` : ''
         ].filter(Boolean).join(' — ');
         const evidence = [
             evidenceReference('security_alert', alert, alertSummary),
@@ -154,7 +163,7 @@ function buildAnonymousIpFindings(alerts, signIns) {
             affectedEntities: {
                 users: [],
                 devices: [],
-                ipAddresses: ipAddress ? [ipAddress] : []
+                ipAddresses
             },
             candidateUsers,
             evidence,
@@ -230,6 +239,58 @@ function buildRiskyUserFindings(riskyUsers, riskDetections, signIns) {
     });
 }
 
+function buildRiskDetectionSignInFindings(riskDetections, signIns) {
+    return riskDetections.filter(riskDetection => getUserKeys(riskDetection).size > 0).map(riskDetection => {
+        const userKeys = getUserKeys(riskDetection);
+        const relatedSignIns = signIns.filter(signIn =>
+            [...getUserKeys(signIn)].some(key => userKeys.has(key))
+        );
+        const successfulSignIns = relatedSignIns.filter(signIn => getSignInOutcome(signIn) === 'success');
+        const userLabel = text(riskDetection.userPrincipalName || riskDetection.userId) || 'an identified user';
+        const detectionLabel = text(riskDetection.riskEventType) || 'identity-risk event';
+        const evidence = [
+            evidenceReference(
+                'risk_detection',
+                riskDetection,
+                `${detectionLabel} — risk ${text(riskDetection.riskLevel) || 'unspecified'} — ${userLabel}`
+            ),
+            ...relatedSignIns.map(signIn => evidenceReference(
+                'sign_in',
+                signIn,
+                `${getSignInOutcome(signIn)} sign-in — ${text(signIn.ipAddress) || 'IP unavailable'} — ${signIn.eventTime || signIn.timestamp || ''}`
+            ))
+        ];
+
+        return {
+            id: createFindingId('identity_risk_detection_successful_sign_in', riskDetection.id || `${userLabel}|${detectionLabel}`),
+            detectionId: 'identity_risk_detection_successful_sign_in',
+            title: successfulSignIns.length
+                ? `Successful sign-in observed for user with Microsoft identity-risk detection`
+                : `Microsoft identity-risk detection requires sign-in review`,
+            description: successfulSignIns.length
+                ? `Microsoft recorded ${detectionLabel} for ${userLabel}, and ${successfulSignIns.length} successful sign-in record(s) matched by user ID or principal name in the collected period. This is an investigation lead, not proof that the account or session was compromised.`
+                : `Microsoft recorded ${detectionLabel} for ${userLabel}, but no matching successful sign-in was found in the collected records. ${relatedSignIns.length} matching sign-in record(s) were returned with another or unknown outcome.`,
+            impact: successfulSignIns.length
+                ? 'A successful authentication was recorded for an identity with a Microsoft identity-risk detection.'
+                : 'An identity-risk detection was returned, but current evidence does not establish a matching successful sign-in.',
+            severity: 'unassessed',
+            sourceRiskLevel: text(riskDetection.riskLevel) || null,
+            sourceRiskState: text(riskDetection.riskState) || null,
+            confidence: successfulSignIns.length ? 'high' : 'low',
+            confidenceReason: successfulSignIns.length
+                ? 'The identity-risk detection and sign-in matched by stable user ID or case-insensitive principal name; compromise is not established.'
+                : 'The identity-risk detection is available, but no matching successful sign-in was returned.',
+            status: successfulSignIns.length ? 'correlated' : 'needs_investigation',
+            affectedEntities: { users: [userLabel], devices: [], ipAddresses: [] },
+            evidence,
+            recommendedAction: successfulSignIns.length
+                ? 'Review sign-in context, device and session evidence, then check Microsoft identity-risk remediation state.'
+                : 'Review the identity-risk detection and its linked sign-in context; do not infer account compromise without corroborating evidence.',
+            assessmentBasis: 'This finding uses a Microsoft identity-risk detection because the risky-user feed is unavailable. Microsoft source values and Stack CTRL assessment remain separate.'
+        };
+    });
+}
+
 function buildSecurityFindings({
     alerts = [],
     signIns = [],
@@ -237,12 +298,17 @@ function buildSecurityFindings({
     riskDetections = [],
     sourceStatuses = {}
 } = {}) {
+    const useRiskDetectionFallback = !riskyUsers.length && sourceStatuses.riskyUsers === 'unavailable';
     const findings = [
         ...buildAnonymousIpFindings(alerts, signIns),
-        ...buildRiskyUserFindings(riskyUsers, riskDetections, signIns)
+        ...buildRiskyUserFindings(riskyUsers, riskDetections, signIns),
+        ...(useRiskDetectionFallback ? buildRiskDetectionSignInFindings(riskDetections, signIns) : [])
     ].sort((left, right) => left.title.localeCompare(right.title));
     const anonymousSources = [sourceStatuses.alerts, sourceStatuses.signIns].filter(Boolean);
-    const identitySources = [sourceStatuses.riskyUsers, sourceStatuses.signIns].filter(Boolean);
+    const identitySources = (useRiskDetectionFallback
+        ? [sourceStatuses.riskDetections, sourceStatuses.signIns]
+        : [sourceStatuses.riskyUsers, sourceStatuses.signIns]
+    ).filter(Boolean);
     const coverageStatus = sources => {
         if (!sources.length) return 'not_assessed';
         if (sources.some(status => status === 'unavailable')) return 'unavailable';
@@ -273,8 +339,12 @@ function buildSecurityFindings({
                 reason: riskyUserStatus === 'unavailable'
                     ? 'Risky-user or sign-in records were unavailable, so this scenario could not be fully evaluated.'
                     : riskyUserStatus === 'partial'
-                        ? 'One or more source queries were incomplete; correlations use only the records returned.'
-                        : null
+                        ? useRiskDetectionFallback
+                            ? 'Risky users are unavailable, so Stack CTRL used returned Microsoft identity-risk detections; one or more source queries were incomplete and correlations use only returned records.'
+                            : 'One or more source queries were incomplete; correlations use only the records returned.'
+                        : useRiskDetectionFallback
+                            ? 'Risky users are unavailable, so Stack CTRL evaluated returned Microsoft identity-risk detections instead.'
+                            : null
             }
         }
     };

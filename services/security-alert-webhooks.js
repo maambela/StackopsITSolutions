@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { extractMicrosoftAlertEntities } = require('./intelligence/microsoft-alert-entities');
 
 function normalizeWebhookSeverity(value) {
   const text = String(value || '').toLowerCase();
@@ -71,6 +72,7 @@ function getMicrosoftGraphSecurityNotificationIds(body = {}) {
 }
 
 function normalizeMicrosoftGraphWebhookAlert(alert = {}) {
+  const entities = extractMicrosoftAlertEntities(alert);
   return {
     id: alert.id,
     title: shortText(alert.title || alert.alertName || alert.displayName, 'Microsoft Graph security alert'),
@@ -83,9 +85,10 @@ function normalizeMicrosoftGraphWebhookAlert(alert = {}) {
     source: 'Microsoft Graph',
     reportingSecuritySystem: 'Microsoft Graph',
     vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
-    user: (alert.userStates || [])[0]?.accountName || alert.userPrincipalName || alert.assignedTo || null,
-    ipAddress: alert.ipAddress || alert.clientIpAddress || alert.sourceIpAddress || null,
-    deviceName: alert.deviceName || alert.hostName || alert.hostname || null
+    user: (alert.userStates || [])[0]?.accountName || alert.userPrincipalName || entities.userPrincipalName || alert.assignedTo || null,
+    ipAddress: entities.ipAddress,
+    ipAddresses: entities.ipAddresses,
+    deviceName: alert.deviceName || alert.hostName || alert.hostname || entities.deviceName || null
   };
 }
 

@@ -66,6 +66,7 @@ const { buildSecurityFindings } = require('./services/intelligence/security-find
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
+const { extractMicrosoftAlertEntities } = require('./services/intelligence/microsoft-alert-entities');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
 const { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');
@@ -14642,7 +14643,25 @@ function buildSecurityScenarioAuditSummary(findings = []) {
 
     return {
         anonymousIpAuthentication: summarize('anonymous_ip_authentication'),
-        riskyUserSuccessfulSignIn: summarize('risky_user_successful_sign_in')
+        riskyUserSuccessfulSignIn: {
+            ...(() => {
+                const direct = summarize('risky_user_successful_sign_in');
+                const fallback = summarize('identity_risk_detection_successful_sign_in');
+                const findings = [...direct.findings, ...fallback.findings];
+                return {
+                    findingCount: findings.length,
+                    statusCounts: findings.reduce((counts, item) => {
+                        const key = String(item.status || 'unknown');
+                        counts[key] = (counts[key] || 0) + 1;
+                        return counts;
+                    }, {}),
+                    correlatedFindingCount: findings.filter(item => ['related_evidence', 'correlated'].includes(item.status)).length,
+                    observationOnlyFindingCount: findings.filter(item => item.status === 'needs_investigation').length,
+                    findings
+                };
+            })(),
+            source: 'Microsoft risky-user feed or, when that licensed feature is unavailable, Microsoft identity-risk detections'
+        }
     };
 }
 
@@ -15205,28 +15224,35 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     console.log(`[security_alerts:evidence_prepare:start] Preparing evidence: ${alerts.length} Graph alerts, ${cloudflareAlerts.length} Cloudflare alerts, ${incidents.length} incidents, ${externalThreatIndicators.length} external threats, ${signIns.length} sign-ins`);
 
-    const processedAlerts = alerts.map(alert => ({
-        id: alert.id,
-        title: alert.title || alert.alertName || alert.displayName || 'Unknown Alert',
-        description: alert.description || '',
-        severity: normalizeSecuritySeverity(alert.severity),
-        sourceSeverity: alert.severity || null,
-        status: normalizeSecurityStatus(alert.status),
-        created: alert.createdDateTime || new Date().toISOString(),
-        eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
-        category: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
-        apiCategory: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
-        apiSource: alert.serviceSource || alert.productName || alert.vendorInformation?.provider || null,
-        vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
-        reportingSecuritySystem: getSecurityReportingSystem(alert),
-        source: getSecurityReportingSystem(alert),
-        user: (alert.userStates || [])[0]?.accountName ||
-            alert.userPrincipalName ||
-            alert.assignedTo ||
-            'Unknown user',
-        ipAddress: alert.ipAddress || alert.clientIpAddress || alert.sourceIpAddress || null,
-        deviceName: alert.deviceName || alert.hostName || alert.hostname || null
-    }));
+    const processedAlerts = alerts.map(alert => {
+        const entities = extractMicrosoftAlertEntities(alert);
+        return {
+            id: alert.id,
+            title: alert.title || alert.alertName || alert.displayName || 'Unknown Alert',
+            description: alert.description || '',
+            severity: normalizeSecuritySeverity(alert.severity),
+            sourceSeverity: alert.severity || null,
+            status: normalizeSecurityStatus(alert.status),
+            created: alert.createdDateTime || new Date().toISOString(),
+            eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
+            category: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
+            apiCategory: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
+            apiSource: alert.serviceSource || alert.productName || alert.vendorInformation?.provider || null,
+            vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
+            reportingSecuritySystem: getSecurityReportingSystem(alert),
+            source: getSecurityReportingSystem(alert),
+            user: (alert.userStates || [])[0]?.accountName ||
+                alert.userPrincipalName ||
+                entities.userPrincipalName ||
+                alert.assignedTo ||
+                'Unknown user',
+            userPrincipalName: alert.userPrincipalName || entities.userPrincipalName || null,
+            ipAddress: entities.ipAddress,
+            ipAddresses: entities.ipAddresses,
+            deviceName: alert.deviceName || alert.hostName || alert.hostname || entities.deviceName || null,
+            deviceNames: entities.devices
+        };
+    });
 
     processedAlerts.push(...cloudflareAlerts);
 
@@ -15331,7 +15357,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             signIns: !signInsResult.ok
                 ? (signIns.length ? 'partial' : 'unavailable')
                 : signInsResult.warnings?.length ? 'partial' : 'complete',
-            riskyUsers: identityRiskResult.sources?.riskyUsers?.status || 'unavailable'
+            riskyUsers: identityRiskResult.sources?.riskyUsers?.status || 'unavailable',
+            riskDetections: identityRiskResult.sources?.riskDetections?.status || 'unavailable'
         }
     });
 

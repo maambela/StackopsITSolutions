@@ -110,3 +110,13 @@ The follow-up audit completed the intended bounded sign-in collection successful
 The audit response now also includes `scenarioFindings`. Its `anonymousIpAuthentication` section lists every anonymous-IP finding, its cited sign-in count, any returned sign-in outcomes, candidate users, evidence count, status, confidence, and recommended action. This is the validation output for Scenario A: it distinguishes a genuine, cited correlation from an alert that remains an observation only.
 
 Use the authenticated, non-notifying audit endpoint after deploying this change. Preserve the `scenarioCoverage`, `scenarioFindings`, and `warnings` fields from that one run as the Scenario A evidence record. Avoid repeatedly running the audit during validation, because it intentionally reads a sizeable Graph sign-in window.
+
+## Scenario A validation finding — 15 October 2026, 17:39 UTC
+
+The audit confirmed that the source collection works, but it did **not** validate an anonymous-IP/authentication correlation yet. All eight anonymous-IP findings had an empty `affectedEntities.ipAddresses` value, zero cited sign-ins, and zero candidate users. This is a Stack CTRL normalisation gap: the alert collector previously read only top-level IP fields, while Microsoft Graph security alerts can provide IP, user, and device details in nested `evidence` objects.
+
+Stack CTRL now extracts only explicit, typed entity fields from a Graph alert and its nested evidence. It validates IP values, preserves multiple IPs on one alert, and never turns an IP-looking value in an alert description into evidence. The same normalisation is applied to Microsoft Graph webhook alerts. After deployment, re-run the audit once and use `scenarioFindings.anonymousIpAuthentication` to establish whether any returned alert evidence matches the collected sign-ins. If no explicit IP is present after this change, the correct result remains an observation-only finding; Stack CTRL must not manufacture an account or correlation.
+
+## Risky-user scenario fallback
+
+The tenant returns `riskDetections` even though the licensed `riskyUsers` feed returns `403`. Stack CTRL therefore evaluates the available Microsoft identity-risk detections against successful sign-ins when, and only when, the risky-user feed is unavailable. Any resulting finding is explicitly labelled as an **identity-risk detection** correlation, retains Microsoft's risk values as source evidence, and does not claim the user is currently a risky user or that an account is compromised. This lets Scenario C progress while the licensing decision remains open.
