@@ -5,7 +5,7 @@ const { buildSecurityFindings, getSignInOutcome } = require('../services/intelli
 const { buildSecurityDashboardPayload } = require('../services/intelligence/security-dashboard-processor');
 const { deriveSecurityEvidence } = require('../services/intelligence/security-evidence-store');
 const buildSecurityAlertsDashboardContext = require('../services/intelligence/dashboard-context/securityAlertsDashboardContext');
-const { extractMicrosoftAlertEntities } = require('../services/intelligence/microsoft-alert-entities');
+const { extractMicrosoftAlertEntities, describeMicrosoftAlertEntityShape } = require('../services/intelligence/microsoft-alert-entities');
 
 test('Microsoft alert evidence exposes explicit nested IP and user entities without parsing alert text', () => {
     const entities = extractMicrosoftAlertEntities({
@@ -22,6 +22,14 @@ test('Microsoft alert evidence exposes explicit nested IP and user entities with
 
     assert.deepEqual(entities.ipAddresses, ['203.0.113.8']);
     assert.equal(entities.userPrincipalName, 'person@example.com');
+
+    const diagnostic = describeMicrosoftAlertEntityShape({
+        id: 'alert-1',
+        evidence: [{ '@odata.type': '#microsoft.graph.security.ipEvidence', ipAddress: '203.0.113.8' }]
+    });
+    assert.equal(diagnostic.extractedEntityCounts.ipAddresses, 1);
+    assert.deepEqual(diagnostic.evidence[0].fields, ['@odata.type', 'ipAddress']);
+    assert.doesNotMatch(JSON.stringify(diagnostic), /203\.0\.113\.8/);
 });
 
 test('anonymous IP alert correlates exact IP sign-ins without asserting compromise', () => {

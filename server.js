@@ -66,7 +66,7 @@ const { buildSecurityFindings } = require('./services/intelligence/security-find
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
-const { extractMicrosoftAlertEntities } = require('./services/intelligence/microsoft-alert-entities');
+const { extractMicrosoftAlertEntities, describeMicrosoftAlertEntityShape } = require('./services/intelligence/microsoft-alert-entities');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
 const { createGovernanceEvidenceAutomation } = require('./services/intelligence/governance-evidence-automation');
@@ -15254,6 +15254,15 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         };
     });
 
+    const anonymousAlertEntityDiagnostics = alerts
+        .filter(alert => /\b(?:anonymous\s+(?:ip|proxy)|tor|anonymi[sz]er)\b/i.test([
+            alert?.title,
+            alert?.description,
+            alert?.category,
+            ...(Array.isArray(alert?.categories) ? alert.categories : [])
+        ].filter(Boolean).join(' ')))
+        .map(describeMicrosoftAlertEntityShape);
+
     processedAlerts.push(...cloudflareAlerts);
 
     const processedIncidents = incidents.map(incident => ({
@@ -15653,7 +15662,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
                     status: alertsResult.warnings?.length && !processedAlerts.length ? 'warning' : 'complete',
-                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult)
+                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult),
+                    entityDiagnostics: anonymousAlertEntityDiagnostics
                 },
                 incidents: {
                     recordsFetched: incidents.length,
