@@ -14600,6 +14600,52 @@ function securityCollectionSourceAudit(endpoint, result = {}) {
     };
 }
 
+function buildSecurityScenarioAuditSummary(findings = []) {
+    const allFindings = Array.isArray(findings) ? findings : [];
+    const summarize = detectionId => {
+        const rows = allFindings.filter(item => item?.detectionId === detectionId);
+        const statusCounts = rows.reduce((counts, item) => {
+            const key = String(item.status || 'unknown');
+            counts[key] = (counts[key] || 0) + 1;
+            return counts;
+        }, {});
+
+        return {
+            findingCount: rows.length,
+            statusCounts,
+            correlatedFindingCount: rows.filter(item => ['related_evidence', 'correlated'].includes(item.status)).length,
+            observationOnlyFindingCount: rows.filter(item => item.status === 'needs_investigation').length,
+            findings: rows.map(item => {
+                const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+                const signInEvidence = evidence.filter(row => row.sourceType === 'sign_in');
+                const outcomes = signInEvidence.reduce((counts, row) => {
+                    const key = String(row?.details?.outcome || 'unknown').toLowerCase();
+                    counts[key] = (counts[key] || 0) + 1;
+                    return counts;
+                }, {});
+                return {
+                    findingId: item.id,
+                    title: item.title,
+                    status: item.status,
+                    confidence: item.confidence,
+                    sourceSeverity: item.sourceSeverity || item.sourceRiskLevel || null,
+                    affectedEntities: item.affectedEntities || {},
+                    candidateUsers: item.candidateUsers || [],
+                    citedEvidenceCount: evidence.length,
+                    citedSignInCount: signInEvidence.length,
+                    signInOutcomes: outcomes,
+                    recommendedAction: item.recommendedAction || null
+                };
+            })
+        };
+    };
+
+    return {
+        anonymousIpAuthentication: summarize('anonymous_ip_authentication'),
+        riskyUserSuccessfulSignIn: summarize('risky_user_successful_sign_in')
+    };
+}
+
 async function readWhatsAppConfigValue(name, fallback = null) {
     if (process.env[name]) return process.env[name];
     return await getSecret(name) || fallback;
@@ -15935,6 +15981,7 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
             warnings: payload.warnings || [],
             sources: payload.collection?.sources || {},
             scenarioCoverage: payload.scenarioCoverage || {},
+            scenarioFindings: buildSecurityScenarioAuditSummary(payload.findings),
             hunting: {
                 requested: includeHunting,
                 status: 'not_requested',

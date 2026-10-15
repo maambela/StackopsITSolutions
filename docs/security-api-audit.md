@@ -92,3 +92,21 @@ For a `429`, Stack CTRL retries a bounded number of times, honours Graph's `Retr
 Following the 15 October audit, Stack CTRL's sign-in collector was changed to request up to 1,000 records per Graph page, pace any follow-up page requests, and collect at most three pages by default. This reduces the request burst that caused the page-five `429` while retaining a bounded collection window.
 
 If Microsoft throttles after one or more pages have returned, Stack CTRL keeps the returned records and marks the source and anonymous-IP scenario **partial**. It must not label that scenario unavailable or claim that no matching sign-in exists. `SECURITY_SIGNINS_MAX_PAGES` and `SECURITY_SIGNINS_PAGE_DELAY_MS` are bounded server-side configuration values for later tuning from production audit results.
+
+## Latest production validation — 15 October 2026, 17:16 UTC
+
+The follow-up audit completed the intended bounded sign-in collection successfully:
+
+| Source / endpoint | Result | Interpretation |
+| --- | --- | --- |
+| `/v1.0/auditLogs/signIns` | `200`, 3,000 records across three pages, three attempts; Graph supplied an additional page | The `429` was not reproduced. Collection is deliberately **partial**, not failed: Stack CTRL stopped at its three-page safety limit and retained the returned evidence. |
+| `/v1.0/security/alerts` | `200`, 15 records | Working provider-alert input. |
+| `/v1.0/security/incidents` | `200`, zero records | Valid empty response for this collection. |
+| `/v1.0/identityProtection/riskDetections` | 14 records | Available as cited identity-risk evidence. |
+| `/v1.0/identityProtection/riskyUsers` | `403`, tenant not licensed | Still unavailable by tenant feature/licensing design. |
+| `/v1.0/security/tiIndicators` | `400`, resource segment not found | Still unavailable as an external indicator source. |
+| `/v1.0/security/runHuntingQuery` | `200`, expected schema, zero rows | Endpoint and permission work; there are no matching `IdentityLogonEvents` rows in the selected 30-day window. |
+
+The audit response now also includes `scenarioFindings`. Its `anonymousIpAuthentication` section lists every anonymous-IP finding, its cited sign-in count, any returned sign-in outcomes, candidate users, evidence count, status, confidence, and recommended action. This is the validation output for Scenario A: it distinguishes a genuine, cited correlation from an alert that remains an observation only.
+
+Use the authenticated, non-notifying audit endpoint after deploying this change. Preserve the `scenarioCoverage`, `scenarioFindings`, and `warnings` fields from that one run as the Scenario A evidence record. Avoid repeatedly running the audit during validation, because it intentionally reads a sizeable Graph sign-in window.
