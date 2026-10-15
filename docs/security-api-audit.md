@@ -125,6 +125,12 @@ The 19:06 UTC diagnostic confirmed that Sunbird's collector was using the legacy
 
 Stack CTRL now uses `GET /v1.0/security/alerts_v2` and `GET /v1.0/security/alerts_v2/{id}`. The Entra consent already shown for `SecurityAlert.Read.All` is the required application permission. The new endpoint returns strongly typed evidence (including IP and user evidence) and is the Microsoft-recommended replacement. A fresh audit must confirm its response before it is used for a notification decision. The legacy endpoint is deprecated and Microsoft documents its retirement date as 15 October 2026.
 
+## alerts_v2 validation — 15 October 2026, 19:32 UTC
+
+`/v1.0/security/alerts_v2` returned `200` with zero records. This proves that the application permission and endpoint access work, but it does not supply the 15 legacy alerts previously returned by `/security/alerts`. Stack CTRL now performs a temporary compatibility read of the legacy endpoint only when `alerts_v2` is empty. Such legacy alerts remain visible for investigation but are marked observation-only and cannot be correlated or sent to WhatsApp.
+
+The same audit also exposed that user-only identity-risk correlation over the entire collected sign-in period was too broad. Stack CTRL now groups identity-risk detections by user and correlates only successful sign-ins for that user within 24 hours of a dated detection. These findings use medium confidence at most, retain Microsoft source values separately, and remain partial while the sign-in collection is bounded to three pages.
+
 ## Risky-user scenario fallback
 
 The tenant returns `riskDetections` even though the licensed `riskyUsers` feed returns `403`. Stack CTRL therefore evaluates the available Microsoft identity-risk detections against successful sign-ins when, and only when, the risky-user feed is unavailable. Any resulting finding is explicitly labelled as an **identity-risk detection** correlation, retains Microsoft's risk values as source evidence, and does not claim the user is currently a risky user or that an account is compromised. This lets Scenario C progress while the licensing decision remains open.

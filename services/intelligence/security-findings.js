@@ -109,7 +109,8 @@ function buildAnonymousIpFindings(alerts, signIns) {
         const ipAddresses = getIps(alert);
         const ipAddress = ipAddresses[0] || '';
         const sourceSystem = text(alert.reportingSecuritySystem || alert.source || alert.vendor) || 'Security provider';
-        const relatedSignIns = ipAddresses.length
+        const compatibilityOnly = alert.sourceSchema === 'legacy_alerts_compatibility';
+        const relatedSignIns = !compatibilityOnly && ipAddresses.length
             ? signIns.filter(signIn => ipAddresses.includes(getIp(signIn)))
             : [];
         const alertSummary = [
@@ -147,16 +148,22 @@ function buildAnonymousIpFindings(alerts, signIns) {
             ),
             detectionId: 'anonymous_ip_authentication',
             title,
-            description: relatedSignIns.length
+            description: compatibilityOnly
+                ? `${sourceSystem} reported an anonymous-IP indicator through the legacy Graph alerts compatibility source. It remains visible for investigation, but is not used for Stack CTRL correlation or notification because typed alert evidence is unavailable.`
+                : relatedSignIns.length
                 ? `${sourceSystem} reported an anonymous-IP indicator. ${relatedSignIns.length} possible sign-in record(s) from the same IP were found in the collected period, including ${successfulSignIns.length} successful authentication(s).${userSummary} IP equality alone does not prove the records are the same activity or establish account compromise.`
                 : `${sourceSystem} reported an anonymous-IP indicator, but no matching sign-in record was available in the collected evidence. This indicator alone does not establish account compromise.`,
-            impact: relatedSignIns.length
+            impact: compatibilityOnly
+                ? 'The provider observation remains available for analyst review, but its legacy data shape cannot establish the affected account or authentication activity.'
+                : relatedSignIns.length
                 ? `A sign-in was recorded from an IP ${sourceSystem} associated with anonymous infrastructure; review the account and authentication context.`
                 : 'The IP indicator warrants review, but current evidence does not establish an authentication attempt or affected account.',
             severity: 'unassessed',
             sourceSeverity: text(alert.sourceSeverity || alert.severity) || null,
             confidence: relatedSignIns.length ? 'medium' : 'low',
-            confidenceReason: relatedSignIns.length
+            confidenceReason: compatibilityOnly
+                ? 'The alert came from the temporary legacy compatibility source without typed evidence.'
+                : relatedSignIns.length
                 ? 'The evidence shares an exact IP address; time-window and account attribution are not established.'
                 : 'Only the Microsoft-reported indicator is available; no matching sign-in was found.',
             status: relatedSignIns.length ? 'related_evidence' : 'needs_investigation',
@@ -167,10 +174,14 @@ function buildAnonymousIpFindings(alerts, signIns) {
             },
             candidateUsers,
             evidence,
-            recommendedAction: relatedSignIns.length
+            recommendedAction: compatibilityOnly
+                ? 'Review in Microsoft Defender and complete migration of this provider alert to alerts_v2; do not notify from this legacy observation.'
+                : relatedSignIns.length
                 ? 'Review the matching sign-in outcomes, user, device and identity-risk state before deciding on containment.'
                 : 'Check Microsoft sign-in and identity-risk records for this IP; do not treat the indicator alone as proof of compromise.',
-            assessmentBasis: 'Stack CTRL links the security alert to collected sign-ins using an exact IP match. Severity remains unassessed pending validated impact criteria.'
+            assessmentBasis: compatibilityOnly
+                ? 'Legacy Graph alert retained temporarily as an observation only; it is excluded from correlation and notification.'
+                : 'Stack CTRL links the security alert to collected sign-ins using an exact IP match. Severity remains unassessed pending validated impact criteria.'
         };
     });
 }
@@ -239,54 +250,83 @@ function buildRiskyUserFindings(riskyUsers, riskDetections, signIns) {
     });
 }
 
+const RISK_DETECTION_SIGNIN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function recordTime(value) {
+    const candidate = value?.activityDateTime || value?.detectedDateTime || value?.eventTime || value?.timestamp || value?.createdDateTime;
+    const parsed = Date.parse(candidate);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildRiskDetectionSignInFindings(riskDetections, signIns) {
-    return riskDetections.filter(riskDetection => getUserKeys(riskDetection).size > 0).map(riskDetection => {
-        const userKeys = getUserKeys(riskDetection);
-        const relatedSignIns = signIns.filter(signIn =>
-            [...getUserKeys(signIn)].some(key => userKeys.has(key))
-        );
+    const byUser = new Map();
+    riskDetections.forEach(riskDetection => {
+        const keys = [...getUserKeys(riskDetection)];
+        if (!keys.length) return;
+        const groupKey = keys.sort()[0];
+        const group = byUser.get(groupKey) || { keys: new Set(keys), detections: [] };
+        keys.forEach(key => group.keys.add(key));
+        group.detections.push(riskDetection);
+        byUser.set(groupKey, group);
+    });
+
+    return [...byUser.values()].map(group => {
+        const userKeys = group.keys;
+        const userLabel = text(group.detections.find(item => item.userPrincipalName)?.userPrincipalName || group.detections[0]?.userId) || 'an identified user';
+        const timedDetections = group.detections.filter(item => recordTime(item) !== null);
+        const relatedSignIns = timedDetections.length
+            ? signIns.filter(signIn => {
+                const signInTime = recordTime(signIn);
+                if (signInTime === null || ![...getUserKeys(signIn)].some(key => userKeys.has(key))) return false;
+                return timedDetections.some(detection => Math.abs(signInTime - recordTime(detection)) <= RISK_DETECTION_SIGNIN_WINDOW_MS);
+            })
+            : [];
         const successfulSignIns = relatedSignIns.filter(signIn => getSignInOutcome(signIn) === 'success');
-        const userLabel = text(riskDetection.userPrincipalName || riskDetection.userId) || 'an identified user';
-        const detectionLabel = text(riskDetection.riskEventType) || 'identity-risk event';
+        const detectionLabels = [...new Set(group.detections.map(item => text(item.riskEventType) || 'identity-risk event'))];
+        const sourceRiskLevels = [...new Set(group.detections.map(item => text(item.riskLevel)).filter(Boolean))];
         const evidence = [
-            evidenceReference(
+            ...group.detections.map(detection => evidenceReference(
                 'risk_detection',
-                riskDetection,
-                `${detectionLabel} — risk ${text(riskDetection.riskLevel) || 'unspecified'} — ${userLabel}`
-            ),
+                detection,
+                `${text(detection.riskEventType) || 'Identity-risk event'} — risk ${text(detection.riskLevel) || 'unspecified'} — ${userLabel}`
+            )),
             ...relatedSignIns.map(signIn => evidenceReference(
                 'sign_in',
                 signIn,
-                `${getSignInOutcome(signIn)} sign-in — ${text(signIn.ipAddress) || 'IP unavailable'} — ${signIn.eventTime || signIn.timestamp || ''}`
+                `${getSignInOutcome(signIn)} sign-in within 24 hours — ${text(signIn.ipAddress) || 'IP unavailable'} — ${signIn.eventTime || signIn.timestamp || ''}`
             ))
         ];
 
         return {
-            id: createFindingId('identity_risk_detection_successful_sign_in', riskDetection.id || `${userLabel}|${detectionLabel}`),
+            id: createFindingId('identity_risk_detection_successful_sign_in', userLabel),
             detectionId: 'identity_risk_detection_successful_sign_in',
             title: successfulSignIns.length
-                ? `Successful sign-in observed for user with Microsoft identity-risk detection`
-                : `Microsoft identity-risk detection requires sign-in review`,
+                ? 'Successful sign-in near Microsoft identity-risk detection'
+                : 'Microsoft identity-risk detection requires sign-in review',
             description: successfulSignIns.length
-                ? `Microsoft recorded ${detectionLabel} for ${userLabel}, and ${successfulSignIns.length} successful sign-in record(s) matched by user ID or principal name in the collected period. This is an investigation lead, not proof that the account or session was compromised.`
-                : `Microsoft recorded ${detectionLabel} for ${userLabel}, but no matching successful sign-in was found in the collected records. ${relatedSignIns.length} matching sign-in record(s) were returned with another or unknown outcome.`,
+                ? `Microsoft recorded ${detectionLabels.join(', ')} for ${userLabel}; ${successfulSignIns.length} successful sign-in record(s) matched the same user within a 24-hour correlation window. This is an investigation lead, not proof that the account or session was compromised.`
+                : timedDetections.length
+                    ? `Microsoft recorded ${detectionLabels.join(', ')} for ${userLabel}, but no matching successful sign-in was found within 24 hours of the detection in the collected records.`
+                    : `Microsoft recorded identity-risk evidence for ${userLabel}, but the detection timestamp was unavailable so Stack CTRL did not correlate sign-ins.`,
             impact: successfulSignIns.length
-                ? 'A successful authentication was recorded for an identity with a Microsoft identity-risk detection.'
-                : 'An identity-risk detection was returned, but current evidence does not establish a matching successful sign-in.',
+                ? 'A successful authentication was recorded near a Microsoft identity-risk detection for the same user.'
+                : 'Identity-risk evidence was returned, but current evidence does not establish a time-bounded successful sign-in correlation.',
             severity: 'unassessed',
-            sourceRiskLevel: text(riskDetection.riskLevel) || null,
-            sourceRiskState: text(riskDetection.riskState) || null,
-            confidence: successfulSignIns.length ? 'high' : 'low',
+            sourceRiskLevel: sourceRiskLevels.join(', ') || null,
+            confidence: successfulSignIns.length ? 'medium' : 'low',
             confidenceReason: successfulSignIns.length
-                ? 'The identity-risk detection and sign-in matched by stable user ID or case-insensitive principal name; compromise is not established.'
-                : 'The identity-risk detection is available, but no matching successful sign-in was returned.',
+                ? 'The identity-risk detection and sign-in matched by stable user identity within a 24-hour time window; compromise is not established.'
+                : timedDetections.length
+                    ? 'No successful sign-in matched the same user inside the 24-hour correlation window.'
+                    : 'The returned identity-risk detection had no usable timestamp for time-bounded correlation.',
             status: successfulSignIns.length ? 'correlated' : 'needs_investigation',
             affectedEntities: { users: [userLabel], devices: [], ipAddresses: [] },
+            candidateUsers: [userLabel],
             evidence,
             recommendedAction: successfulSignIns.length
-                ? 'Review sign-in context, device and session evidence, then check Microsoft identity-risk remediation state.'
+                ? 'Review the time-bounded sign-in context, device and session evidence, then check Microsoft identity-risk remediation state.'
                 : 'Review the identity-risk detection and its linked sign-in context; do not infer account compromise without corroborating evidence.',
-            assessmentBasis: 'This finding uses a Microsoft identity-risk detection because the risky-user feed is unavailable. Microsoft source values and Stack CTRL assessment remain separate.'
+            assessmentBasis: 'This finding groups Microsoft identity-risk detections by user and correlates only sign-ins for the same user within 24 hours. The risky-user feed is unavailable, and source values remain separate from Stack CTRL assessment.'
         };
     });
 }

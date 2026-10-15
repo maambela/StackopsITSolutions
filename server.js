@@ -14298,17 +14298,46 @@ async function fetchGraphJsonWithTimeout({
 }
 
 async function fetchSecurityAlertRows(token) {
-    const result = await fetchGraphJsonWithTimeout({
+    const v2Result = await fetchGraphJsonWithTimeout({
         // alerts_v2 supports $top but not $orderby; Graph supplies the page order.
         url: 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=50',
         token,
         timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
         stage: 'microsoft_graph_alerts_fetch',
-        label: 'Alerts fetch'
+        label: 'Alerts v2 fetch'
     });
 
+    // Some tenants are still transitioning provider alerts to alerts_v2. Keep a
+    // legacy observation-only fallback so the dashboard does not silently lose
+    // those records; never use this fallback as notification-ready evidence.
+    let result = v2Result;
+    let sourceSchema = 'alerts_v2';
+    let legacyFallback = null;
+    if (v2Result.ok && !v2Result.value.length) {
+        const legacyResult = await fetchGraphJsonWithTimeout({
+            url: 'https://graph.microsoft.com/v1.0/security/alerts?$top=50',
+            token,
+            timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
+            stage: 'microsoft_graph_legacy_alerts_fallback_fetch',
+            label: 'Legacy alerts compatibility fetch',
+            optional: true,
+            expectedUnavailableStatuses: [400, 403, 404, 410]
+        });
+        legacyFallback = legacyResult;
+        if (legacyResult.ok && legacyResult.value.length) {
+            result = {
+                ...legacyResult,
+                warnings: [
+                    ...(legacyResult.warnings || []),
+                    'alerts_v2 returned no records; legacy alerts are displayed as observation-only compatibility data and are not notification eligible.'
+                ]
+            };
+            sourceSchema = 'legacy_alerts_compatibility';
+        }
+    }
+
     return {
-        alerts: result.value,
+        alerts: (result.value || []).map(alert => ({ ...alert, stackctrlAlertSchema: sourceSchema })),
         warnings: result.warnings,
         recordsFetched: result.recordsFetched,
         ok: result.ok,
@@ -14322,7 +14351,12 @@ async function fetchSecurityAlertRows(token) {
         pageLimitReached: Boolean(result.pageLimitReached),
         hasMore: Boolean(result.hasMore),
         errorCode: result.errorCode || null,
-        errorDetail: result.errorDetail || null
+        errorDetail: result.errorDetail || null,
+        sourceSchema,
+        primaryV2Audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', v2Result),
+        legacyFallbackAudit: legacyFallback
+            ? securityCollectionSourceAudit('/v1.0/security/alerts', legacyFallback)
+            : null
     };
 }
 
@@ -15244,6 +15278,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
             reportingSecuritySystem: getSecurityReportingSystem(alert),
             source: getSecurityReportingSystem(alert),
+            sourceSchema: alert.stackctrlAlertSchema || 'alerts_v2',
             user: (alert.userStates || [])[0]?.accountName ||
                 alert.userPrincipalName ||
                 entities.userPrincipalName ||
@@ -15664,8 +15699,11 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 alerts: {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
-                    status: alertsResult.warnings?.length && !processedAlerts.length ? 'warning' : 'complete',
+                    status: alertsResult.warnings?.length ? 'warning' : 'complete',
                     audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', alertsResult),
+                    sourceSchema: alertsResult.sourceSchema || 'alerts_v2',
+                    primaryV2Audit: alertsResult.primaryV2Audit || null,
+                    legacyFallbackAudit: alertsResult.legacyFallbackAudit || null,
                     entityDiagnostics: anonymousAlertEntityDiagnostics
                 },
                 incidents: {

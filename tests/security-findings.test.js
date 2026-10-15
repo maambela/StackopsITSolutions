@@ -68,6 +68,23 @@ test('anonymous IP finding correlates against all explicit IP evidence on an ale
     assert.deepEqual(finding.candidateUsers, ['user@example.com']);
 });
 
+test('legacy compatibility alerts remain visible but cannot become a correlation or notification finding', () => {
+    const result = buildSecurityFindings({
+        alerts: [{
+            id: 'legacy-alert',
+            title: 'Anonymous IP sign-in detected',
+            ipAddress: '203.0.113.8',
+            sourceSchema: 'legacy_alerts_compatibility'
+        }],
+        signIns: [{ id: 'signin-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' }]
+    });
+
+    const [finding] = result.findings;
+    assert.equal(finding.status, 'needs_investigation');
+    assert.equal(finding.evidence.filter(item => item.sourceType === 'sign_in').length, 0);
+    assert.match(finding.assessmentBasis, /excluded from correlation and notification/);
+});
+
 test('anonymous IP indicator remains an observation when no sign-in evidence matches', () => {
     const result = buildSecurityFindings({
         alerts: [{ id: 'alert-1', title: 'Anonymous IP address observed', severity: 'high' }],
@@ -108,9 +125,10 @@ test('available identity-risk detections can be correlated when the licensed ris
             userId: 'user-1',
             userPrincipalName: 'person@example.com',
             riskEventType: 'anonymousIpAddress',
-            riskLevel: 'high'
+            riskLevel: 'high',
+            activityDateTime: '2026-10-15T12:00:00.000Z'
         }],
-        signIns: [{ id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success' }],
+        signIns: [{ id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success', eventTime: '2026-10-15T13:00:00.000Z' }],
         sourceStatuses: { riskyUsers: 'unavailable', riskDetections: 'complete', signIns: 'partial' }
     });
 
@@ -118,9 +136,26 @@ test('available identity-risk detections can be correlated when the licensed ris
     assert.equal(finding.detectionId, 'identity_risk_detection_successful_sign_in');
     assert.equal(finding.status, 'correlated');
     assert.equal(finding.sourceRiskLevel, 'high');
+    assert.equal(finding.confidence, 'medium');
     assert.match(finding.assessmentBasis, /risky-user feed is unavailable/);
     assert.equal(result.scenarioCoverage.riskyUserSuccessfulSignIn.status, 'partial');
     assert.match(result.scenarioCoverage.riskyUserSuccessfulSignIn.reason, /identity-risk detections/);
+});
+
+test('identity-risk detections do not correlate a user’s unrelated historical sign-ins', () => {
+    const result = buildSecurityFindings({
+        riskDetections: [{
+            id: 'risk-1', userId: 'user-1', userPrincipalName: 'person@example.com', activityDateTime: '2026-10-15T12:00:00.000Z'
+        }],
+        signIns: [{
+            id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success', eventTime: '2026-10-10T12:00:00.000Z'
+        }],
+        sourceStatuses: { riskyUsers: 'unavailable', riskDetections: 'complete', signIns: 'complete' }
+    });
+
+    assert.equal(result.findings[0].status, 'needs_investigation');
+    assert.equal(result.findings[0].confidence, 'low');
+    assert.equal(result.findings[0].evidence.filter(item => item.sourceType === 'sign_in').length, 0);
 });
 
 test('sign-in outcome stays unknown when Graph omits status and impossible travel is explicitly unassessed', () => {
