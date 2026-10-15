@@ -14225,7 +14225,12 @@ const SECURITY_SIGNINS_FETCH_TIMEOUT_MS = Math.max(
 
 const SECURITY_SIGNINS_MAX_PAGES = Math.max(
     1,
-    Math.min(25, Number(process.env.SECURITY_SIGNINS_MAX_PAGES) || 10)
+    Math.min(25, Number(process.env.SECURITY_SIGNINS_MAX_PAGES) || 3)
+);
+
+const SECURITY_SIGNINS_PAGE_DELAY_MS = Math.max(
+    0,
+    Math.min(60000, Number(process.env.SECURITY_SIGNINS_PAGE_DELAY_MS) || 1000)
 );
 
 const SECURITY_ALERTS_PIPELINE_TIMEOUT_MS = Math.max(
@@ -14395,10 +14400,11 @@ async function fetchSecuritySignInRows(token) {
     ].join(',');
 
     const result = await fetchGraphCollectionPagesWithRetry({
-        url: `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=${encodeURIComponent(filter)}&$top=100&$orderby=createdDateTime desc&$select=${encodeURIComponent(select)}`,
+        url: `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=${encodeURIComponent(filter)}&$top=1000&$orderby=createdDateTime desc&$select=${encodeURIComponent(select)}`,
         token,
         timeoutMs: SECURITY_SIGNINS_FETCH_TIMEOUT_MS,
         maxPages: SECURITY_SIGNINS_MAX_PAGES,
+        betweenPagesDelayMs: SECURITY_SIGNINS_PAGE_DELAY_MS,
         label: 'Sign-ins fetch'
     });
 
@@ -15276,7 +15282,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         riskDetections: processedRiskDetections,
         sourceStatuses: {
             alerts: !alertsResult.ok ? 'unavailable' : alertsResult.warnings?.length ? 'partial' : 'complete',
-            signIns: !signInsResult.ok ? 'unavailable' : signInsResult.warnings?.length ? 'partial' : 'complete',
+            signIns: !signInsResult.ok
+                ? (signIns.length ? 'partial' : 'unavailable')
+                : signInsResult.warnings?.length ? 'partial' : 'complete',
             riskyUsers: identityRiskResult.sources?.riskyUsers?.status || 'unavailable'
         }
     });

@@ -83,6 +83,21 @@ test('empty but successfully collected identity-risk feeds count as evaluated, n
     assert.equal(result.scenarioCoverage.riskyUserSuccessfulSignIn.reason, null);
 });
 
+test('returned sign-in evidence with a failed later page remains partial, not unavailable', () => {
+    const result = buildSecurityFindings({
+        alerts: [{ id: 'alert-1', title: 'Anonymous IP address observed', ipAddress: '203.0.113.9' }],
+        signIns: [{ id: 'signin-1', ipAddress: '203.0.113.9', outcome: 'success' }],
+        sourceStatuses: {
+            alerts: 'complete',
+            signIns: 'partial',
+            riskyUsers: 'unavailable'
+        }
+    });
+
+    assert.equal(result.scenarioCoverage.anonymousIpAuthentication.status, 'partial');
+    assert.match(result.scenarioCoverage.anonymousIpAuthentication.reason, /incomplete/);
+});
+
 test('dashboard and evidence store preserve finding details and source coverage', () => {
     const detection = buildSecurityFindings({
         riskyUsers: [{ id: 'user-1', userPrincipalName: 'person@example.com', riskLevel: 'high', riskState: 'atRisk' }],

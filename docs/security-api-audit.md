@@ -86,3 +86,9 @@ Content-Type: application/json
 This endpoint does not send WhatsApp notifications. It returns each collection source's endpoint, HTTP status, attempt count, Graph request IDs, `Retry-After` value, bounded error detail, record count, and scenario coverage. When requested, it also runs the bounded allow-listed `identityLogons30d` hunting query and returns its schema/record-count metadata without exposing hunting records in the audit summary.
 
 For a `429`, Stack CTRL retries a bounded number of times, honours Graph's `Retry-After` response when supplied, and records the final result. Cloud Run logs can be correlated using `graphRequestId`, `clientRequestId`, and the `security_alerts:*` collection-stage messages.
+
+## Sign-in collection remediation
+
+Following the 15 October audit, Stack CTRL's sign-in collector was changed to request up to 1,000 records per Graph page, pace any follow-up page requests, and collect at most three pages by default. This reduces the request burst that caused the page-five `429` while retaining a bounded collection window.
+
+If Microsoft throttles after one or more pages have returned, Stack CTRL keeps the returned records and marks the source and anonymous-IP scenario **partial**. It must not label that scenario unavailable or claim that no matching sign-in exists. `SECURITY_SIGNINS_MAX_PAGES` and `SECURITY_SIGNINS_PAGE_DELAY_MS` are bounded server-side configuration values for later tuning from production audit results.

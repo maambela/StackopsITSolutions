@@ -186,6 +186,7 @@ async function fetchGraphCollectionWithRetry({
 async function fetchGraphCollectionPagesWithRetry({
     maxPages = 1,
     timeoutMs = 60000,
+    betweenPagesDelayMs = 0,
     now = () => Date.now(),
     ...options
 } = {}) {
@@ -262,6 +263,29 @@ async function fetchGraphCollectionPagesWithRetry({
                 graphRequestIds: requestIds,
                 warnings: []
             };
+        }
+
+        const pageDelay = numberInRange(betweenPagesDelayMs, 0, 60000, 0);
+        if (pageDelay > 0) {
+            const remainingAfterPage = deadline - now();
+            if (remainingAfterPage <= pageDelay) {
+                return {
+                    ...page,
+                    ok: false,
+                    value: rows,
+                    recordsFetched: rows.length,
+                    attempts,
+                    pageCount,
+                    pageLimitReached: false,
+                    hasMore: true,
+                    nextLink: nextUrl,
+                    graphRequestIds: requestIds,
+                    warnings: [`${options.label || 'Microsoft Graph collection'} is partial: the source deadline was reached before its next paced page could be fetched.`],
+                    errorCode: 'GRAPH_COLLECTION_PAGINATION_TIMEOUT',
+                    errorDetail: 'The source deadline was reached while pacing Graph collection pages.'
+                };
+            }
+            await (options.waitImpl || wait)(pageDelay);
         }
     }
 
