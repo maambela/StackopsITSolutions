@@ -37,6 +37,20 @@ The outstanding issues below are therefore not explained by a missing Graph perm
 | `POST /v1.0/security/runHuntingQuery` | Not yet executed against the Sunbird production token in this audit. The Stack CTRL route and bounded `IdentityLogonEvents` query are implemented and covered by unit tests. | Consent alone does not prove Defender hunting data or a supported table is available. | Live tenant validation outstanding. | In the deployed Stack CTRL environment, call `POST /api/security-events/hunting-query` with `{ "queryId": "identityLogons30d" }`. Record HTTP status, returned schema, record count, result-limit state, and any Graph error body/request ID. |
 | Cloudflare posture / coverage | Posture and coverage records appear; no Cloudflare incident activity is represented. | This is useful context but is not incident evidence and must not increase a Microsoft finding's severity by itself. | Available, separate context. | Keep it in the evidence model as posture/coverage unless a concrete Cloudflare alert is received. |
 
+## Live audit result — 15 October 2026
+
+An authenticated production audit was completed at `2026-10-15T13:14:49.401Z` with hunting enabled.
+
+| Source / endpoint | Response | Conclusion | Follow-up |
+| --- | --- | --- | --- |
+| `/v1.0/security/alerts` | `200`, 15 records, one attempt | Working. | Use as provider evidence only. |
+| `/v1.0/security/incidents` | `200`, 0 records, one attempt | Valid empty response for this collection. | Keep collection active. |
+| `/v1.0/auditLogs/signIns` | `200`, 100 records, one page; Graph supplied a next page | The former `429` did not occur in this run. The collection was incomplete because the implementation was limited to its first page. | Implement bounded next-link pagination and preserve the partial state if the page limit is reached. |
+| `/v1.0/security/tiIndicators` | `400`, `Resource not found for the segment 'tiIndicators'` | This is a concrete resource/API availability problem, not an empty indicator set or a missing permission grant. | Do not treat internally extracted IOCs as a successful external threat-intelligence response. Confirm the supported replacement/source before enabling an external indicator collector. |
+| `/v1.0/identityProtection/riskDetections` | 14 records reported | Identity risk detections are available. | Use only as cited identity-risk evidence. |
+| `/v1.0/identityProtection/riskyUsers` | `403`, tenant not licensed | Risky-user scenario remains unavailable. | Tenant licensing decision required; do not infer risky-user state. |
+| `/v1.0/security/runHuntingQuery` | `200`, expected schema, 0 rows | Endpoint, permission, and query all work. Defender has no `IdentityLogonEvents` records in the requested 30-day period. | Retain as an available but currently empty supplemental source; do not manufacture hunting correlation. |
+
 ## Detection-scenario status
 
 | Scenario | Current status | Reason | Next validation evidence |

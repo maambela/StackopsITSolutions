@@ -64,7 +64,7 @@ const { createSecurityEvidenceAutomation } = require('./services/intelligence/se
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
 const { buildSecurityFindings } = require('./services/intelligence/security-findings');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
-const { fetchGraphCollectionWithRetry } = require('./services/intelligence/microsoft-graph-collection');
+const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
 const { createGovernanceEvidenceStore } = require('./services/intelligence/governance-evidence-store');
@@ -14223,6 +14223,11 @@ const SECURITY_SIGNINS_FETCH_TIMEOUT_MS = Math.max(
     Number(process.env.SECURITY_SIGNINS_FETCH_TIMEOUT_MS) || 60000
 );
 
+const SECURITY_SIGNINS_MAX_PAGES = Math.max(
+    1,
+    Math.min(25, Number(process.env.SECURITY_SIGNINS_MAX_PAGES) || 10)
+);
+
 const SECURITY_ALERTS_PIPELINE_TIMEOUT_MS = Math.max(
     120000,
     Number(process.env.SECURITY_ALERTS_PIPELINE_TIMEOUT_MS) || 180000
@@ -14304,6 +14309,9 @@ async function fetchSecurityAlertRows(token) {
         graphRequestId: result.graphRequestId || null,
         clientRequestId: result.clientRequestId || null,
         retryAfterMs: result.retryAfterMs ?? null,
+        pageCount: Number(result.pageCount) || 1,
+        pageLimitReached: Boolean(result.pageLimitReached),
+        hasMore: Boolean(result.hasMore),
         errorCode: result.errorCode || null,
         errorDetail: result.errorDetail || null
     };
@@ -14386,23 +14394,35 @@ async function fetchSecuritySignInRows(token) {
         'resourceDisplayName'
     ].join(',');
 
-    const result = await fetchGraphJsonWithTimeout({
+    const result = await fetchGraphCollectionPagesWithRetry({
         url: `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=${encodeURIComponent(filter)}&$top=100&$orderby=createdDateTime desc&$select=${encodeURIComponent(select)}`,
         token,
         timeoutMs: SECURITY_SIGNINS_FETCH_TIMEOUT_MS,
-        stage: 'security_signins_fetch',
+        maxPages: SECURITY_SIGNINS_MAX_PAGES,
         label: 'Sign-ins fetch'
     });
+
+    if (result.ok) {
+        console.log(`[security_alerts:security_signins_fetch:complete] Sign-ins fetch retrieved ${result.recordsFetched} record(s) across ${result.pageCount} page(s) in ${result.attempts} attempt(s).`);
+    } else if (result.httpStatus === 429) {
+        console.warn(`[security_alerts:security_signins_fetch:rate_limited] Sign-ins fetch remained rate limited after ${result.attempts} attempt(s); retry-after ${result.retryAfterMs ?? 'not supplied'}ms.`);
+    } else {
+        console.warn(`[security_alerts:security_signins_fetch:unavailable_or_failed] ${result.errorCode || 'GRAPH_REQUEST_FAILED'}: ${result.errorDetail || result.warnings?.[0] || 'Sign-ins fetch failed'}`);
+    }
 
     return {
         signIns: result.value,
         warnings: result.warnings,
         recordsFetched: result.recordsFetched,
         ok: result.ok,
-        status: result.status,
+        status: result.httpStatus,
         aborted: result.aborted || false,
         attempts: result.attempts || 0,
+        pageCount: result.pageCount || 0,
+        pageLimitReached: Boolean(result.pageLimitReached),
+        hasMore: Boolean(result.hasMore),
         graphRequestId: result.graphRequestId || null,
+        graphRequestIds: result.graphRequestIds || [],
         clientRequestId: result.clientRequestId || null,
         retryAfterMs: result.retryAfterMs ?? null,
         errorCode: result.errorCode || null,
@@ -15496,6 +15516,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     const aiSummary = highRiskSignals > 0
         ? `Security attention is required. ${highSeverityAlerts.length} high or critical alert(s), ${activeIncidents.length} active incident(s), and ${usersUnderAttack.length} user attack pattern(s) were found.`
+        : allWarnings.length
+            ? 'Security posture cannot be fully assessed because one or more Microsoft security sources returned incomplete or unavailable evidence.'
         : hasPrimaryEvidence
             ? 'Security posture is currently stable across available Microsoft security signals.'
             : 'Security posture could not be fully assessed because primary Security Alerts evidence was unavailable.';
@@ -15562,13 +15584,13 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: externalThreatIndicators.length,
                     recordsPrepared: processedThreats.length,
                     internalExtracted: internalThreats.length,
-                    status: processedThreats.length ? 'complete' : (threatIndicatorsResult.warnings?.length ? 'warning' : 'complete'),
+                    status: threatIndicatorsResult.warnings?.length ? 'warning' : 'complete',
                     audit: securityCollectionSourceAudit('/v1.0/security/tiIndicators', threatIndicatorsResult)
                 },
                 signIns: {
                     recordsFetched: signIns.length,
                     recordsPrepared: suspiciousSignIns.length,
-                    status: signInsResult.warnings?.length && !suspiciousSignIns.length ? 'warning' : 'complete',
+                    status: signInsResult.warnings?.length ? 'warning' : 'complete',
                     audit: securityCollectionSourceAudit('/v1.0/auditLogs/signIns', signInsResult)
                 },
                 identityRisk: {

@@ -96,6 +96,7 @@ async function fetchGraphCollectionWithRetry({
                     optional,
                     value,
                     hasMore,
+                    nextLink: data?.['@odata.nextLink'] || null,
                     warnings: hasMore ? [`${label} returned the first ${value.length} records; Microsoft Graph has additional pages.`] : [],
                     recordsFetched: value.length,
                     attempts: attempt,
@@ -177,10 +178,113 @@ async function fetchGraphCollectionWithRetry({
     };
 }
 
+/**
+ * Reads a bounded number of Graph collection pages. A later-page failure keeps
+ * the records that were safely returned but marks the source partial; callers
+ * must never treat the partial collection as a clean result.
+ */
+async function fetchGraphCollectionPagesWithRetry({
+    maxPages = 1,
+    timeoutMs = 60000,
+    now = () => Date.now(),
+    ...options
+} = {}) {
+    const pageLimit = numberInRange(maxPages, 1, 25, 1);
+    const deadline = now() + numberInRange(timeoutMs, 1000, 300000, 60000);
+    const rows = [];
+    const requestIds = [];
+    let attempts = 0;
+    let pageCount = 0;
+    let nextUrl = options.url;
+    let lastResult = null;
+
+    while (nextUrl && pageCount < pageLimit) {
+        const remainingMs = deadline - now();
+        if (remainingMs <= 0) {
+            return {
+                ok: false,
+                optional: Boolean(options.optional),
+                value: rows,
+                recordsFetched: rows.length,
+                attempts,
+                pageCount,
+                pageLimitReached: true,
+                hasMore: true,
+                nextLink: nextUrl,
+                graphRequestIds: requestIds,
+                warnings: [`${options.label || 'Microsoft Graph collection'} is partial: page collection timed out after ${timeoutMs}ms.`],
+                errorCode: 'GRAPH_COLLECTION_PAGINATION_TIMEOUT',
+                errorDetail: 'The collection deadline was reached before the next page could be fetched.'
+            };
+        }
+
+        const page = await fetchGraphCollectionWithRetry({
+            ...options,
+            url: nextUrl,
+            timeoutMs: remainingMs,
+            now
+        });
+        lastResult = page;
+        pageCount += 1;
+        attempts += page.attempts || 0;
+        if (page.graphRequestId) requestIds.push(page.graphRequestId);
+
+        if (!page.ok) {
+            return {
+                ...page,
+                value: rows,
+                recordsFetched: rows.length,
+                attempts,
+                pageCount,
+                hasMore: Boolean(nextUrl),
+                nextLink: nextUrl,
+                graphRequestIds: requestIds,
+                warnings: [
+                    ...page.warnings,
+                    ...(rows.length ? [`${options.label || 'Microsoft Graph collection'} is partial: ${rows.length} record(s) were returned before page ${pageCount} failed.`] : [])
+                ],
+                partial: rows.length > 0
+            };
+        }
+
+        rows.push(...page.value);
+        nextUrl = page.nextLink;
+        if (!nextUrl) {
+            return {
+                ...page,
+                value: rows,
+                recordsFetched: rows.length,
+                attempts,
+                pageCount,
+                pageLimitReached: false,
+                hasMore: false,
+                nextLink: null,
+                graphRequestIds: requestIds,
+                warnings: []
+            };
+        }
+    }
+
+    return {
+        ...lastResult,
+        ok: true,
+        value: rows,
+        recordsFetched: rows.length,
+        attempts,
+        pageCount,
+        pageLimitReached: true,
+        hasMore: true,
+        nextLink: nextUrl,
+        graphRequestIds: requestIds,
+        warnings: [`${options.label || 'Microsoft Graph collection'} is limited to ${pageCount} page(s) and ${rows.length} record(s); Microsoft Graph has additional pages.`]
+    };
+}
+
 module.exports = {
     RETRYABLE_GRAPH_STATUSES,
     parseRetryAfterMs,
     retryDelayMs,
     graphResponseMetadata,
-    fetchGraphCollectionWithRetry
+    fetchGraphCollectionWithRetry,
+    fetchGraphCollectionPagesWithRetry
 };

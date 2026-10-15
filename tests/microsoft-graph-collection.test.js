@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
     parseRetryAfterMs,
     retryDelayMs,
-    fetchGraphCollectionWithRetry
+    fetchGraphCollectionWithRetry,
+    fetchGraphCollectionPagesWithRetry
 } = require('../services/intelligence/microsoft-graph-collection');
 
 function response({ status = 200, body = {}, headers = {} } = {}) {
@@ -75,4 +76,40 @@ test('returns a structured unavailable result for known optional endpoint failur
     assert.equal(result.errorCode, 'GRAPH_HTTP_400');
     assert.equal(result.graphRequestId, 'indicator-request');
     assert.match(result.errorDetail, /Unsupported request/);
+});
+
+test('follows Graph next links up to the configured page limit and reports an incomplete collection', async () => {
+    const requests = [];
+    const result = await fetchGraphCollectionPagesWithRetry({
+        url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns?$top=100',
+        token: 'graph-token',
+        maxPages: 2,
+        fetchImpl: async url => {
+            requests.push(url);
+            return requests.length === 1
+                ? response({
+                    body: {
+                        value: [{ id: 'page-one' }],
+                        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/auditLogs/signIns?$skiptoken=next'
+                    },
+                    headers: { 'request-id': 'page-one-request' }
+                })
+                : response({
+                    body: {
+                        value: [{ id: 'page-two' }],
+                        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/auditLogs/signIns?$skiptoken=still-more'
+                    },
+                    headers: { 'request-id': 'page-two-request' }
+                });
+        }
+    });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(result.value.map(row => row.id), ['page-one', 'page-two']);
+    assert.equal(result.recordsFetched, 2);
+    assert.equal(result.pageCount, 2);
+    assert.equal(result.pageLimitReached, true);
+    assert.equal(result.hasMore, true);
+    assert.deepEqual(result.graphRequestIds, ['page-one-request', 'page-two-request']);
+    assert.match(result.warnings[0], /limited to 2 page/);
 });
