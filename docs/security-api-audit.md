@@ -131,6 +131,29 @@ Stack CTRL now uses `GET /v1.0/security/alerts_v2` and `GET /v1.0/security/alert
 
 The same audit also exposed that user-only identity-risk correlation over the entire collected sign-in period was too broad. Stack CTRL now groups identity-risk detections by user and correlates only successful sign-ins for that user within 24 hours of a dated detection. These findings use medium confidence at most, retain Microsoft source values separately, and remain partial while the sign-in collection is bounded to three pages.
 
+## WhatsApp notification gate
+
+WhatsApp now selects Stack CTRL findings only; it no longer relays raw Microsoft Graph alerts, incidents, webhook events, or Cloudflare events. A finding is automatically eligible only when all of the following are true:
+
+- Stack CTRL status is `correlated`.
+- Stack CTRL severity is `high` or `critical` (a Microsoft provider severity cannot raise it).
+- Stack CTRL confidence is `high`.
+- The relevant scenario coverage is `evaluated`, not partial or unavailable.
+- At least two cited evidence records, an impact statement, and a recommended action are present.
+- The finding is not legacy compatibility evidence.
+
+The 16 October 2026 audit has two medium-confidence, partial identity-risk/sign-in correlations and one observation-only finding. They remain dashboard investigation items and are not WhatsApp candidates. Raw provider events are persisted for later correlation but cannot bypass this policy.
+
+## Sunbird decision: continue without alerts_v2
+
+Sunbird confirmed that the tenant does not use the `alerts_v2` capability. Stack CTRL therefore continues with the existing legacy alerts endpoint as an optional observation source and does not query `alerts_v2` in its normal collection path. Legacy alerts, if Microsoft returns any, remain dashboard evidence only: their older schema does not meet the evidence requirements for Stack CTRL correlation or WhatsApp notification. The active detection work continues using available Entra sign-ins, identity-risk detections, incidents, and Cloudflare data when events are supplied.
+
+## Impossible-travel validation
+
+Stack CTRL now evaluates the available sign-in records for travel-velocity candidates. It uses only successful sign-ins with a stable user, timestamp, country, and valid geographic coordinates. It compares consecutive sign-ins for the same user across countries and reports an investigation candidate only when the locations are at least 500 km apart and the implied speed is at least 1,000 km/h. The audit reports coordinate coverage, comparable pair count, and candidate findings.
+
+This is deliberately not a compromise determination or an automatic notification. VPNs, proxies, mobile networks, coordinate accuracy, and legitimate travel can produce misleading location changes. Candidates remain unassessed, dashboard-only investigation findings until an analyst validates the context.
+
 ## Risky-user scenario fallback
 
 The tenant returns `riskDetections` even though the licensed `riskyUsers` feed returns `403`. Stack CTRL therefore evaluates the available Microsoft identity-risk detections against successful sign-ins when, and only when, the risky-user feed is unavailable. Any resulting finding is explicitly labelled as an **identity-risk detection** correlation, retains Microsoft's risk values as source evidence, and does not claim the user is currently a risky user or that an account is compromised. This lets Scenario C progress while the licensing decision remains open.

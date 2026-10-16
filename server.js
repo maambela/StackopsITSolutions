@@ -22,6 +22,7 @@ const {
     sendSecurityAlert
 } = require('./services/whatsapp');
 const { createWhatsAppNotificationLedger } = require('./services/whatsapp-notification-ledger');
+const { selectSecurityFindingNotifications } = require('./services/security-finding-notifications');
 const {
     getMicrosoftGraphSecurityNotificationIds,
     normalizeCloudflareWebhookAlert,
@@ -14000,9 +14001,7 @@ async function fetchCompliancePolicies(token) {
  * Fetch security alerts
  */
 async function fetchSecurityAlerts(token) {
-    // `/security/alerts` is the retired legacy schema. alerts_v2 returns typed
-    // evidence and is required for reliable entity correlation.
-    const url = 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=50';
+    const url = 'https://graph.microsoft.com/v1.0/security/alerts?$top=50';
     
     try {
         const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph security alerts');
@@ -14298,46 +14297,18 @@ async function fetchGraphJsonWithTimeout({
 }
 
 async function fetchSecurityAlertRows(token) {
-    const v2Result = await fetchGraphJsonWithTimeout({
-        // alerts_v2 supports $top but not $orderby; Graph supplies the page order.
-        url: 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=50',
+    const result = await fetchGraphJsonWithTimeout({
+        url: 'https://graph.microsoft.com/v1.0/security/alerts?$top=50&$orderby=createdDateTime desc',
         token,
         timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
         stage: 'microsoft_graph_alerts_fetch',
-        label: 'Alerts v2 fetch'
+        label: 'Legacy alerts fetch',
+        optional: true,
+        expectedUnavailableStatuses: [400, 403, 404, 410]
     });
 
-    // Some tenants are still transitioning provider alerts to alerts_v2. Keep a
-    // legacy observation-only fallback so the dashboard does not silently lose
-    // those records; never use this fallback as notification-ready evidence.
-    let result = v2Result;
-    let sourceSchema = 'alerts_v2';
-    let legacyFallback = null;
-    if (v2Result.ok && !v2Result.value.length) {
-        const legacyResult = await fetchGraphJsonWithTimeout({
-            url: 'https://graph.microsoft.com/v1.0/security/alerts?$top=50',
-            token,
-            timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
-            stage: 'microsoft_graph_legacy_alerts_fallback_fetch',
-            label: 'Legacy alerts compatibility fetch',
-            optional: true,
-            expectedUnavailableStatuses: [400, 403, 404, 410]
-        });
-        legacyFallback = legacyResult;
-        if (legacyResult.ok && legacyResult.value.length) {
-            result = {
-                ...legacyResult,
-                warnings: [
-                    ...(legacyResult.warnings || []),
-                    'alerts_v2 returned no records; legacy alerts are displayed as observation-only compatibility data and are not notification eligible.'
-                ]
-            };
-            sourceSchema = 'legacy_alerts_compatibility';
-        }
-    }
-
     return {
-        alerts: (result.value || []).map(alert => ({ ...alert, stackctrlAlertSchema: sourceSchema })),
+        alerts: (result.value || []).map(alert => ({ ...alert, stackctrlAlertSchema: 'legacy_alerts' })),
         warnings: result.warnings,
         recordsFetched: result.recordsFetched,
         ok: result.ok,
@@ -14352,11 +14323,8 @@ async function fetchSecurityAlertRows(token) {
         hasMore: Boolean(result.hasMore),
         errorCode: result.errorCode || null,
         errorDetail: result.errorDetail || null,
-        sourceSchema,
-        primaryV2Audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', v2Result),
-        legacyFallbackAudit: legacyFallback
-            ? securityCollectionSourceAudit('/v1.0/security/alerts', legacyFallback)
-            : null
+        sourceSchema: 'legacy_alerts',
+        legacyAlertsAudit: securityCollectionSourceAudit('/v1.0/security/alerts', result)
     };
 }
 
@@ -14680,6 +14648,7 @@ function buildSecurityScenarioAuditSummary(findings = []) {
 
     return {
         anonymousIpAuthentication: summarize('anonymous_ip_authentication'),
+        impossibleTravel: summarize('impossible_travel_candidate'),
         riskyUserSuccessfulSignIn: {
             ...(() => {
                 const direct = summarize('risky_user_successful_sign_in');
@@ -14824,8 +14793,9 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
 
     const severities = new Set(getSecurityAlertSeverities(options.severities || config.severities));
     const limit = Math.max(1, Number(options.limit || config.limit || 20));
-    const types = new Set((options.types || ['alert', 'incident']).map(type => String(type || '').toLowerCase()));
-    const candidates = getWhatsAppSecurityAlertCandidates(payload)
+    const types = new Set((options.types || ['finding']).map(type => String(type || '').toLowerCase()));
+    const findingSelection = selectSecurityFindingNotifications(payload);
+    const candidates = findingSelection.eligible
         .filter(item => types.has(String(item.recordType || item.type || '').toLowerCase()))
         .filter(item => severities.has(normalizeWhatsAppSeverity(item.severity)))
         .sort((a, b) => {
@@ -14880,8 +14850,11 @@ async function notifySecurityAlertsViaWhatsApp(payload, options = {}) {
         enabled: config.enabled,
         recipient: config.recipient,
         sent: results.filter(item => item.status === 'sent').length,
-        skipped: results.filter(item => item.status === 'skipped-duplicate').length,
+        skipped: results.filter(item => item.status === 'skipped-duplicate').length + findingSelection.ineligible.length,
         failed: results.filter(item => item.status === 'failed').length,
+        eligibleFindingCount: findingSelection.eligible.length,
+        ineligibleFindingCount: findingSelection.ineligible.length,
+        ineligibleFindings: findingSelection.ineligible,
         results
     };
 }
@@ -15033,18 +15006,17 @@ async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
         console.info(`[Security Webhook] Stored resolved ${provider} alert without WhatsApp notification.`, { id: alert.id });
         return { stored: true, notification: null };
     }
-    const notification = await notifySecurityAlertsViaWhatsApp({ alerts: [alert], incidents: [] }, {
-        requireEnabled: true,
-        types: ['alert'],
-        limit: 1
-    });
-    console.info(`[Security Webhook] Processed ${provider} alert.`, {
+    console.info(`[Security Webhook] Stored ${provider} alert for finding correlation; raw events do not send WhatsApp.`, {
         id: alert.id,
-        sent: notification.sent,
-        skipped: notification.skipped,
-        failed: notification.failed
+        severity: alert.severity
     });
-    return { stored: true, notification };
+    return {
+        stored: true,
+        notification: {
+            status: 'deferred_to_finding_correlation',
+            reason: 'Raw provider events are not WhatsApp notification candidates.'
+        }
+    };
 }
 
 function buildCloudflarePollingSecurityAlerts(summary = {}) {
@@ -15278,7 +15250,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
             reportingSecuritySystem: getSecurityReportingSystem(alert),
             source: getSecurityReportingSystem(alert),
-            sourceSchema: alert.stackctrlAlertSchema || 'alerts_v2',
+            sourceSchema: alert.stackctrlAlertSchema || 'legacy_alerts',
             user: (alert.userStates || [])[0]?.accountName ||
                 alert.userPrincipalName ||
                 entities.userPrincipalName ||
@@ -15700,10 +15672,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
                     status: alertsResult.warnings?.length ? 'warning' : 'complete',
-                    audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', alertsResult),
-                    sourceSchema: alertsResult.sourceSchema || 'alerts_v2',
-                    primaryV2Audit: alertsResult.primaryV2Audit || null,
-                    legacyFallbackAudit: alertsResult.legacyFallbackAudit || null,
+                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult),
+                    sourceSchema: alertsResult.sourceSchema || 'legacy_alerts',
+                    legacyAlertsAudit: alertsResult.legacyAlertsAudit || null,
                     entityDiagnostics: anonymousAlertEntityDiagnostics
                 },
                 incidents: {
@@ -15895,7 +15866,7 @@ app.post('/api/webhooks/microsoft-security-alerts', async (req, res) => {
                 try {
                     const token = await getMicrosoftGraphToken({ securityAlerts: true });
                     const graphAlert = await fetchMicrosoftGraphJson(
-                        `https://graph.microsoft.com/v1.0/security/alerts_v2/${encodeURIComponent(id)}`,
+                        `https://graph.microsoft.com/v1.0/security/alerts/${encodeURIComponent(id)}`,
                         token,
                         `Microsoft Graph webhook alert ${id}`,
                         { shared: false, retries: 1 }
@@ -16345,8 +16316,9 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
 
 /**
  * Route: POST /api/security-events/whatsapp-alerts
- * Sends current Microsoft Graph and stored Cloudflare security alerts/incidents
- * to the configured WhatsApp recipient through the same deduplication path.
+ * Sends eligible evidence-backed Stack CTRL findings to the configured WhatsApp
+ * recipient through the same deduplication path. Raw provider events stay in
+ * the dashboard for correlation and cannot be sent directly.
  */
 app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, res) => {
     try {
@@ -16365,7 +16337,7 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
             await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true })
         );
         const severities = getSecurityAlertSeverities(req.body?.severities || req.query.severities || 'critical,high,medium');
-        const types = String(req.body?.types || req.query.types || 'alert,incident')
+        const types = String(req.body?.types || req.query.types || 'finding')
             .split(',')
             .map(item => item.trim())
             .filter(Boolean);
@@ -16375,7 +16347,7 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
             severities,
             types,
             // This authenticated route is an explicit operator action. It
-            // deliberately resends the selected alert even if the automatic
+            // deliberately resends an eligible finding even if the automatic
             // anti-spam cooldown already recorded it.
             force: true,
             prioritizeSeverity: true

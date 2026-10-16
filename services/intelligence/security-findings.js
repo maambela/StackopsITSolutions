@@ -45,6 +45,80 @@ function getSignInOutcome(signIn = {}) {
     return 'unknown';
 }
 
+const IMPOSSIBLE_TRAVEL_MIN_DISTANCE_KM = 500;
+const IMPOSSIBLE_TRAVEL_MIN_SPEED_KMH = 1000;
+
+function numericCoordinate(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function signInCoordinates(signIn = {}) {
+    const latitude = numericCoordinate(signIn.locationCoordinates?.latitude);
+    const longitude = numericCoordinate(signIn.locationCoordinates?.longitude);
+    return latitude !== null && longitude !== null && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+        ? { latitude, longitude }
+        : null;
+}
+
+function distanceKm(left, right) {
+    const radians = degrees => degrees * (Math.PI / 180);
+    const earthRadiusKm = 6371;
+    const latitudeDelta = radians(right.latitude - left.latitude);
+    const longitudeDelta = radians(right.longitude - left.longitude);
+    const value = Math.sin(latitudeDelta / 2) ** 2 +
+        Math.cos(radians(left.latitude)) * Math.cos(radians(right.latitude)) * Math.sin(longitudeDelta / 2) ** 2;
+    return earthRadiusKm * (2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value)));
+}
+
+function travelUserKey(signIn = {}) {
+    return normalizeIdentity(signIn.userId || signIn.userPrincipalName || signIn.user);
+}
+
+function analyseImpossibleTravel(signIns = []) {
+    const usable = signIns.filter(signIn =>
+        getSignInOutcome(signIn) === 'success' &&
+        travelUserKey(signIn) &&
+        signInCoordinates(signIn) &&
+        recordTime(signIn) !== null &&
+        text(signIn.country).toLowerCase() !== 'unknown'
+    );
+    const byUser = new Map();
+    usable.forEach(signIn => {
+        const key = travelUserKey(signIn);
+        const rows = byUser.get(key) || [];
+        rows.push(signIn);
+        byUser.set(key, rows);
+    });
+    const candidates = [];
+    let comparablePairCount = 0;
+    byUser.forEach(rows => {
+        const ordered = [...rows].sort((left, right) => recordTime(left) - recordTime(right));
+        let strongest = null;
+        for (let index = 1; index < ordered.length; index += 1) {
+            const earlier = ordered[index - 1];
+            const later = ordered[index];
+            if (normalizeIdentity(earlier.country) === normalizeIdentity(later.country)) continue;
+            const elapsedHours = (recordTime(later) - recordTime(earlier)) / (60 * 60 * 1000);
+            if (elapsedHours <= 0) continue;
+            comparablePairCount += 1;
+            const distance = distanceKm(signInCoordinates(earlier), signInCoordinates(later));
+            const speed = distance / elapsedHours;
+            if (distance < IMPOSSIBLE_TRAVEL_MIN_DISTANCE_KM || speed < IMPOSSIBLE_TRAVEL_MIN_SPEED_KMH) continue;
+            if (!strongest || speed > strongest.speedKmh) {
+                strongest = { userKey: travelUserKey(later), earlier, later, distanceKm: distance, elapsedHours, speedKmh: speed };
+            }
+        }
+        if (strongest) candidates.push(strongest);
+    });
+    return {
+        coordinateSignInCount: usable.length,
+        identitiesWithCoordinates: [...byUser.values()].filter(rows => rows.length >= 2).length,
+        comparablePairCount,
+        candidates
+    };
+}
+
 function evidenceReference(sourceType, record, summary) {
     const details = sourceType === 'sign_in'
         ? {
@@ -109,7 +183,7 @@ function buildAnonymousIpFindings(alerts, signIns) {
         const ipAddresses = getIps(alert);
         const ipAddress = ipAddresses[0] || '';
         const sourceSystem = text(alert.reportingSecuritySystem || alert.source || alert.vendor) || 'Security provider';
-        const compatibilityOnly = alert.sourceSchema === 'legacy_alerts_compatibility';
+        const compatibilityOnly = ['legacy_alerts', 'legacy_alerts_compatibility'].includes(alert.sourceSchema);
         const relatedSignIns = !compatibilityOnly && ipAddresses.length
             ? signIns.filter(signIn => ipAddresses.includes(getIp(signIn)))
             : [];
@@ -175,7 +249,7 @@ function buildAnonymousIpFindings(alerts, signIns) {
             candidateUsers,
             evidence,
             recommendedAction: compatibilityOnly
-                ? 'Review in Microsoft Defender and complete migration of this provider alert to alerts_v2; do not notify from this legacy observation.'
+                ? 'Review the provider alert in Microsoft Defender; do not notify from this legacy observation without independently corroborating evidence.'
                 : relatedSignIns.length
                 ? 'Review the matching sign-in outcomes, user, device and identity-risk state before deciding on containment.'
                 : 'Check Microsoft sign-in and identity-risk records for this IP; do not treat the indicator alone as proof of compromise.',
@@ -331,6 +405,42 @@ function buildRiskDetectionSignInFindings(riskDetections, signIns) {
     });
 }
 
+function buildImpossibleTravelFindings(signIns) {
+    const analysis = analyseImpossibleTravel(signIns);
+    return {
+        ...analysis,
+        findings: analysis.candidates.map(candidate => {
+            const userLabel = text(candidate.later.userPrincipalName || candidate.later.user) || 'an identified user';
+            const roundedDistance = Math.round(candidate.distanceKm);
+            const roundedSpeed = Math.round(candidate.speedKmh);
+            const roundedHours = Number(candidate.elapsedHours.toFixed(1));
+            return {
+                id: createFindingId('impossible_travel_candidate', `${candidate.userKey}|${candidate.earlier.id}|${candidate.later.id}`),
+                detectionId: 'impossible_travel_candidate',
+                title: 'Travel-velocity sign-in anomaly requires investigation',
+                description: `Successful sign-ins for ${userLabel} were recorded from different countries ${roundedDistance} km apart, ${roundedHours} hour(s) apart, implying approximately ${roundedSpeed} km/h. This is a travel-velocity anomaly, not proof of impossible travel or account compromise.`,
+                impact: 'A rapid location change can indicate proxy, VPN, token misuse, inaccurate location data, or legitimate travel; analyst context is required.',
+                severity: 'unassessed',
+                confidence: 'medium',
+                confidenceReason: 'The same user has two successful sign-ins with valid coordinates and a calculated velocity above the conservative threshold. VPNs, proxies, mobile networks, and location accuracy can produce false positives.',
+                status: 'needs_investigation',
+                affectedEntities: {
+                    users: [userLabel],
+                    devices: [candidate.earlier.deviceName, candidate.later.deviceName].filter(Boolean),
+                    ipAddresses: [candidate.earlier.ipAddress, candidate.later.ipAddress].filter(Boolean)
+                },
+                candidateUsers: [userLabel],
+                evidence: [
+                    evidenceReference('sign_in', candidate.earlier, `Earlier successful sign-in — ${candidate.earlier.location} — ${candidate.earlier.eventTime || candidate.earlier.timestamp}`),
+                    evidenceReference('sign_in', candidate.later, `Later successful sign-in — ${candidate.later.location} — ${candidate.later.eventTime || candidate.later.timestamp}`)
+                ],
+                recommendedAction: 'Review both sign-ins, device/session context, known VPN or travel activity, and Microsoft identity-risk evidence before containment.',
+                assessmentBasis: `Same-user successful sign-ins with valid coordinates crossed countries at an implied ${roundedSpeed} km/h. Stack CTRL does not label this impossible travel or compromise without human validation.`
+            };
+        })
+    };
+}
+
 function buildSecurityFindings({
     alerts = [],
     signIns = [],
@@ -339,10 +449,12 @@ function buildSecurityFindings({
     sourceStatuses = {}
 } = {}) {
     const useRiskDetectionFallback = !riskyUsers.length && sourceStatuses.riskyUsers === 'unavailable';
+    const impossibleTravel = buildImpossibleTravelFindings(signIns);
     const findings = [
         ...buildAnonymousIpFindings(alerts, signIns),
         ...buildRiskyUserFindings(riskyUsers, riskDetections, signIns),
-        ...(useRiskDetectionFallback ? buildRiskDetectionSignInFindings(riskDetections, signIns) : [])
+        ...(useRiskDetectionFallback ? buildRiskDetectionSignInFindings(riskDetections, signIns) : []),
+        ...impossibleTravel.findings
     ].sort((left, right) => left.title.localeCompare(right.title));
     const anonymousSources = [sourceStatuses.alerts, sourceStatuses.signIns].filter(Boolean);
     const identitySources = (useRiskDetectionFallback
@@ -371,8 +483,18 @@ function buildSecurityFindings({
                         : null
             },
             impossibleTravel: {
-                status: 'not_assessed',
-                reason: 'Microsoft sign-in location coordinates are retained where provided, but coordinate coverage, a defensible distance/speed threshold, native risk detections, and VPN/proxy limitations must be validated against tenant data before labeling travel impossible.'
+                status: !impossibleTravel.coordinateSignInCount
+                    ? 'not_assessed'
+                    : sourceStatuses.signIns === 'partial'
+                        ? 'partial'
+                        : 'evaluated',
+                coordinateSignInCount: impossibleTravel.coordinateSignInCount,
+                identitiesWithCoordinates: impossibleTravel.identitiesWithCoordinates,
+                comparablePairCount: impossibleTravel.comparablePairCount,
+                findingCount: impossibleTravel.findings.length,
+                reason: !impossibleTravel.coordinateSignInCount
+                    ? 'No successful sign-ins with both a stable user identity, valid location coordinates, timestamp, and country were returned.'
+                    : 'Stack CTRL compares consecutive successful sign-ins for the same user across countries. A candidate requires valid coordinates, at least 500 km distance, and an implied speed of at least 1,000 km/h. VPNs, proxies, mobile networks, and location accuracy can produce false positives.'
             },
             riskyUserSuccessfulSignIn: {
                 status: riskyUserStatus,

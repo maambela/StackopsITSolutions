@@ -165,7 +165,33 @@ test('sign-in outcome stays unknown when Graph omits status and impossible trave
 
     const result = buildSecurityFindings();
     assert.equal(result.scenarioCoverage.impossibleTravel.status, 'not_assessed');
-    assert.match(result.scenarioCoverage.impossibleTravel.reason, /VPN\/proxy limitations/);
+    assert.match(result.scenarioCoverage.impossibleTravel.reason, /No successful sign-ins/);
+});
+
+test('travel-velocity candidates require valid same-user coordinates, countries, and a conservative speed', () => {
+    const result = buildSecurityFindings({
+        signIns: [
+            {
+                id: 'signin-1', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success',
+                country: 'South Africa', location: 'Cape Town, South Africa', eventTime: '2026-10-15T08:00:00.000Z',
+                locationCoordinates: { latitude: -33.9249, longitude: 18.4241 }, ipAddress: '203.0.113.8'
+            },
+            {
+                id: 'signin-2', userId: 'user-1', userPrincipalName: 'person@example.com', outcome: 'success',
+                country: 'United Kingdom', location: 'London, United Kingdom', eventTime: '2026-10-15T09:00:00.000Z',
+                locationCoordinates: { latitude: 51.5074, longitude: -0.1278 }, ipAddress: '198.51.100.8'
+            }
+        ],
+        sourceStatuses: { signIns: 'complete' }
+    });
+
+    const finding = result.findings.find(item => item.detectionId === 'impossible_travel_candidate');
+    assert.ok(finding);
+    assert.equal(finding.status, 'needs_investigation');
+    assert.equal(finding.severity, 'unassessed');
+    assert.match(finding.description, /not proof/);
+    assert.equal(result.scenarioCoverage.impossibleTravel.status, 'evaluated');
+    assert.equal(result.scenarioCoverage.impossibleTravel.findingCount, 1);
 });
 
 test('empty but successfully collected identity-risk feeds count as evaluated, not unavailable', () => {
