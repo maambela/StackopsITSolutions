@@ -14309,7 +14309,12 @@ async function fetchSecurityAlertRows(token) {
 
     return {
         alerts: (result.value || []).map(alert => ({ ...alert, stackctrlAlertSchema: 'legacy_alerts' })),
-        warnings: result.warnings,
+        warnings: [
+            ...(result.warnings || []),
+            ...(Number(result.status) === 206
+                ? ['Legacy alerts returned HTTP 206 with no records; alert coverage is partial and cannot be treated as a clean result.']
+                : [])
+        ],
         recordsFetched: result.recordsFetched,
         ok: result.ok,
         status: result.status,
@@ -14602,7 +14607,7 @@ function securityCollectionSourceAudit(endpoint, result = {}) {
         errorDetail: result.errorDetail || null,
         completed: Boolean(result.ok),
         unavailable: Boolean(result.unavailable),
-        partial: Boolean(result.hasMore || result.warnings?.length)
+        partial: Boolean(result.hasMore || result.warnings?.length || Number(result.status) === 206)
     };
 }
 

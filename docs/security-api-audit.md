@@ -154,6 +154,12 @@ Stack CTRL now evaluates the available sign-in records for travel-velocity candi
 
 This is deliberately not a compromise determination or an automatic notification. VPNs, proxies, mobile networks, coordinate accuracy, and legitimate travel can produce misleading location changes. Candidates remain unassessed, dashboard-only investigation findings until an analyst validates the context.
 
+## Final validation — 16 October 2026, 01:13 UTC
+
+The final Sunbird audit collected 3,000 sign-ins across three successful pages without a `429`, returned 14 identity-risk detections, and confirmed enough location data to evaluate the travel-velocity rule: 2,811 coordinate-bearing sign-ins across 41 identities, 13 comparable cross-country pairs, and one investigation candidate. This confirms the collection, normalisation, correlation, scenario coverage, and dashboard finding paths are operational.
+
+The legacy alerts endpoint returned HTTP `206` with zero records. Stack CTRL now explicitly marks that source **partial**, rather than treating it as a clean zero. The legacy alert, external threat-indicator, risky-user licensing, and hunting-table limitations remain visible as collection coverage rather than being converted into negative security conclusions.
+
 ## Risky-user scenario fallback
 
 The tenant returns `riskDetections` even though the licensed `riskyUsers` feed returns `403`. Stack CTRL therefore evaluates the available Microsoft identity-risk detections against successful sign-ins when, and only when, the risky-user feed is unavailable. Any resulting finding is explicitly labelled as an **identity-risk detection** correlation, retains Microsoft's risk values as source evidence, and does not claim the user is currently a risky user or that an account is compromised. This lets Scenario C progress while the licensing decision remains open.
