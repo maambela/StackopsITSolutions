@@ -63,7 +63,7 @@ const { buildSecurityDashboardPayload } = require('./services/intelligence/secur
 const { createSecurityEvidenceStore } = require('./services/intelligence/security-evidence-store');
 const { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
-const { buildSecurityFindings } = require('./services/intelligence/security-findings');
+const { buildSecurityFindings, buildCloudflareFindings } = require('./services/intelligence/security-findings');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
@@ -14950,15 +14950,16 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
     const realtimeAlerts = rows.map(row => {
         try { return JSON.parse(row.Payload); } catch (_) { return null; }
     }).filter(Boolean);
-    if (!realtimeAlerts.length) return payload;
-
     const alerts = mergeUniqueSecurityAlerts(payload.alerts, realtimeAlerts);
+    const findingsById = new Map((Array.isArray(payload.findings) ? payload.findings : []).map(finding => [finding.id, finding]));
+    buildCloudflareFindings(alerts).forEach(finding => findingsById.set(finding.id, finding));
+    const findings = [...findingsById.values()];
     const summary = {
         ...(payload.summary || {}),
         totalAlerts: alerts.length,
         highSeverityAlerts: alerts.filter(alert => ['critical', 'high'].includes(normalizeWhatsAppSeverity(alert.severity))).length
     };
-    return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, summary };
+    return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, findings, summary };
 }
 
 function sanitizeCachedSecurityIndicators(payload = {}) {
@@ -15028,7 +15029,7 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
     const alerts = [];
     const seen = new Set();
     const addAlert = ({ id, title, description, severity = 'medium', category, eventTime, user, ipAddress, domain }) => {
-        const key = `${title}|${category || ''}|${user || ipAddress || domain || ''}`.toLowerCase();
+        const key = `${id || ''}|${title}|${category || ''}|${user || ipAddress || domain || ''}|${eventTime || ''}`.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
         alerts.push({
@@ -15054,7 +15055,6 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
     // routine log line are intentionally excluded to avoid client alert noise.
     (Array.isArray(summary.accessLogs) ? summary.accessLogs : [])
         .filter(log => /block|deny|fail/i.test(String(log.action || log.status || '')))
-        .slice(0, 10)
         .forEach((log, index) => addAlert({
             id: log.id || `access-${index}`,
             title: `Cloudflare Access ${log.action || 'blocked'} event`,
@@ -15068,7 +15068,7 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
         }));
 
     const addFindingRows = (rows, category, fallbackTitle) => {
-        (Array.isArray(rows) ? rows : []).slice(0, 10).forEach((finding, index) => addAlert({
+        (Array.isArray(rows) ? rows : []).forEach((finding, index) => addAlert({
             id: finding.id || finding.uuid || `${category}-${index}`,
             title: finding.title || finding.name || fallbackTitle,
             description: finding.description || finding.status || `${category} reported a security finding.`,

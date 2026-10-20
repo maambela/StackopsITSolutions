@@ -14149,18 +14149,16 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     font-size: 0.86rem;
     font-weight: 400;
     color: #ffffff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
   }
 
   .portal-mobile-alert-meta {
     margin: 0;
     font-size: 0.72rem;
     color: rgba(255, 255, 255, 0.62);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
   }
 
   .portal-mobile-alert-dot {
@@ -14170,6 +14168,8 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     flex-shrink: 0;
     background: #34d399;
   }
+
+  .portal-mobile-alert-dot.severity-neutral { background: rgba(255, 255, 255, 0.62); }
 
   .portal-mobile-alert-dot.severity-high,
   .portal-mobile-alert-dot.severity-critical {
@@ -17302,6 +17302,18 @@ body .project-card[data-project-id="9"]:focus-within,
 body .project-card[data-project-id="10"]:hover,
 body .project-card[data-project-id="10"]:focus-within {
   animation: none !important;
+  transform: none !important;
+  translate: none !important;
+  rotate: none !important;
+  scale: none !important;
+}
+
+/* The peek container is itself a button; its global hover animation otherwise
+   moves the whole security card even when the inner card stays still. */
+body button.side-peek-nav:has(.project-card[data-project-id="9"]):is(:hover, :focus-visible, .client-dashboard-button-wobble),
+body button.side-peek-nav:has(.project-card[data-project-id="10"]):is(:hover, :focus-visible, .client-dashboard-button-wobble) {
+  animation: none !important;
+  transform: none !important;
 }
 
 /* Keep wobble out of buttons within Credential and Network Security cards. */
@@ -17408,8 +17420,20 @@ body:has(#dashboard-section) .site-header {
 }
 
 .sunbird-security-card-rows li:last-child { border-bottom: 0; padding-bottom: 0; }
-.sunbird-security-card-rows i { color: rgba(165, 243, 252, 0.86); font-size: 0.68rem; }
+.sunbird-security-card-rows i { color: rgba(255, 255, 255, 0.7); font-size: 0.68rem; }
 .sunbird-security-card-rows strong { color: rgba(255, 255, 255, 0.91); font-weight: 600; text-align: right; }
+
+.sunbird-security-card-findings { min-width: 0; border-top: 1px solid rgba(255, 255, 255, 0.13); }
+.sunbird-security-card-findings-heading { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0 6px; color: rgba(255, 255, 255, 0.9); font-size: 0.72rem; }
+.sunbird-security-card-findings-heading span { color: rgba(255, 255, 255, 0.6); font-weight: 400; white-space: nowrap; }
+.sunbird-security-card-findings ul { max-height: 180px; overflow-y: auto; margin: 0; padding: 0; list-style: none; scrollbar-color: rgba(255, 255, 255, 0.3) transparent; }
+.sunbird-security-card-findings li { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 9px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.sunbird-security-card-findings li > div { min-width: 0; }
+.sunbird-security-card-findings li strong, .sunbird-security-card-findings li small { display: block; overflow-wrap: anywhere; }
+.sunbird-security-card-findings li strong { color: rgba(255, 255, 255, 0.92); font-size: 0.74rem; line-height: 1.4; }
+.sunbird-security-card-findings li small { margin-top: 3px; color: rgba(255, 255, 255, 0.6); font-size: 0.67rem; line-height: 1.4; }
+.sunbird-security-card-findings li .sunbird-security-status { flex-shrink: 0; font-size: 0.6rem; }
+.sunbird-security-card-findings > p { margin: 7px 0 0; color: rgba(255, 255, 255, 0.66); font-size: 0.68rem; line-height: 1.4; }
 
 /* Ordered investigation content on the full dashboard. */
 .sunbird-security-dashboard .sunbird-security-investigation {
@@ -17850,6 +17874,180 @@ body:has(#dashboard-section) .site-header {
     min-width: 44px !important;
     min-height: 44px !important;
   }
+}
+
+/* ------------------------------------------------------------------------
+   Mobile dashboard polish: keep the two sensitive service cards completely
+   still, then make the home and risk summaries dense without becoming small.
+   These selectors are deliberately narrow so the desktop and other cards
+   retain their established behaviour. */
+#projects-view .project-card[data-project-id="9"]:is(:hover, :focus, :focus-within),
+#projects-view .project-card[data-project-id="10"]:is(:hover, :focus, :focus-within) {
+  transform: none !important;
+  translate: none !important;
+  rotate: none !important;
+  scale: none !important;
+  animation: none !important;
+}
+
+#projects-view .project-card[data-project-id="9"]:is(:hover, :focus, :focus-within)::before,
+#projects-view .project-card[data-project-id="10"]:is(:hover, :focus, :focus-within)::before {
+  animation: none !important;
+}
+
+@media (max-width: 700px) {
+  /* Three real actions fit at once; chat remains available from its dedicated
+     support control rather than forcing a fourth, clipped card into Home. */
+  /* Keep the Home hierarchy still while a real alert set is arriving. Three
+     compact alert rows occupy roughly this footprint once populated. */
+  .portal-mobile-shell.is-loading .portal-mobile-alerts-list {
+    min-height: 230px;
+    justify-content: center;
+  }
+
+  .portal-mobile-shell.is-loading .portal-mobile-health-status {
+    color: rgba(255, 255, 255, 0.68) !important;
+  }
+
+  .portal-mobile-shell.is-loading .portal-mobile-health-ring-fill {
+    stroke: rgba(255, 255, 255, 0.34) !important;
+  }
+
+  .portal-mobile-quick-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    overflow: visible !important;
+    padding: 1px !important;
+    scroll-snap-type: none !important;
+  }
+
+  .portal-mobile-quick-btn {
+    min-width: 0 !important;
+    min-height: 72px !important;
+    aspect-ratio: 1.18 / 1;
+    padding: 7px 4px !important;
+    gap: 4px !important;
+    border-radius: 11px 7px 11px 7px;
+    font-size: 0.62rem !important;
+    line-height: 1.15;
+  }
+
+  .portal-mobile-quick-btn i { font-size: 0.94rem; }
+
+  .portal-mobile-health.is-loading,
+  .portal-mobile-shell.is-loading .portal-mobile-health {
+    border-color: rgba(255, 184, 121, 0.28);
+  }
+
+  .portal-mobile-alert-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 52px;
+    padding: 10px 14px;
+    border: 1px dashed rgba(255, 190, 135, 0.28);
+    border-radius: 12px 7px 12px 7px;
+    color: rgba(255, 235, 215, 0.8);
+    background: linear-gradient(110deg, rgba(255, 150, 55, 0.08), rgba(255, 255, 255, 0.035));
+    font-size: 0.76rem;
+  }
+
+  .portal-mobile-loading-mark {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    border: 2px solid rgba(255, 195, 143, 0.27);
+    border-top-color: #ffb169;
+    border-radius: 50%;
+    animation: portal-mobile-workspace-spin 0.9s linear infinite;
+  }
+
+  .portal-mobile-alert-error {
+    color: rgba(255, 209, 197, 0.86);
+    border-color: rgba(248, 113, 113, 0.38);
+  }
+}
+
+@keyframes portal-mobile-workspace-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (min-width: 701px) and (max-width: 1100px) {
+  .portal-mobile-alert-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 74px;
+    padding: 14px;
+    border: 1px dashed rgba(255, 190, 135, 0.28);
+    border-radius: 12px 7px 12px 7px;
+    color: rgba(255, 235, 215, 0.8);
+    font-size: 0.78rem;
+  }
+
+  .portal-mobile-loading-mark {
+    width: 10px;
+    height: 10px;
+    border: 2px solid rgba(255, 195, 143, 0.27);
+    border-top-color: #ffb169;
+    border-radius: 50%;
+    animation: portal-mobile-workspace-spin 0.9s linear infinite;
+  }
+}
+
+@media (max-width: 1100px) {
+  /* Insight cards are risk summaries, not a vertical metric list. */
+  body.sunbird-client-portal .sunbird-id-insights {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
+
+  body.sunbird-client-portal .sunbird-id-insight {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 126px;
+    aspect-ratio: 1 / 0.88;
+    padding: 13px;
+  }
+
+  body.sunbird-client-portal .sunbird-id-insight span {
+    font-size: 0.76rem;
+    line-height: 1.3;
+  }
+
+  body.sunbird-client-portal .sunbird-id-insight strong {
+    margin-top: 10px;
+    font-size: clamp(1.45rem, 3vw, 1.9rem);
+  }
+}
+
+@media (min-width: 900px) and (max-width: 1100px) {
+  body.sunbird-client-portal .sunbird-id-insights { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+}
+
+@media (max-width: 700px) {
+  body.sunbird-client-portal .sunbird-id-insights {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  body.sunbird-client-portal .sunbird-id-insight {
+    min-height: 118px;
+    aspect-ratio: 1 / 0.9;
+    padding: 12px;
+  }
+
+  body.sunbird-client-portal .sunbird-id-insight span { font-size: 0.72rem; }
+  body.sunbird-client-portal .sunbird-id-insight strong { margin-top: 8px; font-size: 1.48rem; }
+
+  /* Evidence remains a popover, but each side of the two-column grid owns
+     an edge so the detail panel never escapes the viewport. */
+  body.sunbird-client-portal .sunbird-id-insight:nth-child(odd) .sunbird-id-insight-evidence { left: 0; right: auto; }
+  body.sunbird-client-portal .sunbird-id-insight:nth-child(even) .sunbird-id-insight-evidence { right: 0; left: auto; }
 }
 
 @media (max-width: 700px) {
@@ -18666,7 +18864,13 @@ body:has(#dashboard-section) .site-header {
   padding: 15px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  list-style: none;
 }
+.sunbird-security-dashboard .sunbird-security-finding-series-header::-webkit-details-marker { display: none; }
+.sunbird-security-dashboard .sunbird-security-finding-series-header:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: -3px; }
+.sunbird-security-dashboard .sunbird-security-finding-series-header small { display: block; margin-top: 7px; color: rgba(255, 255, 255, 0.75); font-size: 0.7rem; }
+.sunbird-security-dashboard .sunbird-security-finding-series[open] .sunbird-security-finding-series-header small { display: none; }
 
 .sunbird-security-dashboard .sunbird-security-finding-series-header > div { min-width: 0; }
 .sunbird-security-dashboard .sunbird-security-finding-series-header h4 { margin: 0; color: rgba(255, 255, 255, 0.95); font-size: 0.95rem; font-weight: 650; line-height: 1.35; }
@@ -19099,4 +19303,114 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .projects-view.portal-mobile-tab-profile #billing-card .billing-warning { display: none; }
   body.sunbird-client-portal .projects-view.portal-mobile-tab-profile #billing-card .billing-mobile-manage { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid rgba(255, 184, 121, 0.42); border-radius: 9px 5px 9px 5px; color: #fff; background: rgba(255, 129, 29, 0.16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15); font: inherit; font-size: 0.82rem; text-align: left; }
   body.sunbird-client-portal .projects-view.portal-mobile-tab-profile #billing-card .billing-mobile-manage:focus-visible { outline: 2px solid rgba(255, 201, 151, 0.98); outline-offset: 2px; }
+}
+
+/* Final phone owner: later legacy breakpoints use a horizontal strip, but the
+   Home surface intentionally has exactly three compact action tiles. */
+@media (max-width: 700px) {
+  body.sunbird-client-portal .portal-mobile-quick-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    overflow: visible !important;
+    padding: 1px !important;
+    scroll-snap-type: none !important;
+  }
+
+  body.sunbird-client-portal .portal-mobile-quick-btn {
+    flex: initial !important;
+    min-width: 0 !important;
+    min-height: 72px !important;
+    aspect-ratio: 1.18 / 1;
+    padding: 7px 4px !important;
+    gap: 4px !important;
+    border-radius: 11px 7px 11px 7px;
+    font-size: 0.62rem !important;
+    line-height: 1.15;
+    scroll-snap-align: none !important;
+  }
+
+  body.sunbird-client-portal .portal-mobile-quick-btn i { font-size: 0.94rem; }
+}
+
+/* Identity's two wide chart panels have different minimum content widths.
+   The desktop composition is intentionally asymmetric, while tablet needs
+   equal information panels and phone needs a safe stack. Own those ranges
+   here rather than letting the desktop-specific selector dictate them. */
+@media (min-width: 721px) and (max-width: 1100px) {
+  /* Both panels carry equally important information at tablet scale. Equal
+     minmax-safe tracks leave the risk legend enough room without making the
+     posture card visually dominate the section. */
+  #sunbird-identity-dashboard .sunbird-id-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  #sunbird-identity-dashboard .sunbird-id-charts > .sunbird-id-chart-card {
+    min-width: 0;
+    width: 100%;
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  #sunbird-identity-dashboard .sunbird-id-charts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  #sunbird-identity-dashboard .sunbird-id-charts > .sunbird-id-chart-card {
+    min-width: 0;
+    width: 100%;
+    grid-column: 1;
+  }
+
+  /* Put the two header controls in a real control row. This replaces the
+     accidental mix of a flow-positioned Back control and an absolute badge,
+     so their vertical centres stay aligned instead of drifting apart. */
+  .sunbird-identity-dashboard .sunbird-id-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "back badge"
+      "title title";
+    align-items: center;
+    gap: 12px 10px;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .sunbird-identity-dashboard .sunbird-id-header > .sunbird-id-back-btn {
+    grid-area: back;
+    position: static !important;
+    justify-self: start;
+    margin: 0;
+    transform: none !important;
+  }
+
+  .sunbird-identity-dashboard .sunbird-id-header > :nth-child(2) {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .sunbird-identity-dashboard .sunbird-id-header > .sunbird-id-microsoft-badge {
+    grid-area: badge;
+    position: static;
+    justify-self: end;
+    min-width: 0;
+    max-width: min(56vw, 180px);
+    margin: 0;
+    white-space: normal;
+  }
+
+}
+
+@media (max-width: 380px) {
+  .sunbird-identity-dashboard .sunbird-id-header {
+    gap: 10px 8px;
+  }
+
+  .sunbird-identity-dashboard .sunbird-id-header > .sunbird-id-microsoft-badge {
+    max-width: 158px;
+  }
 }

@@ -7,6 +7,25 @@ const { deriveSecurityEvidence } = require('../services/intelligence/security-ev
 const buildSecurityAlertsDashboardContext = require('../services/intelligence/dashboard-context/securityAlertsDashboardContext');
 const { extractMicrosoftAlertEntities, describeMicrosoftAlertEntityShape } = require('../services/intelligence/microsoft-alert-entities');
 
+test('Cloudflare provider events become inspectable observations without invented correlation or severity', () => {
+    const { findings } = buildSecurityFindings({
+        alerts: [
+            { id: 'cf-1', title: 'Anonymous IP blocked', cloudflareWebhook: true, source: 'Cloudflare', severity: 'high', sourceSeverity: 'high', user: 'user@example.com', ipAddress: '203.0.113.5', status: 'active' },
+            { id: 'cf-2', title: 'CASB finding', cloudflareApiSignal: true, source: 'Cloudflare', severity: 'medium' },
+            { id: 'cf-posture', title: 'Cloudflare configured', source: 'Cloudflare', cloudflareOneSignal: true }
+        ],
+        signIns: [{ id: 'signin', user: 'user@example.com', ipAddress: '203.0.113.5', outcome: 'success' }]
+    });
+    assert.equal(findings.length, 2);
+    const observation = findings.find(finding => finding.title === 'Anonymous IP blocked');
+    assert.equal(observation.detectionId, 'cloudflare_security_observation');
+    assert.equal(observation.severity, 'unassessed');
+    assert.equal(observation.sourceSeverity, 'high');
+    assert.equal(observation.confidence, 'low');
+    assert.equal(observation.evidence[0].sourceId, 'cf-1');
+    assert.equal(observation.evidence.length, 1);
+});
+
 test('Microsoft alert evidence exposes explicit nested IP and user entities without parsing alert text', () => {
     const entities = extractMicrosoftAlertEntities({
         title: 'Anonymous IP address detected',

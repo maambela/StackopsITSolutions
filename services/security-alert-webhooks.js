@@ -46,6 +46,7 @@ function normalizeCloudflareWebhookAlert(payload = {}) {
     correlationId: correlationId || null,
     title,
     description,
+    sourceSeverity: data.severity || payload.severity || data.level || null,
     severity: normalizeWebhookSeverity(data.severity || payload.severity || data.level || payload.alert_type),
     status: normalizeWebhookStatus(alertEvent),
     created: eventTime,

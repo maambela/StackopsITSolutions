@@ -2407,7 +2407,8 @@ function enableClientDashboardButtonWobble() {
     dashboardView.addEventListener('pointerover', event => {
         const button = event.target.closest('button');
         if (!button || !dashboardView.contains(button) || button.contains(event.relatedTarget)) return;
-        if (button.closest('.project-card[data-project-id="9"], .project-card[data-project-id="10"]')) return;
+        if (button.closest('.project-card[data-project-id="9"], .project-card[data-project-id="10"]') ||
+            (button.classList.contains('side-peek-nav') && button.querySelector('.project-card[data-project-id="9"], .project-card[data-project-id="10"]'))) return;
 
         // Dynamically-rendered dashboards reuse the same root. Toggling this
         // class explicitly restarts the animation for every button hover.
@@ -5196,7 +5197,7 @@ function openSunbirdSecurityDashboard() {
     setupSunbirdSecurityDashboard();
 
     const cached = readSunbirdSecuritySnapshot();
-    sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(cached || { success: true });
+    sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(cached || { success: true, findingLoadState: 'loading' });
     renderSunbirdSecurityDashboard();
     loadSunbirdSecurityDashboardData();
 }
@@ -5424,7 +5425,11 @@ function saveSunbirdSecuritySnapshot(data) {
 
 async function loadSunbirdSecurityDashboardData() {
     const token = localStorage.getItem('authToken');
-    if (!token) return;
+    if (!token) {
+        sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error' };
+        renderSunbirdSecurityDashboard();
+        return;
+    }
     try {
         const cachedResponse = await fetch('/api/db/security-events', {
             method: 'GET',
@@ -5448,6 +5453,8 @@ async function loadSunbirdSecurityDashboardData() {
             renderSunbirdSecurityDashboard();
         } catch (liveError) {
             console.warn('[Security Dashboard] Detailed SOC evidence unavailable:', liveError.message);
+            sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error' };
+            renderSunbirdSecurityDashboard();
         }
     }
 }
@@ -5725,7 +5732,7 @@ function renderSunbirdSecurityInvestigation(model) {
     el.innerHTML = `
         ${renderSunbirdSecurityInvestigationSummary(model)}
         ${renderSunbirdSecurityFindingOverview(model)}
-        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Evidence-backed findings</h3><p>Every returned finding is shown with its assessment, affected entities, action, and cited evidence.</p></div>${renderSunbirdSecurityFindings(model.findings, model)}</section>
+        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Evidence-backed findings</h3><p>Every returned finding is shown with its assessment, affected entities, action, and cited evidence.</p>${model.findingLoadState === 'error' && model.findings?.length ? '<p>Refresh failed; showing previously saved findings, which may be out of date.</p>' : ''}</div>${renderSunbirdSecurityFindings(model.findings, model)}</section>
         <section id="sunbird-security-coverage-section" class="sunbird-security-investigation-section sunbird-security-coverage-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">02</p><h3>Detection coverage</h3><p>Scenario-specific availability and limitations.</p></div>${renderSunbirdSecurityCoverage(model)}</section>
         <section id="sunbird-security-sources-section" class="sunbird-security-investigation-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">03</p><h3>Connected security evidence</h3><p>Only sources represented in the returned security model are shown. Cloudflare posture and coverage are kept separate from incident activity.</p></div>${renderSunbirdSecuritySources(model)}</section>
     `;
@@ -14738,12 +14745,18 @@ async function fetchSunbirdSecurityEventsData() {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
     };
+    let lastError;
     for (const endpoint of ['/api/db/security-events', '/api/security-events']) {
-        const response = await fetch(endpoint, { headers });
-        const data = await response.json();
-        if (response.ok && data.success) return augmentSunbirdSecurityDataWithCloudflare(data);
+        try {
+            const response = await fetch(endpoint, { headers });
+            const data = await response.json();
+            if (response.ok && data.success) return normalizeSunbirdSecurityData(data);
+            lastError = new Error(data.message || `Security events request failed (${response.status})`);
+        } catch (error) {
+            lastError = error;
+        }
     }
-    throw new Error('Security events data unavailable');
+    throw new Error(`Security events data unavailable: ${lastError?.message || 'both sources failed'}`);
 }
 
 async function fetchSunbirdBackupRecoveryData() {
@@ -16609,6 +16622,7 @@ function sunbirdSecurityEntityLabels(entities) {
     add('User', entities.users);
     add('Device', entities.devices);
     add('IP address', entities.ipAddresses);
+    add('Resource', entities.resources);
     add('Entity', entities.entities);
     return labels;
 }
@@ -16616,7 +16630,7 @@ function sunbirdSecurityEntityLabels(entities) {
 function sunbirdSecurityFindingSource(finding = {}) {
     const evidence = Array.isArray(finding?.evidence) ? finding.evidence : [];
     const firstEvidence = evidence.find(item => item && typeof item === 'object') || {};
-    return firstEvidence.sourceType || firstEvidence.type || finding?.sourceType || finding?.source || finding?.provider || 'Source not recorded';
+    return firstEvidence?.details?.sourceSystem || finding?.source || finding?.provider || firstEvidence.sourceType || firstEvidence.type || finding?.sourceType || 'Source not recorded';
 }
 
 function normalizeSunbirdSecurityGroupingText(value) {
@@ -16699,7 +16713,7 @@ function sunbirdSecurityFindingGroupTitle(group = {}) {
             ? 'Risky-user records with successful sign-ins'
             : 'Risky-user records requiring investigation'
     };
-    return `${titles[first.detectionId] || sunbirdSecurityStatusLabel(first.detectionId, 'Security findings')} — ${countLabel}`;
+    return `${titles[first.detectionId] || sunbirdSecurityDisplayText(first.title, sunbirdSecurityStatusLabel(first.detectionId, 'Security findings'))} — ${countLabel}`;
 }
 
 function sunbirdSecurityFindingGroupLimitation(group = {}) {
@@ -16763,6 +16777,9 @@ function renderSunbirdSecurityFindings(findings = [], data = {}) {
     const scenarioCoverage = data?.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
     const coverageIsLimited = Object.values(scenarioCoverage).some(item => /partial|unavailable|not_assessed/i.test(String(item?.status || '')));
 
+    if (!records.length && /^(loading|error)$/.test(String(data.findingLoadState || ''))) {
+        return `<div class="sunbird-security-findings-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><div><strong>${data.findingLoadState === 'loading' ? 'Loading findings' : 'Findings could not be loaded'}</strong><p>${data.findingLoadState === 'loading' ? 'Collecting the latest available evidence.' : 'Please retry; unavailable data does not mean there are no findings.'}</p></div></div>`;
+    }
     if (!records.length) {
         return `<div class="sunbird-security-findings-empty">
             <i class="fas fa-circle-info" aria-hidden="true"></i>
@@ -16778,11 +16795,11 @@ function renderSunbirdSecurityFindings(findings = [], data = {}) {
             groupFirstFinding?.sourceRiskLevel ? ['Provider risk', groupFirstFinding.sourceRiskLevel] : null,
             groupFirstFinding?.sourceRiskState ? ['Provider risk state', groupFirstFinding.sourceRiskState] : null
         ].filter(Boolean);
-        return `<section class="sunbird-security-finding-series" aria-label="${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}">
-            <header class="sunbird-security-finding-series-header">
-                <div><p class="sunbird-security-eyebrow">Finding series</p><h4>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}</h4><p>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupLimitation(group))}</p></div>
+        return `<details class="sunbird-security-finding-series" aria-label="${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}">
+            <summary class="sunbird-security-finding-series-header">
+                <div><p class="sunbird-security-eyebrow">${group.findings.length === 1 ? 'Finding' : 'Related findings'}</p><h4>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupTitle(group))}</h4><p>${sunbirdSecurityEscape(sunbirdSecurityFindingGroupLimitation(group))}</p><small>Open to review assessment and evidence</small></div>
                 <span class="sunbird-security-status ${sunbirdSecurityStatusClass(groupFirstFinding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(groupFirstFinding?.status, 'Status not recorded'))}</span>
-            </header>
+            </summary>
             <div class="sunbird-security-series-assessment">
                 <div class="sunbird-security-assessment-grid">
                     <section><span>Stack CTRL assessment</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(groupFirstFinding?.severity, 'Unassessed'))}</strong><small>Severity</small></section>
@@ -16811,7 +16828,7 @@ function renderSunbirdSecurityFindings(findings = [], data = {}) {
             <details class="sunbird-security-assessment-details"><summary>Event detail</summary><div><div class="sunbird-security-entity-row"><span>Observed / affected</span><div>${affected.length ? affected.map(entity => `<span class="sunbird-security-entity"><b>${sunbirdSecurityEscape(entity.type, '')}:</b> ${sunbirdSecurityEscape(entity.label)}</span>`).join('') : '<span class="sunbird-security-missing">No affected entities were returned.</span>'}${candidateUsers.length ? `<span class="sunbird-security-candidates"><b>Candidate user${candidateUsers.length === 1 ? '' : 's'} observed:</b> ${candidateUsers.map(user => sunbirdSecurityEscape(user)).join(', ')}</span>` : ''}</div></div><p><b>Event impact:</b> ${sunbirdSecurityEscape(finding?.impact)}</p><p><b>Full finding explanation:</b> ${sunbirdSecurityEscape(finding?.description, 'No finding description was returned.')}</p></div></details>
             ${renderSunbirdSecurityEvidenceDetails(evidence, finding)}
         </article>`;
-    }).join('')}</div></section>`;
+    }).join('')}</div></details>`;
     }).join('')}</div>`;
 }
 
@@ -16951,6 +16968,15 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
     const integrationState = integrations.length ? `${integrations.length} source${integrations.length === 1 ? '' : 's'} represented` : 'No source represented';
     return `<div class="sunbird-security-card-summary">
         <p class="sunbird-security-card-intro">${sunbirdSecurityEscape(plainSummary)}</p>
+        ${findings.length ? `<div class="sunbird-security-card-findings" aria-label="Current evidence-backed findings">
+            <div class="sunbird-security-card-findings-heading"><strong>Current findings</strong><span>${findings.length} total</span></div>
+            <ul>${findings.map(finding => {
+                const affected = sunbirdSecurityEntityLabels(finding?.affectedEntities);
+                const source = sunbirdSecurityReadableSourceLabel(sunbirdSecurityFindingSource(finding));
+                return `<li><div><strong>${sunbirdSecurityEscape(finding?.title, 'Security finding')}</strong><small>${sunbirdSecurityEscape(affected.length ? affected.map(entity => entity.label).join(', ') : source)}</small></div><span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.status, 'Not recorded'))}</span></li>`;
+            }).join('')}</ul>
+            <p>Open the full dashboard to review evidence and recommended actions.</p>
+        </div>` : ''}
         <ol class="sunbird-security-card-rows">
             <li><i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i><span>Findings</span><strong>${sunbirdSecurityEscape(findingState)}</strong></li>
             <li><i class="fas fa-satellite-dish" aria-hidden="true"></i><span>Detection coverage</span><strong>${sunbirdSecurityEscape(coverageState)}</strong></li>
@@ -16974,12 +17000,12 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                     </div>
                     <div class="sunbird-mini-stats">
                         <div class="sunbird-mini-stat">
-                            <span>High Severity Alerts</span>
-                            <strong>0</strong>
+                            <span>Findings</span>
+                            <strong>–</strong>
                         </div>
                         <div class="sunbird-mini-stat">
-                            <span>Security Incidents</span>
-                            <strong>0</strong>
+                            <span>High / Critical Findings</span>
+                            <strong>–</strong>
                         </div>
                     </div>
                     ${renderSunbirdSecurityBillingSummary()}
@@ -16994,7 +17020,9 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
             cachedSunbirdSecurityData = await fetchSunbirdSecurityEventsData();
         }
 
-        const data = cachedSunbirdSecurityData;
+        const data = normalizeSunbirdSecurityData(cachedSunbirdSecurityData);
+        const findings = Array.isArray(data.findings) ? data.findings : [];
+        const highFindings = findings.filter(finding => ['high', 'critical'].includes(String(finding?.severity || '').toLowerCase())).length;
         const incidents = (data.incidents || []).slice(0, 10);
         const highSeverityAlerts = data.summary?.highSeverityAlerts || 0;
         const activeIncidents = data.summary?.activeIncidents || 0;
@@ -17045,12 +17073,12 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                 </div>
                 <div class="sunbird-mini-stats">
                     <div class="sunbird-mini-stat">
-                        <span>High Severity Alerts</span>
-                        <strong>${highSeverityAlerts}</strong>
+                        <span>Findings</span>
+                        <strong>${findings.length}</strong>
                     </div>
                     <div class="sunbird-mini-stat">
-                        <span>Security Incidents</span>
-                        <strong>${activeIncidents}</strong>
+                        <span>High / Critical Findings</span>
+                        <strong>${highFindings}</strong>
                     </div>
                 </div>
 
@@ -17061,11 +17089,6 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
     } catch (error) {
         console.error('[Sunbird Security Alerts] Error:', error);
         if (!isSunbirdBillingViewActive('security')) return;
-        if (billingCard.querySelector('.sunbird-panel-view')) {
-            ensureSunbirdBillingCardDimensions();
-            syncSunbirdLeftMenuHeight();
-            return;
-        }
         billingCard.innerHTML = `
             <div class="sunbird-panel-view">
                 <div class="billing-card-header">
@@ -18521,26 +18544,100 @@ function formatPortalMobileAlertTime(timestamp) {
     return minutes < 1 ? 'Just now' : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.round(minutes / 60)}h ago` : `${Math.round(minutes / 1440)}d ago`;
 }
 
-function renderPortalMobileAlerts(items = []) {
+function renderPortalMobileAlerts(items = [], options = {}) {
     const list = document.getElementById('portal-mobile-alerts-list');
     if (!list) return;
-    if (!items.length) {
-        list.innerHTML = '<div class="portal-mobile-alert-empty">No active alerts</div>';
+    if (options.error) {
+        list.innerHTML = '<div class="portal-mobile-alert-empty portal-mobile-alert-error">Alerts could not be updated. Please try again shortly.</div>';
         return;
     }
-    list.innerHTML = items.slice(0, 3).map(item => {
-        const severity = ['critical', 'high', 'medium', 'warning'].includes(String(item.severity).toLowerCase()) ? String(item.severity).toLowerCase() : 'low';
+    if (!items.length) {
+        list.innerHTML = options.limited
+            ? '<div class="portal-mobile-alert-empty">No findings returned. Collection is incomplete, so this is not a clean result.</div>'
+            : options.findingsOnly ? '<div class="portal-mobile-alert-empty">No evidence-backed findings returned.</div>' : '<div class="portal-mobile-alert-empty">No active alerts</div>';
+        return;
+    }
+    list.innerHTML = (options.findingsOnly ? items : items.slice(0, 3)).map(item => {
+        const severity = ['critical', 'high', 'medium', 'warning', 'low'].includes(String(item.severity).toLowerCase()) ? String(item.severity).toLowerCase() : 'neutral';
         const title = escapeIdentityText(item.message || item.displayName || item.title || 'Security alert');
         const detail = escapeIdentityText(item.source || item.type || item.category || 'Security activity');
         return `<div class="portal-mobile-alert-item"><span class="portal-mobile-alert-icon severity-${severity}"><i class="fas fa-bell"></i></span><div class="portal-mobile-alert-body"><p class="portal-mobile-alert-title">${title}</p><p class="portal-mobile-alert-meta">${detail} · ${formatPortalMobileAlertTime(item.timestamp || item.createdDateTime || item.created)}</p></div><span class="portal-mobile-alert-dot severity-${severity}"></span></div>`;
     }).join('');
 }
 
+function setPortalMobileDashboardLoading(isLoading) {
+    const shell = document.getElementById('portal-mobile-shell');
+    const status = document.getElementById('portal-mobile-health-status');
+    const value = document.getElementById('portal-mobile-health-value');
+    const ring = document.getElementById('portal-mobile-health-ring');
+    const list = document.getElementById('portal-mobile-alerts-list');
+    if (!shell) return;
+
+    shell.classList.toggle('is-loading', isLoading);
+    shell.setAttribute('aria-busy', String(isLoading));
+    if (!isLoading) return;
+
+    if (status) {
+        status.classList.remove('is-warning', 'is-critical');
+        status.style.color = 'rgba(255, 255, 255, 0.68)';
+        status.textContent = 'Updating your workspace';
+    }
+    if (value) value.textContent = '--';
+    if (ring) {
+        ring.setAttribute('stroke-dasharray', '0, 100');
+        ring.style.stroke = 'rgba(255, 255, 255, 0.34)';
+    }
+    if (list) {
+        list.innerHTML = '<div class="portal-mobile-alert-loading" role="status"><span class="portal-mobile-loading-mark" aria-hidden="true"></span><span>Updating your workspace</span></div>';
+    }
+}
+
+function renderPortalMobileHealthUnavailable() {
+    const text = document.getElementById('portal-mobile-health-value');
+    const ring = document.getElementById('portal-mobile-health-ring');
+    const status = document.getElementById('portal-mobile-health-status');
+    if (text) text.textContent = '--';
+    if (ring) {
+        ring.setAttribute('stroke-dasharray', '0, 100');
+        ring.style.stroke = 'rgba(255, 255, 255, 0.34)';
+    }
+    if (status) {
+        status.classList.remove('is-warning', 'is-critical');
+        status.style.color = 'rgba(255, 255, 255, 0.68)';
+        status.textContent = 'Health data unavailable';
+    }
+}
+
+function getPortalMobileAlertItems(security) {
+    if (isSunbirdUser()) {
+        const payload = security?.payload && typeof security.payload === 'object' ? security.payload : security;
+        return (Array.isArray(payload?.findings) ? payload.findings : []).map(finding => ({
+            title: finding.title,
+            severity: finding.severity,
+            source: sunbirdSecurityReadableSourceLabel(sunbirdSecurityFindingSource(finding)),
+            timestamp: (Array.isArray(finding.evidence) ? finding.evidence.find(item => item?.eventTime)?.eventTime : null) || finding.createdAt
+        }));
+    }
+    const activity = Array.isArray(security?.activityFeed) ? security.activityFeed : [];
+    const incidents = Array.isArray(security?.incidents) ? security.incidents : [];
+    const seen = new Set();
+    return [...activity, ...incidents].filter(item => {
+        const key = item?.id || item?.eventId || item?.incidentId || [item?.message, item?.title, item?.displayName, item?.timestamp || item?.createdDateTime || item?.created].join('|');
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
 function renderPortalMobileQuickActions() {
     const grid = document.getElementById('portal-mobile-quick-grid');
     if (!grid || grid.dataset.ready) return;
-    const actions = [['Projects', 'fa-folder-open', () => setPortalMobileTab('dashboard')], ['Security Alerts', 'fa-bell', () => setPortalMobileTab('alerts')], ['Chat Support', 'fa-comments', () => document.getElementById('chatbot-toggle')?.click()]];
-    if (isSunbirdUser()) actions.splice(2, 0, ['Reports', 'fa-file-alt', () => { setPortalMobileTab('alerts'); window.switchBillingMenu?.('reports'); }]);
+    const actions = [['Projects', 'fa-folder-open', () => setPortalMobileTab('dashboard')], ['Security Alerts', 'fa-bell', () => setPortalMobileTab('alerts')]];
+    if (isSunbirdUser()) {
+        actions.push(['Reports', 'fa-file-alt', () => { setPortalMobileTab('alerts'); window.switchBillingMenu?.('reports'); }]);
+    } else {
+        actions.push(['Chat Support', 'fa-comments', () => document.getElementById('chatbot-toggle')?.click()]);
+    }
     actions.forEach(([label, icon, action]) => {
         const button = document.createElement('button');
         button.type = 'button'; button.className = 'portal-mobile-quick-btn';
@@ -18550,18 +18647,41 @@ function renderPortalMobileQuickActions() {
     grid.dataset.ready = 'true';
 }
 
+let portalMobileDashboardRefreshId = 0;
+
 async function refreshPortalMobileDashboard() {
     if (!isPortalMobileLayout() || sessionStorage.getItem('isLoggedIn') !== 'true') return;
     syncPortalMobileUserName(); renderPortalMobileQuickActions();
-    try {
-        const reports = await fetchSunbirdReportsData('30d');
+    const refreshId = ++portalMobileDashboardRefreshId;
+    setPortalMobileDashboardLoading(true);
+
+    const [reportsResult, securityResult] = await Promise.allSettled([
+        fetchSunbirdReportsData('30d'),
+        cachedSunbirdSecurityData ? Promise.resolve(cachedSunbirdSecurityData) : fetchSunbirdSecurityEventsData()
+    ]);
+
+    if (refreshId !== portalMobileDashboardRefreshId) return;
+
+    if (reportsResult.status === 'fulfilled') {
+        const reports = reportsResult.value;
         renderPortalMobileHealth(getSunbirdReportIntelligence(reports).health);
-    } catch (error) { console.warn('[Mobile Portal] Report health unavailable:', error.message); }
-    try {
-        const security = cachedSunbirdSecurityData || await fetchSunbirdSecurityEventsData();
+    } else {
+        console.warn('[Mobile Portal] Report health unavailable:', reportsResult.reason?.message);
+        renderPortalMobileHealthUnavailable();
+    }
+
+    if (securityResult.status === 'fulfilled') {
+        const security = securityResult.value;
         cachedSunbirdSecurityData = security;
-        renderPortalMobileAlerts(security.activityFeed || security.incidents || []);
-    } catch (error) { console.warn('[Mobile Portal] Security alerts unavailable:', error.message); }
+        const payload = security?.payload && typeof security.payload === 'object' ? security.payload : security;
+        const coverage = payload?.scenarioCoverage && typeof payload.scenarioCoverage === 'object' ? Object.values(payload.scenarioCoverage) : [];
+        renderPortalMobileAlerts(getPortalMobileAlertItems(security), { findingsOnly: isSunbirdUser(), limited: isSunbirdUser() && coverage.some(item => /partial|unavailable|not_assessed/i.test(String(item?.status || ''))) });
+    } else {
+        console.warn('[Mobile Portal] Security alerts unavailable:', securityResult.reason?.message);
+        renderPortalMobileAlerts([], { error: true });
+    }
+
+    setPortalMobileDashboardLoading(false);
 }
 
 function initializePortalMobileDashboard() {

@@ -6,7 +6,7 @@
     <title>Client Portal | StackOps IT Solutions</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/clientportal.css?v=20261008-reporting-identity-analysis-v9">
+    <link rel="stylesheet" href="css/clientportal.css?v=20261020-security-card-motion-v1">
     <link rel="stylesheet" href="css/scrollbar.css">
 
     <style>
@@ -1017,12 +1017,12 @@
             <div class="container">
 
                 <!-- Mobile / Tablet home shell (structure only — liquid glass styling from CSS) -->
-                <div class="portal-mobile-shell" id="portal-mobile-shell">
+                <div class="portal-mobile-shell is-loading" id="portal-mobile-shell" aria-busy="true">
                     <div class="portal-mobile-health dashboard-card" id="portal-mobile-health-card">
                         <div class="portal-mobile-health-content">
                             <div class="portal-mobile-health-text">
                                 <h2>System Health</h2>
-                                <p class="portal-mobile-health-status" id="portal-mobile-health-status">All systems operational</p>
+                                <p class="portal-mobile-health-status" id="portal-mobile-health-status">Updating your workspace</p>
                             </div>
                             <div class="portal-mobile-health-gauge" aria-hidden="true">
                                 <svg class="portal-mobile-health-ring" viewBox="0 0 36 36">
@@ -1041,8 +1041,11 @@
 
                     <div class="portal-mobile-alerts">
                         <h2 class="portal-mobile-section-title">Latest Alerts</h2>
-                        <div class="portal-mobile-alerts-list" id="portal-mobile-alerts-list">
-                            <div class="portal-mobile-alert-empty">No active alerts</div>
+                        <div class="portal-mobile-alerts-list" id="portal-mobile-alerts-list" aria-live="polite">
+                            <div class="portal-mobile-alert-loading" role="status">
+                                <span class="portal-mobile-loading-mark" aria-hidden="true"></span>
+                                <span>Updating your workspace</span>
+                            </div>
                         </div>
                         <button type="button" class="portal-mobile-view-all" id="portal-mobile-view-all-alerts">
                             View all alerts <i class="fas fa-arrow-right" aria-hidden="true"></i>
@@ -1535,7 +1538,7 @@
     <script src="js/script.js?v=20260529"></script>
     <!-- StackOps demo tenant (user 36 / company 5): serves the Sunbird-style dashboard from local mock data. No-op for every other user. Must load before clientportal.js. -->
     <script src="js/clientportal-stackops-mock.js?v=20260903"></script>
-    <script src="js/clientportal.js?v=20261006-realtime-security-alerts-v5"></script>
+    <script src="js/clientportal.js?v=20261020-security-card-motion-v1"></script>
     <script src="js/ChatBot.js"></script>
 </body>
 </html>

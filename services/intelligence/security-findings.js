@@ -177,6 +177,7 @@ function createFindingId(detectionKey, anchor) {
 
 function buildAnonymousIpFindings(alerts, signIns) {
     return alerts.filter(alert => {
+        if (alert.cloudflareApiSignal || alert.cloudflareWebhook) return false;
         const description = [alert.title, alert.description, alert.category, alert.apiCategory].map(text).join(' ');
         return ANONYMOUS_IP_PATTERN.test(description);
     }).map(alert => {
@@ -256,6 +257,37 @@ function buildAnonymousIpFindings(alerts, signIns) {
             assessmentBasis: compatibilityOnly
                 ? 'Legacy Graph alert retained temporarily as an observation only; it is excluded from correlation and notification.'
                 : 'Stack CTRL links the security alert to collected sign-ins using an exact IP match. Severity remains unassessed pending validated impact criteria.'
+        };
+    });
+}
+
+function buildCloudflareFindings(alerts = []) {
+    return alerts.filter(alert => alert && (alert.cloudflareApiSignal || alert.cloudflareWebhook)).map(alert => {
+        const title = text(alert.title) || 'Cloudflare security alert';
+        const providerSeverity = text(alert.sourceSeverity) || null;
+        const identity = alert.id || alert.correlationId || [title, alert.eventTime, alert.user, alert.ipAddress].map(text).join('|');
+        return {
+            id: createFindingId('cloudflare_security_observation', identity),
+            detectionId: 'cloudflare_security_observation',
+            title,
+            description: text(alert.description) || 'Cloudflare reported a security event; review its evidence for details.',
+            impact: 'Cloudflare reported an event that warrants review. Its impact has not been independently assessed.',
+            severity: 'unassessed',
+            sourceSeverity: providerSeverity,
+            source: 'Cloudflare',
+            confidence: 'low',
+            confidenceReason: 'This finding is based on a Cloudflare provider observation; independent correlation has not been performed.',
+            status: /resolved|closed|recovered|clear/i.test(text(alert.status)) ? 'resolved' : 'needs_investigation',
+            affectedEntities: {
+                users: [alert.user].filter(Boolean),
+                devices: [],
+                ipAddresses: [alert.ipAddress].filter(Boolean),
+                resources: [alert.domain].filter(Boolean)
+            },
+            providerValues: { severity: providerSeverity, status: alert.status || null, source: 'Cloudflare' },
+            evidence: [evidenceReference('security_alert', alert, title)],
+            recommendedAction: 'Review the Cloudflare event and its context; verify the affected resource and impact before taking action.',
+            assessmentBasis: 'Cloudflare reported this event. Stack CTRL has not independently determined severity or correlated it with other evidence.'
         };
     });
 }
@@ -451,6 +483,7 @@ function buildSecurityFindings({
     const useRiskDetectionFallback = !riskyUsers.length && sourceStatuses.riskyUsers === 'unavailable';
     const impossibleTravel = buildImpossibleTravelFindings(signIns);
     const findings = [
+        ...buildCloudflareFindings(alerts),
         ...buildAnonymousIpFindings(alerts, signIns),
         ...buildRiskyUserFindings(riskyUsers, riskDetections, signIns),
         ...(useRiskDetectionFallback ? buildRiskDetectionSignInFindings(riskDetections, signIns) : []),
@@ -514,5 +547,6 @@ function buildSecurityFindings({
 
 module.exports = {
     buildSecurityFindings,
+    buildCloudflareFindings,
     getSignInOutcome
 };
