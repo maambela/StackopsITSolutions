@@ -7444,6 +7444,10 @@ async function sendSunbirdAutomationStartNotice(companyId, companyName, localDat
     await sendEmail(recipient, subject, html, true);
 }
 
+function isSunbirdAutomationStartNoticeEnabled() {
+    return ['true', '1', 'yes'].includes(String(process.env.STACKCTRL_AUTOMATION_START_NOTICE_ENABLED || 'false').toLowerCase());
+}
+
 async function runSunbirdReportAutomation() {
     if (!pool) return;
     const now = new Date();
@@ -7466,7 +7470,7 @@ async function runSunbirdReportAutomation() {
                 ? new Date(settings.LastAutomationStartNoticeDate).toISOString().slice(0, 10)
                 : null;
             if (lastDaily !== localDate) {
-                if (lastAutomationStartNoticeDate !== localDate) {
+                if (isSunbirdAutomationStartNoticeEnabled() && lastAutomationStartNoticeDate !== localDate) {
                     try {
                         await sendSunbirdAutomationStartNotice(companyId, companyName, localDate);
                         await pool.query(
