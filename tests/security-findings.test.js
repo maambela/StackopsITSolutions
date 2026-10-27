@@ -26,6 +26,27 @@ test('Cloudflare provider events become inspectable observations without invente
     assert.equal(observation.evidence.length, 1);
 });
 
+test('provider security incidents become evidence-backed AI assessment candidates without inventing scope', () => {
+    const result = buildSecurityFindings({
+        incidents: [{
+            id: 'incident-1', displayName: 'Suspicious inbox rule', description: 'Microsoft correlated related alert activity.',
+            severity: 'high', sourceSeverity: 'high', status: 'active', source: 'Microsoft Defender',
+            created: '2026-10-20T10:00:00.000Z', assignedTo: 'Security operations', redirectUrl: 'https://security.microsoft.com/incidents/incident-1'
+        }],
+        sourceStatuses: { incidents: 'complete' }
+    });
+
+    const incident = result.findings.find(finding => finding.detectionId === 'security_incident');
+    assert.ok(incident);
+    assert.equal(incident.severity, 'unassessed');
+    assert.equal(incident.sourceSeverity, 'high');
+    assert.equal(incident.evidence[0].sourceType, 'security_incident');
+    assert.equal(incident.evidence[0].sourceId, 'incident-1');
+    assert.equal(incident.evidence[0].eventTime, '2026-10-20T10:00:00.000Z');
+    assert.deepEqual(incident.affectedEntities.users, []);
+    assert.equal(result.scenarioCoverage.securityIncidents.status, 'evaluated');
+});
+
 test('Microsoft alert evidence exposes explicit nested IP and user entities without parsing alert text', () => {
     const entities = extractMicrosoftAlertEntities({
         title: 'Anonymous IP address detected',

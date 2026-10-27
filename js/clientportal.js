@@ -5175,6 +5175,7 @@ let sunbirdSecurityDashboardData = null;
 let sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', sort: 'newest' };
 let lockedSunbirdSecurityInsightEvidenceKey = null;
 let sunbirdSecurityTrendWindow = '7d';
+let sunbirdSecuritySelectedFindingId = null;
 
 function openSunbirdSecurityDashboard() {
     const dashboardView = document.getElementById('dashboard-view');
@@ -5193,6 +5194,7 @@ function openSunbirdSecurityDashboard() {
     dashboardView.classList.add('sunbird-security-active');
 
     captureDashboardViewHTML();
+    sunbirdSecuritySelectedFindingId = null;
     dashboardView.innerHTML = renderSunbirdSecurityShell();
     setupSunbirdSecurityDashboard();
 
@@ -5491,6 +5493,8 @@ function normalizeSunbirdSecurityData(data = {}) {
         categoryDistribution: Array.isArray(payload.categoryDistribution) ? payload.categoryDistribution : countSunbirdSecurityBy(alerts, a => a.category || 'Other'),
         regionDistribution: Array.isArray(payload.regionDistribution) ? payload.regionDistribution : countSunbirdSecurityBy(suspiciousSignIns, s => s.country || s.location || 'Unknown'),
         attackTimeline: Array.isArray(payload.attackTimeline) ? payload.attackTimeline : buildSunbirdSecurityTimeline(alerts, incidents, suspiciousSignIns, threats),
+        dailyOverview: payload.dailyOverview && typeof payload.dailyOverview === 'object' ? payload.dailyOverview : null,
+        assessmentMeta: payload.assessmentMeta && typeof payload.assessmentMeta === 'object' ? payload.assessmentMeta : null,
         aiSummary: payload.aiSummary || 'Security posture is currently based on cached Microsoft security evidence.',
         recommendations: Array.isArray(payload.recommendations) ? payload.recommendations : buildSunbirdSecurityRecommendations({ highSeverityAlerts, activeIncidents, usersUnderAttack, threats }),
         summary: {
@@ -5726,13 +5730,192 @@ function renderSunbirdSecuritySources(data = {}) {
     return `<ol class="sunbird-security-sources-list">${sources.map(source => `<li><div><strong>${sunbirdSecurityEscape(source.name)}</strong><p>${sunbirdSecurityEscape(source.state)}</p></div><div><span>${sunbirdSecurityEscape(source.type)}</span><b>${sunbirdSecurityEscape(source.count)} record${source.count === 1 ? '' : 's'}</b></div></li>`).join('')}</ol>`;
 }
 
+function getSunbirdSecurityFindingById(findings = [], findingId = '') {
+    const id = String(findingId || '').trim();
+    if (!id) return null;
+    return (Array.isArray(findings) ? findings : []).find(finding => String(finding?.id || '') === id) || null;
+}
+
+function sunbirdSecurityFindingEventTime(finding = {}) {
+    const evidenceTime = (Array.isArray(finding.evidence) ? finding.evidence : []).map(item => item?.eventTime).find(Boolean);
+    return evidenceTime || finding.aiAssessment?.assessedAt || null;
+}
+
+function sunbirdSecurityFindingPrimaryEntity(finding = {}) {
+    const entities = sunbirdSecurityEntityLabels(finding?.affectedEntities);
+    if (entities.length) return entities[0].label;
+    const candidates = Array.isArray(finding?.candidateUsers) ? finding.candidateUsers.filter(Boolean) : [];
+    return candidates[0] || null;
+}
+
+function renderSunbirdSecurityDailyOverview(model = {}) {
+    const overview = model.dailyOverview && typeof model.dailyOverview === 'object' ? model.dailyOverview : null;
+    const findings = Array.isArray(model.findings) ? model.findings : [];
+    if (!overview && !findings.length) return '';
+    const summary = overview?.summary || model.aiSummary || 'Daily security intelligence is based on the findings and collection coverage reviewed in this result.';
+    const requiresAttention = (overview?.requiresAttention || []).length;
+    const monitor = (overview?.monitor || []).length;
+    const noAction = (overview?.noImmediateAction || []).length;
+    const gaps = Array.isArray(overview?.collectionGaps) ? overview.collectionGaps.filter(Boolean) : [];
+    return `<section class="sunbird-security-daily-overview" aria-label="Daily security intelligence">
+        <div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">Daily overview</p><h3>What needs attention today</h3></div>
+        <p class="sunbird-security-daily-summary">${sunbirdSecurityEscape(summary)}</p>
+        <dl class="sunbird-security-daily-stats">
+            <div><dt>Requires attention</dt><dd>${sunbirdSecurityEscape(requiresAttention)}</dd></div>
+            <div><dt>Monitor</dt><dd>${sunbirdSecurityEscape(monitor)}</dd></div>
+            <div><dt>No immediate action</dt><dd>${sunbirdSecurityEscape(noAction)}</dd></div>
+        </dl>
+        ${gaps.length ? `<div class="sunbird-security-daily-gaps"><strong>Collection gaps</strong><ul>${gaps.map(gap => `<li>${sunbirdSecurityEscape(gap)}</li>`).join('')}</ul></div>` : ''}
+    </section>`;
+}
+
+function renderSunbirdSecurityAlertsOverview(findings = [], data = {}) {
+    const records = Array.isArray(findings) ? findings : [];
+    const scenarioCoverage = data?.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
+    const coverageIsLimited = Object.values(scenarioCoverage).some(item => /partial|unavailable|not_assessed/i.test(String(item?.status || '')));
+
+    if (!records.length && /^(loading|error)$/.test(String(data.findingLoadState || ''))) {
+        return `<div class="sunbird-security-findings-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><div><strong>${data.findingLoadState === 'loading' ? 'Loading alerts' : 'Alerts could not be loaded'}</strong><p>${data.findingLoadState === 'loading' ? 'Collecting the latest available evidence.' : 'Please retry; unavailable data does not mean there are no alerts.'}</p></div></div>`;
+    }
+    if (!records.length) {
+        return `<div class="sunbird-security-findings-empty">
+            <i class="fas fa-circle-info" aria-hidden="true"></i>
+            <div><strong>No alert generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage before treating this as a clean result.' : 'The returned evidence did not produce an evidence-backed alert.'}</p></div>
+        </div>`;
+    }
+
+    const sorted = [...records].sort((left, right) => {
+        const rank = value => {
+            const severity = String(value?.severity || 'unassessed').toLowerCase();
+            if (severity === 'critical') return 5;
+            if (severity === 'high') return 4;
+            if (severity === 'medium') return 3;
+            if (severity === 'low') return 2;
+            if (severity === 'informational') return 1;
+            return 0;
+        };
+        const severityDelta = rank(right) - rank(left);
+        if (severityDelta !== 0) return severityDelta;
+        return String(sunbirdSecurityFindingEventTime(right)).localeCompare(String(sunbirdSecurityFindingEventTime(left)));
+    });
+
+    return `<div class="sunbird-security-alerts-overview">${sorted.map(finding => {
+        const entity = sunbirdSecurityFindingPrimaryEntity(finding);
+        const summary = finding.aiSummary || finding.description || 'No AI summary was returned for this alert.';
+        const action = finding.recommendedAction;
+        const showAction = action && finding.actionPriority !== 'none' && finding.requiresAction !== false;
+        const severityClass = sunbirdSecuritySeverityClass(finding.severity);
+        return `<article class="sunbird-security-alert-row">
+            <div class="sunbird-security-alert-row-main">
+                <div class="sunbird-security-alert-row-badges">
+                    <span class="sunbird-severity-pill severity-${sunbirdSecurityEscape(severityClass, 'medium')}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.severity, 'Unassessed'))}</span>
+                    <span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.status, 'Status not recorded'))}</span>
+                </div>
+                <h4>${sunbirdSecurityEscape(finding.title, 'Security alert')}</h4>
+                <p class="sunbird-security-alert-summary">${sunbirdSecurityEscape(summary)}</p>
+                <dl class="sunbird-security-alert-meta">
+                    ${entity ? `<div><dt>Affected</dt><dd>${sunbirdSecurityEscape(entity)}</dd></div>` : ''}
+                    <div><dt>When</dt><dd>${sunbirdSecurityEscape(sunbirdSecurityFormatTime(sunbirdSecurityFindingEventTime(finding)))}</dd></div>
+                    ${showAction ? `<div class="sunbird-security-alert-action"><dt>Next step</dt><dd>${sunbirdSecurityEscape(action)}</dd></div>` : ''}
+                </dl>
+            </div>
+            <button type="button" class="sunbird-security-alert-detail-btn" onclick='openSunbirdSecurityFindingDetail(${JSON.stringify(finding.id || '')})'>View details</button>
+        </article>`;
+    }).join('')}</div>`;
+}
+
+function renderSunbirdSecurityAiAssessmentSection(finding = {}) {
+    const assessment = finding.aiAssessment && typeof finding.aiAssessment === 'object' ? finding.aiAssessment : {};
+    const summary = finding.aiSummary || assessment.aiSummary || assessment.whatHappened || finding.description;
+    const providerValues = [
+        finding.sourceSeverity ? ['Provider severity', finding.sourceSeverity] : null,
+        finding.sourceRiskLevel ? ['Provider risk', finding.sourceRiskLevel] : null,
+        finding.sourceRiskState ? ['Provider risk state', finding.sourceRiskState] : null
+    ].filter(Boolean);
+    return `<section class="sunbird-security-detail-block sunbird-security-detail-ai">
+        <div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">AI assessment</p><h3>What this means</h3></div>
+        <p class="sunbird-security-detail-lead">${sunbirdSecurityEscape(summary)}</p>
+        <div class="sunbird-security-assessment-grid">
+            <section><span>Stack CTRL severity</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.severity, 'Unassessed'))}</strong><small>Potential impact if malicious</small></section>
+            <section><span>Confidence</span><strong>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.confidence, 'Not recorded'))}</strong><small>${sunbirdSecurityEscape(finding.confidenceReason || assessment.confidenceReason)}</small></section>
+            ${providerValues.length ? `<section class="sunbird-security-provider-values"><span>Provider values</span>${providerValues.map(([label, value]) => `<p><b>${sunbirdSecurityEscape(label, '')}</b>${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(value))}</p>`).join('')}</section>` : '<section class="sunbird-security-provider-values"><span>Provider values</span><p>No provider severity or risk value returned.</p></section>'}
+        </div>
+        ${finding.recommendedAction ? `<p class="sunbird-security-recommendation"><i class="fas fa-arrow-right" aria-hidden="true"></i><span><b>Recommended next step:</b> ${sunbirdSecurityEscape(finding.recommendedAction)}</span></p>` : ''}
+        ${finding.aiAssessmentStatus && finding.aiAssessmentStatus !== 'assessed' ? `<p class="sunbird-security-ai-status-note">AI assessment status: ${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.aiAssessmentStatus))}${finding.aiAssessmentError ? ` — ${sunbirdSecurityEscape(finding.aiAssessmentError)}` : ''}</p>` : ''}
+    </section>`;
+}
+
+function renderSunbirdSecurityDetailList(title, items = []) {
+    const rows = (Array.isArray(items) ? items : []).filter(Boolean);
+    if (!rows.length) return '';
+    return `<section class="sunbird-security-detail-block"><div class="sunbird-security-section-title"><h3>${sunbirdSecurityEscape(title)}</h3></div><ul class="sunbird-security-detail-list">${rows.map(item => `<li>${sunbirdSecurityEscape(item)}</li>`).join('')}</ul></section>`;
+}
+
+function renderSunbirdSecurityFindingDetail(finding = {}, model = {}) {
+    if (!finding) {
+        return `<div class="sunbird-security-findings-empty"><strong>Alert not found</strong><p>The selected alert is no longer in the current result.</p><button type="button" class="sunbird-security-alert-detail-btn" onclick="closeSunbirdSecurityFindingDetail()">Back to alerts</button></div>`;
+    }
+    const assessment = finding.aiAssessment && typeof finding.aiAssessment === 'object' ? finding.aiAssessment : {};
+    const affected = sunbirdSecurityEntityLabels(finding.affectedEntities);
+    const candidateUsers = Array.isArray(finding.candidateUsers) ? finding.candidateUsers.filter(Boolean) : [];
+    const relatedFindings = (Array.isArray(finding.relatedFindingIds) ? finding.relatedFindingIds : [])
+        .map(id => getSunbirdSecurityFindingById(model.findings, id))
+        .filter(Boolean);
+    const limitations = [
+        ...(Array.isArray(assessment.limitations) ? assessment.limitations : []),
+        ...(Array.isArray(assessment.unknowns) ? assessment.unknowns : [])
+    ].filter(Boolean);
+
+    return `<section id="sunbird-security-finding-detail" class="sunbird-security-investigation-section sunbird-security-finding-detail">
+        <div class="sunbird-security-detail-toolbar">
+            <button type="button" class="sunbird-id-back-btn sunbird-security-detail-back" onclick="closeSunbirdSecurityFindingDetail()"><span class="sunbird-id-back-icon" aria-hidden="true">&larr;</span><span>Back to alerts</span></button>
+            <div><p class="sunbird-security-eyebrow">Alert investigation</p><h3>${sunbirdSecurityEscape(finding.title, 'Security alert')}</h3></div>
+        </div>
+        ${renderSunbirdSecurityAiAssessmentSection(finding)}
+        <section class="sunbird-security-detail-block"><div class="sunbird-security-section-title"><h3>What happened</h3></div>
+            <p>${sunbirdSecurityEscape(assessment.whatHappened || sunbirdSecurityFindingObservation(finding))}</p>
+            <div class="sunbird-security-entity-row"><span>Observed / affected</span><div>${affected.length ? affected.map(entity => `<span class="sunbird-security-entity"><b>${sunbirdSecurityEscape(entity.type, '')}:</b> ${sunbirdSecurityEscape(entity.label)}</span>`).join('') : '<span class="sunbird-security-missing">No affected entities were returned.</span>'}${candidateUsers.length ? `<span class="sunbird-security-candidates"><b>Candidate user${candidateUsers.length === 1 ? '' : 's'}:</b> ${candidateUsers.map(user => sunbirdSecurityEscape(user)).join(', ')}</span>` : ''}</div></div>
+            <p><b>Relevant period:</b> ${sunbirdSecurityEscape(sunbirdSecurityFormatTime(sunbirdSecurityFindingEventTime(finding)))}</p>
+        </section>
+        ${renderSunbirdSecurityDetailList('Why the AI reached this conclusion', [
+            assessment.reasoning || finding.assessmentBasis,
+            ...(assessment.supportingEvidence || []).map(item => `Supporting: ${item}`),
+            ...(assessment.contradictoryEvidence || []).map(item => `Contradictory: ${item}`),
+            ...(assessment.plausibleLegitimateExplanations || []).map(item => `Legitimate explanation: ${item}`)
+        ])}
+        <section class="sunbird-security-detail-block"><div class="sunbird-security-section-title"><h3>Evidence and source records</h3><p>Underlying records cited for this assessment.</p></div>${renderSunbirdSecurityEvidenceDetails(finding.evidence, finding)}</section>
+        ${relatedFindings.length ? `<section class="sunbird-security-detail-block"><div class="sunbird-security-section-title"><h3>Related activity</h3></div><ul class="sunbird-security-detail-list">${relatedFindings.map(item => `<li><button type="button" class="sunbird-security-related-link" onclick='openSunbirdSecurityFindingDetail(${JSON.stringify(item.id || '')})'>${sunbirdSecurityEscape(item.title, 'Related alert')}</button></li>`).join('')}</ul></section>` : ''}
+        ${limitations.length ? renderSunbirdSecurityDetailList('Limitations and unknowns', limitations) : ''}
+        <section class="sunbird-security-detail-block"><div class="sunbird-security-section-title"><h3>Review and response</h3></div><p>Investigation status: <span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding.status, 'Not recorded'))}</span></p><p class="sunbird-security-detail-note">AI recommendations are guidance only. Verify evidence before containment or remediation.</p></section>
+    </section>`;
+}
+
+function openSunbirdSecurityFindingDetail(findingId) {
+    sunbirdSecuritySelectedFindingId = String(findingId || '').trim() || null;
+    renderSunbirdSecurityInvestigation(buildSunbirdSecurityModel());
+    const detail = document.getElementById('sunbird-security-finding-detail');
+    detail?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeSunbirdSecurityFindingDetail() {
+    sunbirdSecuritySelectedFindingId = null;
+    renderSunbirdSecurityInvestigation(buildSunbirdSecurityModel());
+    document.getElementById('sunbird-security-findings-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function renderSunbirdSecurityInvestigation(model) {
     const el = document.getElementById('sunbird-security-investigation');
     if (!el) return;
-    el.innerHTML = `
+    const selectedFinding = sunbirdSecuritySelectedFindingId
+        ? getSunbirdSecurityFindingById(model.findings, sunbirdSecuritySelectedFindingId)
+        : null;
+    el.innerHTML = selectedFinding
+        ? renderSunbirdSecurityFindingDetail(selectedFinding, model)
+        : `
         ${renderSunbirdSecurityInvestigationSummary(model)}
+        ${renderSunbirdSecurityDailyOverview(model)}
         ${renderSunbirdSecurityFindingOverview(model)}
-        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Evidence-backed findings</h3><p>Every returned finding is shown with its assessment, affected entities, action, and cited evidence.</p>${model.findingLoadState === 'error' && model.findings?.length ? '<p>Refresh failed; showing previously saved findings, which may be out of date.</p>' : ''}</div>${renderSunbirdSecurityFindings(model.findings, model)}</section>
+        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Alerts</h3><p>Review concise AI summaries here, then open an alert for the full investigation and cited evidence.</p>${model.findingLoadState === 'error' && model.findings?.length ? '<p>Refresh failed; showing previously saved alerts, which may be out of date.</p>' : ''}</div>${renderSunbirdSecurityAlertsOverview(model.findings, model)}</section>
         <section id="sunbird-security-coverage-section" class="sunbird-security-investigation-section sunbird-security-coverage-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">02</p><h3>Detection coverage</h3><p>Scenario-specific availability and limitations.</p></div>${renderSunbirdSecurityCoverage(model)}</section>
         <section id="sunbird-security-sources-section" class="sunbird-security-investigation-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">03</p><h3>Connected security evidence</h3><p>Only sources represented in the returned security model are shown. Cloudflare posture and coverage are kept separate from incident activity.</p></div>${renderSunbirdSecuritySources(model)}</section>
     `;
@@ -6454,6 +6637,8 @@ function getSunbirdSecurityDayKey(value) {
 }
 
 window.openSunbirdSecurityDashboard = openSunbirdSecurityDashboard;
+window.openSunbirdSecurityFindingDetail = openSunbirdSecurityFindingDetail;
+window.closeSunbirdSecurityFindingDetail = closeSunbirdSecurityFindingDetail;
 window.openSunbirdSecurityEvidence = openSunbirdSecurityEvidence;
 window.openSunbirdSecurityEventEvidence = openSunbirdSecurityEventEvidence;
 window.openSunbirdSecurityTrendEvidence = openSunbirdSecurityTrendEvidence;
@@ -16956,13 +17141,13 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
     const limitedCoverage = coverageStates.some(state => /partial|unavailable|not_assessed/.test(state));
     const integrations = getSunbirdSecurityIntegrationSources(data);
     const hasReturnedData = Boolean(data && (data.summary || data.collectionStatus || data.collection || findings.length || Object.keys(coverage).length || integrations.length));
-    const plainSummary = !hasReturnedData
+    const plainSummary = data.dailyOverview?.summary || data.aiSummary || (!hasReturnedData
         ? 'Collecting current security evidence. A successful empty response is not treated as a clean result.'
         : findings.length
-            ? `${findings.length} evidence-backed finding${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} review from the returned evidence.`
+            ? `${findings.length} evidence-backed alert${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} review from the returned evidence.`
             : limitedCoverage
-                ? 'No finding was generated, but one or more detection scenarios are limited or unavailable.'
-                : 'No evidence-backed finding was generated from the returned collection.';
+                ? 'No alert was generated, but one or more detection scenarios are limited or unavailable.'
+                : 'No evidence-backed alert was generated from the returned collection.');
     const findingState = findings.length ? `${findings.length} to review` : 'No finding generated';
     const coverageState = !Object.keys(coverage).length ? 'Not yet reported' : limitedCoverage ? 'Limited / incomplete' : 'Reported';
     const integrationState = integrations.length ? `${integrations.length} source${integrations.length === 1 ? '' : 's'} represented` : 'No source represented';
@@ -16970,12 +17155,13 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
         <p class="sunbird-security-card-intro">${sunbirdSecurityEscape(plainSummary)}</p>
         ${findings.length ? `<div class="sunbird-security-card-findings" aria-label="Current evidence-backed findings">
             <div class="sunbird-security-card-findings-heading"><strong>Current findings</strong><span>${findings.length} total</span></div>
-            <ul>${findings.map(finding => {
+            <ul>${findings.slice(0, 5).map(finding => {
                 const affected = sunbirdSecurityEntityLabels(finding?.affectedEntities);
                 const source = sunbirdSecurityReadableSourceLabel(sunbirdSecurityFindingSource(finding));
-                return `<li><div><strong>${sunbirdSecurityEscape(finding?.title, 'Security finding')}</strong><small>${sunbirdSecurityEscape(affected.length ? affected.map(entity => entity.label).join(', ') : source)}</small></div><span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.status, 'Not recorded'))}</span></li>`;
+                const summary = finding.aiSummary || finding.description || '';
+                return `<li><div><strong>${sunbirdSecurityEscape(finding?.title, 'Security alert')}</strong><small>${sunbirdSecurityEscape(summary || (affected.length ? affected.map(entity => entity.label).join(', ') : source))}</small></div><span class="sunbird-security-status ${sunbirdSecurityStatusClass(finding?.status)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(finding?.status, 'Not recorded'))}</span></li>`;
             }).join('')}</ul>
-            <p>Open the full dashboard to review evidence and recommended actions.</p>
+            <p>Open the full dashboard to review alert details, evidence, and recommended actions.</p>
         </div>` : ''}
         <ol class="sunbird-security-card-rows">
             <li><i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i><span>Findings</span><strong>${sunbirdSecurityEscape(findingState)}</strong></li>
@@ -18561,7 +18747,8 @@ function renderPortalMobileAlerts(items = [], options = {}) {
         const severity = ['critical', 'high', 'medium', 'warning', 'low'].includes(String(item.severity).toLowerCase()) ? String(item.severity).toLowerCase() : 'neutral';
         const title = escapeIdentityText(item.message || item.displayName || item.title || 'Security alert');
         const detail = escapeIdentityText(item.source || item.type || item.category || 'Security activity');
-        return `<div class="portal-mobile-alert-item"><span class="portal-mobile-alert-icon severity-${severity}"><i class="fas fa-bell"></i></span><div class="portal-mobile-alert-body"><p class="portal-mobile-alert-title">${title}</p><p class="portal-mobile-alert-meta">${detail} · ${formatPortalMobileAlertTime(item.timestamp || item.createdDateTime || item.created)}</p></div><span class="portal-mobile-alert-dot severity-${severity}"></span></div>`;
+        const openAction = item.id ? ` role="button" tabindex="0" onclick="openSunbirdSecurityDashboard(); setTimeout(function(){ openSunbirdSecurityFindingDetail(${JSON.stringify(item.id)}); }, 120);" onkeydown="if(event.key==='Enter'){ openSunbirdSecurityDashboard(); setTimeout(function(){ openSunbirdSecurityFindingDetail(${JSON.stringify(item.id)}); }, 120); }"` : '';
+        return `<div class="portal-mobile-alert-item"${openAction}><span class="portal-mobile-alert-icon severity-${severity}"><i class="fas fa-bell"></i></span><div class="portal-mobile-alert-body"><p class="portal-mobile-alert-title">${title}</p><p class="portal-mobile-alert-meta">${detail} · ${formatPortalMobileAlertTime(item.timestamp || item.createdDateTime || item.created)}</p></div><span class="portal-mobile-alert-dot severity-${severity}"></span></div>`;
     }).join('');
 }
 
@@ -18612,7 +18799,9 @@ function getPortalMobileAlertItems(security) {
     if (isSunbirdUser()) {
         const payload = security?.payload && typeof security.payload === 'object' ? security.payload : security;
         return (Array.isArray(payload?.findings) ? payload.findings : []).map(finding => ({
+            id: finding.id,
             title: finding.title,
+            message: finding.aiSummary || finding.title,
             severity: finding.severity,
             source: sunbirdSecurityReadableSourceLabel(sunbirdSecurityFindingSource(finding)),
             timestamp: (Array.isArray(finding.evidence) ? finding.evidence.find(item => item?.eventTime)?.eventTime : null) || finding.createdAt

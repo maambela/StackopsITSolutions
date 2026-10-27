@@ -64,6 +64,7 @@ const { createSecurityEvidenceStore } = require('./services/intelligence/securit
 const { createSecurityEvidenceAutomation } = require('./services/intelligence/security-evidence-automation');
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
 const { buildSecurityFindings, buildCloudflareFindings } = require('./services/intelligence/security-findings');
+const { createSecurityFindingAiAssessment } = require('./services/intelligence/security-finding-ai-assessment');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
@@ -11464,7 +11465,7 @@ async function upsertDashboardMetricCaches() {
                 fetchApplicationsPayloadFromApi(),
                 fetchEmailMetricsFromApi(),
                 fetchEmailSecurityPayloadFromApi(),
-                fetchSecurityEventsPayloadFromApi(),
+                fetchSecurityEventsPayloadFromApi({ companyId, tenantKey: `company:${companyId}` }),
                 fetchBackupRecoveryPayloadFromApi()
             ]);
 
@@ -12513,7 +12514,7 @@ app.get('/api/sunbird/governance', authenticateToken, async (req, res) => {
         const userEmail = req.user.email;
         const tenant = getTenantByEmail(userEmail);
 
-        if (!tenant || tenant.clientId !== 'sunbird') {
+        if (!tenant || tenant.clientId !== 'sunbird' || !tenant.companyId) {
             operation.finish(403, { reason: 'access_denied' });
             return res.status(403).json({ error: 'Access denied. Sunbird only.' });
         }
@@ -14952,7 +14953,18 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
     }).filter(Boolean);
     const alerts = mergeUniqueSecurityAlerts(payload.alerts, realtimeAlerts);
     const findingsById = new Map((Array.isArray(payload.findings) ? payload.findings : []).map(finding => [finding.id, finding]));
-    buildCloudflareFindings(alerts).forEach(finding => findingsById.set(finding.id, finding));
+    const newRealtimeFindings = buildCloudflareFindings(alerts)
+        .filter(finding => !findingsById.has(finding.id));
+    if (newRealtimeFindings.length) {
+        const assessment = await securityFindingAiAssessment.assessSecurityFindings({
+            companyId,
+            findings: newRealtimeFindings,
+            scenarioCoverage: payload.scenarioCoverage || {},
+            warnings: payload.warnings || payload.collection?.warnings || [],
+            collectionStatus: payload.collectionStatus || payload.collection?.status || 'complete'
+        });
+        assessment.findings.forEach(finding => findingsById.set(finding.id, finding));
+    }
     const findings = [...findingsById.values()];
     const summary = {
         ...(payload.summary || {}),
@@ -15003,6 +15015,19 @@ async function getSecurityWebhookConfig() {
         cloudflareSecret,
         companyId: Number(companyIdValue) || null
     };
+}
+
+async function getCompanyScopedCloudflareSecuritySummary(companyId) {
+    const configuredCompanyId = Number(
+        await readWhatsAppConfigValue('SECURITY_ALERTS_CLOUDFLARE_COMPANY_ID')
+        || await readWhatsAppConfigValue('SECURITY_ALERTS_WEBHOOK_COMPANY_ID')
+    );
+    if (!Number.isInteger(configuredCompanyId) || configuredCompanyId <= 0 || configuredCompanyId !== Number(companyId)) {
+        const error = new Error('Cloudflare security alerts are not configured for the requested company.');
+        error.code = 'CLOUDFLARE_SECURITY_TENANT_CONTEXT_UNAVAILABLE';
+        throw error;
+    }
+    return getCloudflareNetworkSecuritySummary({ getSecret });
 }
 
 async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
@@ -15088,6 +15113,15 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
 async function buildSecurityEventsPayloadFromApi(options = {}) {
     console.log('[security_alerts:start] Security Alerts domain processing starting');
 
+    const companyId = Number(options.companyId);
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+        const error = new Error('A valid companyId is required to collect and assess security alerts.');
+        error.code = 'SECURITY_ALERTS_TENANT_CONTEXT_REQUIRED';
+        error.securityAlertsStatus = 'failed_terminal';
+        error.securityAlertsStage = 'tenant_context';
+        throw error;
+    }
+
     const allMetrics = {
         recordsFetched: 0,
         recordsStored: 0,
@@ -15103,7 +15137,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     let token;
 
     try {
-        token = options.token || await getMicrosoftGraphToken({ securityAlerts: true });
+        token = options.token || await getMicrosoftGraphTokenForCompany(companyId);
         stages.push({
             stage: 'graph_credentials:complete_or_failed',
             status: 'complete',
@@ -15132,7 +15166,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         fetchSecurityIncidentRows(token),
         fetchSecurityThreatIndicatorRows(token),
         fetchSecuritySignInRows(token),
-        getCloudflareNetworkSecuritySummary({ getSecret }).then(summary => ({
+        getCompanyScopedCloudflareSecuritySummary(companyId).then(summary => ({
             label: 'Cloudflare security polling',
             summary,
             warnings: [],
@@ -15285,6 +15319,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         displayName: incident.displayName || incident.title || 'Unknown Incident',
         description: incident.description || '',
         severity: normalizeSecuritySeverity(incident.severity),
+        sourceSeverity: incident.severity || null,
         status: normalizeSecurityStatus(incident.status || 'active'),
         created: incident.createdDateTime || new Date().toISOString(),
         updated: incident.lastUpdateDateTime || incident.lastUpdatedDateTime || new Date().toISOString(),
@@ -15371,13 +15406,15 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ipAddress: detection.ipAddress || null,
         location: detection.location || null
     }));
-    const { findings, scenarioCoverage } = buildSecurityFindings({
+    let { findings, scenarioCoverage } = buildSecurityFindings({
         alerts: processedAlerts,
+        incidents: processedIncidents,
         signIns: normalizedSignIns,
         riskyUsers: processedRiskyUsers,
         riskDetections: processedRiskDetections,
         sourceStatuses: {
             alerts: !alertsResult.ok ? 'unavailable' : alertsResult.warnings?.length ? 'partial' : 'complete',
+            incidents: !incidentsResult.ok ? 'unavailable' : incidentsResult.warnings?.length ? 'partial' : 'complete',
             signIns: !signInsResult.ok
                 ? (signIns.length ? 'partial' : 'unavailable')
                 : signInsResult.warnings?.length ? 'partial' : 'complete',
@@ -15619,13 +15656,56 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     const highRiskSignals = highSeverityAlerts.length + activeIncidents.length + usersUnderAttack.length;
 
-    const aiSummary = highRiskSignals > 0
-        ? `Security attention is required. ${highSeverityAlerts.length} high or critical alert(s), ${activeIncidents.length} active incident(s), and ${usersUnderAttack.length} user attack pattern(s) were found.`
-        : allWarnings.length
-            ? 'Security posture cannot be fully assessed because one or more Microsoft security sources returned incomplete or unavailable evidence.'
-        : hasPrimaryEvidence
-            ? 'Security posture is currently stable across available Microsoft security signals.'
-            : 'Security posture could not be fully assessed because primary Security Alerts evidence was unavailable.';
+    let dailyOverview = null;
+    let assessmentMeta = null;
+    const findingAiEnabled = !['false', '0', 'no'].includes(String(process.env.SECURITY_FINDING_AI_ENABLED || 'true').toLowerCase());
+    if (findingAiEnabled && findings.length && !options.skipFindingAiAssessment) {
+        stages.push({
+            stage: 'security_finding_ai:start',
+            status: 'processing',
+            findingCount: findings.length,
+            at: new Date().toISOString()
+        });
+        try {
+            const assessmentResult = await securityFindingAiAssessment.assessSecurityFindings({
+                findings,
+                scenarioCoverage,
+                warnings: allWarnings,
+                collectionStatus: allWarnings.length ? 'completed_with_warnings' : 'complete',
+                companyId
+            });
+            findings = assessmentResult.findings;
+            dailyOverview = assessmentResult.dailyOverview;
+            assessmentMeta = assessmentResult.assessmentMeta;
+            allMetrics.recordsAnalysed = assessmentMeta?.assessedCount || 0;
+            if (assessmentMeta?.status === 'assessed') {
+                allMetrics.recordsSentToAzure = findings.length;
+            }
+            stages.push({
+                stage: 'security_finding_ai:complete',
+                status: assessmentMeta?.status || 'complete',
+                assessedCount: assessmentMeta?.assessedCount || 0,
+                at: new Date().toISOString()
+            });
+        } catch (error) {
+            console.warn('[security_finding_ai] Assessment stage failed:', error.message);
+            stages.push({
+                stage: 'security_finding_ai:complete',
+                status: 'failed',
+                error: error.message,
+                at: new Date().toISOString()
+            });
+        }
+    }
+
+    const aiSummary = dailyOverview?.summary
+        || (highRiskSignals > 0
+            ? `Security attention is required. ${highSeverityAlerts.length} high or critical alert(s), ${activeIncidents.length} active incident(s), and ${usersUnderAttack.length} user attack pattern(s) were found.`
+            : allWarnings.length
+                ? 'Security posture cannot be fully assessed because one or more Microsoft security sources returned incomplete or unavailable evidence.'
+                : hasPrimaryEvidence
+                    ? 'Security posture is currently stable across available Microsoft security signals.'
+                    : 'Security posture could not be fully assessed because primary Security Alerts evidence was unavailable.');
 
     const recommendations = [
         highSeverityAlerts.length
@@ -15755,6 +15835,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         regionDistribution,
         attackTimeline,
         aiSummary,
+        dailyOverview,
+        assessmentMeta,
         recommendations
     };
 
@@ -15939,7 +16021,10 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
             } catch (_) {}
         }
 
-        const api = await fetchSecurityEventsPayloadFromApi();
+        const api = await fetchSecurityEventsPayloadFromApi({
+            companyId: context.companyId,
+            tenantKey: context.tenantId || context.accessType || null
+        });
         await pool.query(
             `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
              VALUES (?, ?, NOW())`,
@@ -15972,7 +16057,10 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
             });
         }
 
-        const payload = await fetchSecurityEventsPayloadFromApi();
+        const payload = await fetchSecurityEventsPayloadFromApi({
+            companyId: tenant.companyId,
+            tenantKey: tenant.tenantId || tenant.clientId
+        });
         const payloadWithRealtimeAlerts = await mergeStoredRealtimeSecurityAlerts(tenant.companyId, payload);
         console.log(`[Security Events] Compiled cached/live SOC payload for ${userEmail}:`, {
             alerts: payloadWithRealtimeAlerts.alerts.length,
@@ -16016,7 +16104,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
  */
 app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
     const tenant = getTenantByEmail(req.user?.email);
-    if (!tenant || tenant.clientId !== 'sunbird') {
+    if (!tenant || tenant.clientId !== 'sunbird' || !tenant.companyId) {
         return res.status(403).json({
             success: false,
             error: 'Access denied',
@@ -16026,7 +16114,11 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
 
     const includeHunting = req.body?.includeHunting === true;
     try {
-        const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
+        const payload = await fetchSecurityEventsPayloadFromApi({
+            companyId: tenant.companyId,
+            tenantKey: tenant.tenantId || tenant.clientId,
+            skipWhatsAppAuto: true
+        });
         const audit = {
             success: true,
             tenant: tenant.clientId,
@@ -16045,7 +16137,7 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
 
         if (includeHunting) {
             try {
-                const token = await getMicrosoftGraphToken({ securityAlerts: true });
+                const token = await getMicrosoftGraphTokenForCompany(tenant.companyId);
                 const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'identityLogons30d' });
                 audit.hunting = {
                     requested: true,
@@ -16148,7 +16240,7 @@ app.post("/api/whatsapp/test-hello", authenticateToken, async (req, res) => {
     let recipient = null;
     try {
         const tenant = getTenantByEmail(req.user?.email);
-        if (!tenant || tenant.clientId !== 'sunbird') {
+        if (!tenant || tenant.clientId !== 'sunbird' || !tenant.companyId) {
             return res.status(403).json({
                 success: false,
                 error: 'Access denied',
@@ -16339,7 +16431,11 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
 
         const payload = await mergeStoredRealtimeSecurityAlerts(
             tenant.companyId,
-            await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true })
+            await fetchSecurityEventsPayloadFromApi({
+                companyId: tenant.companyId,
+                tenantKey: tenant.tenantId || tenant.clientId,
+                skipWhatsAppAuto: true
+            })
         );
         const severities = getSecurityAlertSeverities(req.body?.severities || req.query.severities || 'critical,high,medium');
         const types = String(req.body?.types || req.query.types || 'finding')
@@ -16945,17 +17041,20 @@ async function collectApplicationsEvidenceForConfiguredTenants({ trigger = 'sche
     return { companyCount: companies.length, results };
 }
 
-async function performSecurityEvidenceCollection(companyId, collectionTrigger) {
+async function performSecurityEvidenceCollection(companyId, collectionTrigger, collectorContext = {}) {
     if (!securityEvidenceService) throw new Error('Security evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Security Alerts';
     try {
         // The scheduled collection is the automatic notification path.  The
         // notification ledger suppresses recurring provider noise before any
         // WhatsApp message is sent.
-        const payload = await fetchSecurityEventsPayloadFromApi();
-        const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: 'sunbird', payload });
+        const payload = await fetchSecurityEventsPayloadFromApi({
+            companyId,
+            tenantKey: collectorContext.tenantKey || 'sunbird'
+        });
+        const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: collectorContext.tenantKey || 'sunbird', payload });
         await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
-        const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });
+        const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: collectorContext.tenantKey || 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });
         console.log('[security_alerts:storage:complete] Security Alerts evidence stored', {
             snapshotId: stored.snapshotId,
             recordsFetched: dashboardPayload.collection?.accounting?.recordsFetched || 0,
@@ -16966,7 +17065,7 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger) {
         console.log(`[security_alerts:complete_or_completed_with_warnings_or_failed] ${stored.collectionStatus}`, { snapshotId: stored.snapshotId, warnings: stored.warnings || [] });
         return stored;
     } catch (error) {
-        const terminal = await securityEvidenceService.recordCollectionFailure({ companyId, tenantKey: 'sunbird', collectionTrigger, sourceEndpoint, error }).catch(() => null);
+        const terminal = await securityEvidenceService.recordCollectionFailure({ companyId, tenantKey: collectorContext.tenantKey || 'sunbird', collectionTrigger, sourceEndpoint, error }).catch(() => null);
         console.error('[security_alerts:complete_or_completed_with_warnings_or_failed] failed_terminal', { snapshotId: terminal?.snapshotId || null, stage: error.securityAlertsStage || 'unknown', reason: error.message });
         throw error;
     }
@@ -17311,7 +17410,11 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                     throw refreshError;
                 }
             }
-            const payload = await fetchSecurityEventsPayloadFromApi({ skipWhatsAppAuto: true });
+            const payload = await fetchSecurityEventsPayloadFromApi({
+                companyId,
+                tenantKey: `company:${companyId}`,
+                skipWhatsAppAuto: true
+            });
             await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)]);
             return null;
         }
@@ -17432,6 +17535,12 @@ const azureOpenAIService = createAzureOpenAIService({
     getSecret,
     maxRetries: process.env.AZURE_OPENAI_MAX_RETRIES,
     retryMaxMs: process.env.AZURE_OPENAI_RETRY_MAX_MS
+});
+const securityFindingAiAssessment = createSecurityFindingAiAssessment({
+    azureOpenAI: azureOpenAIService,
+    logger: console,
+    timeoutMs: process.env.SECURITY_FINDING_AI_TIMEOUT_MS || 45000,
+    maxTokens: process.env.SECURITY_FINDING_AI_MAX_TOKENS || 3500
 });
 identityEvidenceService = createIdentityEvidenceStore({ pool });
 const identityEvidenceSchemaReady = identityEvidenceService.ensureSchema().catch(error => {

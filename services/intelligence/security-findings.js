@@ -164,7 +164,7 @@ function evidenceReference(sourceType, record, summary) {
     return {
         sourceType,
         sourceId: text(record.id || record.requestId) || null,
-        eventTime: record.eventTime || record.timestamp || record.createdDateTime || record.activityDateTime || null,
+        eventTime: record.eventTime || record.timestamp || record.createdDateTime || record.activityDateTime || record.created || record.updated || null,
         summary,
         details
     };
@@ -288,6 +288,51 @@ function buildCloudflareFindings(alerts = []) {
             evidence: [evidenceReference('security_alert', alert, title)],
             recommendedAction: 'Review the Cloudflare event and its context; verify the affected resource and impact before taking action.',
             assessmentBasis: 'Cloudflare reported this event. Stack CTRL has not independently determined severity or correlated it with other evidence.'
+        };
+    });
+}
+
+function buildIncidentFindings(incidents = []) {
+    return incidents.filter(incident => incident && text(incident.id || incident.displayName || incident.title)).map(incident => {
+        const sourceSystem = text(incident.reportingSecuritySystem || incident.source || incident.vendor) || 'Security provider';
+        const title = text(incident.displayName || incident.title) || 'Security incident';
+        const sourceSeverity = text(incident.sourceSeverity || incident.severity) || null;
+        const status = text(incident.status) || 'needs_investigation';
+        const resolved = /resolved|closed|dismissed/i.test(status);
+        const providerState = [
+            sourceSeverity ? `provider severity ${sourceSeverity}` : '',
+            status ? `status ${status}` : '',
+            text(incident.assignedTo) ? `assigned to ${incident.assignedTo}` : ''
+        ].filter(Boolean).join(', ');
+
+        return {
+            id: createFindingId('security_incident', incident.id || `${title}|${incident.created || incident.updated || ''}`),
+            detectionId: 'security_incident',
+            title: `Security incident: ${title}`,
+            description: `${sourceSystem} reported this security incident${providerState ? ` (${providerState})` : ''}. ${text(incident.description) || 'Provider detail was not returned with the incident.'}`,
+            impact: resolved
+                ? 'The provider marks this incident as resolved or closed; confirm the recorded scope and outcome before treating it as fully remediated.'
+                : 'The provider has grouped related security activity into an incident. Its potential impact requires review of the cited provider evidence.',
+            severity: 'unassessed',
+            sourceSeverity,
+            sourceRiskLevel: text(incident.riskLevel) || null,
+            sourceRiskState: text(incident.status) || null,
+            source: sourceSystem,
+            confidence: 'low',
+            confidenceReason: 'This finding is based on the provider incident record. Stack CTRL does not infer affected entities or confirmed impact when those details are unavailable.',
+            status,
+            affectedEntities: { users: [], devices: [], ipAddresses: [], resources: [] },
+            providerValues: {
+                severity: sourceSeverity,
+                status,
+                source: sourceSystem,
+                reference: incident.redirectUrl || null
+            },
+            evidence: [evidenceReference('security_incident', incident, `${title}${providerState ? ` - ${providerState}` : ''}`)],
+            recommendedAction: resolved
+                ? 'Review the provider incident record and verify that its documented resolution applies to the affected environment.'
+                : 'Open the provider incident record, verify its scope and affected entities, then decide on the appropriate response.',
+            assessmentBasis: 'The provider incident is retained as an observed record. Stack CTRL keeps provider severity and status separate from the AI assessment and does not claim a confirmed compromise.'
         };
     });
 }
@@ -475,6 +520,7 @@ function buildImpossibleTravelFindings(signIns) {
 
 function buildSecurityFindings({
     alerts = [],
+    incidents = [],
     signIns = [],
     riskyUsers = [],
     riskDetections = [],
@@ -484,6 +530,7 @@ function buildSecurityFindings({
     const impossibleTravel = buildImpossibleTravelFindings(signIns);
     const findings = [
         ...buildCloudflareFindings(alerts),
+        ...buildIncidentFindings(incidents),
         ...buildAnonymousIpFindings(alerts, signIns),
         ...buildRiskyUserFindings(riskyUsers, riskDetections, signIns),
         ...(useRiskDetectionFallback ? buildRiskDetectionSignInFindings(riskDetections, signIns) : []),
@@ -502,6 +549,7 @@ function buildSecurityFindings({
     };
     const anonymousStatus = coverageStatus(anonymousSources);
     const riskyUserStatus = coverageStatus(identitySources);
+    const incidentStatus = coverageStatus([sourceStatuses.incidents].filter(Boolean));
 
     return {
         findings,
@@ -540,6 +588,15 @@ function buildSecurityFindings({
                         : useRiskDetectionFallback
                             ? 'Risky users are unavailable, so Stack CTRL evaluated returned Microsoft identity-risk detections instead.'
                             : null
+            },
+            securityIncidents: {
+                status: incidentStatus,
+                findingCount: findings.filter(item => item.detectionId === 'security_incident').length,
+                reason: incidentStatus === 'partial'
+                    ? 'One or more incident records may be missing because the provider query was incomplete.'
+                    : incidentStatus === 'unavailable'
+                        ? 'Provider incident records were unavailable, so incident findings could not be assessed.'
+                        : null
             }
         }
     };
@@ -548,5 +605,6 @@ function buildSecurityFindings({
 module.exports = {
     buildSecurityFindings,
     buildCloudflareFindings,
+    buildIncidentFindings,
     getSignInOutcome
 };

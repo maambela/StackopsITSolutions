@@ -17,8 +17,10 @@ const names = [
     'sunbirdSecurityFindingProviderIdentity', 'sunbirdSecurityFindingExplanatorySignature',
     'sunbirdSecurityFindingCorrelationState', 'groupSunbirdSecurityFindings',
     'sunbirdSecurityFindingGroupTitle', 'sunbirdSecurityFindingGroupLimitation',
-    'sunbirdSecurityFindingObservation', 'renderSunbirdSecurityEvidenceDetails',
-    'renderSunbirdSecurityFindings', 'renderSunbirdSecurityBillingSummary'
+    'sunbirdSecurityFindingObservation', 'sunbirdSecurityFindingEventTime', 'sunbirdSecurityFindingPrimaryEntity', 'sunbirdSecuritySeverityClass',
+    'getSunbirdSecurityFindingById', 'renderSunbirdSecurityEvidenceDetails',
+    'renderSunbirdSecurityFindings', 'renderSunbirdSecurityAlertsOverview', 'renderSunbirdSecurityBillingSummary',
+    'renderSunbirdSecurityAiAssessmentSection', 'renderSunbirdSecurityDetailList', 'renderSunbirdSecurityFindingDetail'
 ];
 const context = vm.createContext({
     sunbirdSecurityEscape: (value, fallback = 'Not recorded') => String(value ?? fallback).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
@@ -45,6 +47,43 @@ test('outer card lists all findings, including Cloudflare, without raw events', 
     assert.match(html, /&lt;unsafe&gt;/);
     assert.doesNotMatch(html, /Raw event/);
     assert.match(html, /3 total/);
+});
+
+test('alerts overview stays compact and links to detail without inline evidence dumps', () => {
+    const findings = [{
+        id: 'alert-1',
+        title: 'Risky sign-in',
+        aiSummary: 'person@example.com signed in while Microsoft marks the account risky.',
+        severity: 'high',
+        status: 'correlated',
+        recommendedAction: 'Verify the sign-in.',
+        affectedEntities: { users: ['person@example.com'] },
+        evidence: [{ sourceType: 'sign_in', summary: 'Hidden until detail', sourceId: 'si-1' }]
+    }];
+    const html = context.renderSunbirdSecurityAlertsOverview(findings, {});
+    assert.match(html, /person@example.com signed in/);
+    assert.match(html, /View details/);
+    assert.match(html, /openSunbirdSecurityFindingDetail/);
+    assert.doesNotMatch(html, /Hidden until detail/);
+});
+
+test('alert detail keeps assessment, rationale, action, evidence, and limitations separate from the overview', () => {
+    const finding = {
+        id: 'alert-1', title: 'Risky sign-in', severity: 'high', confidence: 'high', confidenceReason: 'Matching identity evidence.',
+        status: 'needs_investigation', sourceSeverity: 'medium', recommendedAction: 'Verify the sign-in with the account owner.',
+        affectedEntities: { users: ['person@example.com'] }, evidence: [{ sourceType: 'sign_in', sourceId: 'si-1', eventTime: '2026-10-20T10:00:00.000Z', summary: 'Successful sign-in' }],
+        aiAssessment: {
+            whatHappened: 'A successful sign-in matched a risky-user record.', reasoning: 'The provider records cite the same identity.',
+            supportingEvidence: ['Risky-user record'], limitations: ['Device context was unavailable']
+        }
+    };
+    const html = context.renderSunbirdSecurityFindingDetail(finding, { findings: [finding] });
+    assert.match(html, /AI assessment/);
+    assert.match(html, /Why the AI reached this conclusion/);
+    assert.match(html, /Recommended next step/);
+    assert.match(html, /Evidence and source records/);
+    assert.match(html, /Limitations and unknowns/);
+    assert.match(html, /Back to alerts/);
 });
 
 test('dashboard keeps each finding and every cited evidence reference accessible', () => {

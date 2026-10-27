@@ -17633,6 +17633,167 @@ body:has(#dashboard-section) .site-header {
   box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.32);
 }
 
+.sunbird-security-dashboard .sunbird-security-daily-overview {
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(12, 13, 16, 0.34);
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-summary {
+  margin: 0 0 12px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-stats dt {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-stats dd {
+  margin: 4px 0 0;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-gaps {
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.76rem;
+}
+
+.sunbird-security-dashboard .sunbird-security-daily-gaps ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.sunbird-security-dashboard .sunbird-security-alerts-overview {
+  display: grid;
+  gap: 10px;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-row-main {
+  min-width: 0;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-row h4 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-summary {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-meta {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-meta dt {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-meta dd {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.76rem;
+}
+
+.sunbird-security-dashboard .sunbird-security-alert-detail-btn,
+.sunbird-security-dashboard .sunbird-security-related-link {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.72rem;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.sunbird-security-dashboard .sunbird-security-finding-detail .sunbird-security-detail-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sunbird-security-dashboard .sunbird-security-detail-lead {
+  margin: 0 0 12px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.sunbird-security-dashboard .sunbird-security-detail-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sunbird-security-dashboard .sunbird-security-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.sunbird-security-dashboard .sunbird-security-detail-note,
+.sunbird-security-dashboard .sunbird-security-ai-status-note {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.74rem;
+}
+
+@media (max-width: 700px) {
+  .sunbird-security-dashboard .sunbird-security-alert-row {
+    flex-direction: column;
+  }
+  .sunbird-security-dashboard .sunbird-security-daily-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sunbird-security-dashboard .sunbird-security-assessment-grid section,
 .sunbird-security-dashboard .sunbird-security-recommendation,
 .sunbird-security-dashboard .sunbird-security-collection-note,
