@@ -3202,6 +3202,42 @@ async function getMicrosoftGraphTokenForCompany(companyId) {
   return tokenResponse.token;
 }
 
+async function getSecurityAlertsGraphTokenForCompany(companyId) {
+  const numericCompanyId = Number(companyId);
+  if (!Number.isInteger(numericCompanyId) || numericCompanyId <= 0) {
+    const error = new Error('A valid companyId is required for the Security Alerts Graph token.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const [rows] = await pool.query(
+    `SELECT mt.TenantID
+     FROM CompanyMicrosoftMapping cm
+     INNER JOIN MicrosoftTenants mt ON mt.ID = cm.MicrosoftTenantID
+     WHERE cm.CompanyID = ? AND cm.IsActive = 1
+     LIMIT 1`,
+    [numericCompanyId]
+  );
+  const mappedTenantId = String(rows[0]?.TenantID || '').trim();
+  if (!mappedTenantId) {
+    const error = new Error('Microsoft Graph is not configured for this security-alert tenant.');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  // Security Alerts uses the already-proven shared Graph application credentials.
+  // The company mapping is still mandatory and must identify the same Microsoft tenant,
+  // so a request can never silently use those credentials for another company.
+  const sharedCredentials = await getMicrosoftGraphCredentials({ securityAlerts: true });
+  if (mappedTenantId.toLowerCase() !== String(sharedCredentials.tenantId || '').trim().toLowerCase()) {
+    const error = new Error('The requested company is mapped to a different Microsoft tenant than the configured Security Alerts credential.');
+    error.statusCode = 403;
+    error.code = 'SECURITY_ALERTS_TENANT_MISMATCH';
+    throw error;
+  }
+  return getMicrosoftGraphToken({ securityAlerts: true });
+}
+
 function isReportEventWithinRange(event, start, end) {
     if (!event.timestamp) return true;
     const time = new Date(event.timestamp).getTime();
@@ -15141,7 +15177,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     let token;
 
     try {
-        token = options.token || await getMicrosoftGraphTokenForCompany(companyId);
+        token = options.token || await getSecurityAlertsGraphTokenForCompany(companyId);
         stages.push({
             stage: 'graph_credentials:complete_or_failed',
             status: 'complete',
@@ -16141,7 +16177,7 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
 
         if (includeHunting) {
             try {
-                const token = await getMicrosoftGraphTokenForCompany(tenant.companyId);
+                const token = await getSecurityAlertsGraphTokenForCompany(tenant.companyId);
                 const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'identityLogons30d' });
                 audit.hunting = {
                     requested: true,
