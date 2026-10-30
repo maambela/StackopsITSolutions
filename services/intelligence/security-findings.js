@@ -292,6 +292,52 @@ function buildCloudflareFindings(alerts = []) {
     });
 }
 
+function buildCloudflareMicrosoftCorrelationFindings(cloudflareFindings = [], signIns = []) {
+    const findings = [];
+    cloudflareFindings.filter(finding => finding?.detectionId === 'cloudflare_repeated_access_denials').forEach(finding => {
+        const cloudflareEvidence = Array.isArray(finding.evidence) ? finding.evidence : [];
+        const userKeys = new Set(cloudflareEvidence
+            .map(item => normalizeIdentity(item?.details?.user))
+            .filter(Boolean));
+        const ipKeys = new Set(cloudflareEvidence
+            .map(item => normalizeIdentity(item?.details?.ipAddress))
+            .filter(Boolean));
+        const cloudflareTimes = cloudflareEvidence.map(item => recordTime(item)).filter(value => value !== null);
+        if (!userKeys.size || !cloudflareTimes.length) return;
+        const relatedSignIns = signIns.filter(signIn => {
+            const signInUser = normalizeIdentity(signIn.userPrincipalName || signIn.user);
+            if (!userKeys.has(signInUser) || recordTime(signIn) === null) return false;
+            const timeMatches = cloudflareTimes.some(time => Math.abs(recordTime(signIn) - time) <= 24 * 60 * 60 * 1000);
+            const signInIp = normalizeIdentity(signIn.ipAddress);
+            return timeMatches && (!ipKeys.size || !signInIp || ipKeys.has(signInIp));
+        });
+        if (!relatedSignIns.length) return;
+        const successful = relatedSignIns.filter(item => getSignInOutcome(item) === 'success');
+        findings.push({
+            id: createFindingId('cloudflare_access_identity_correlation', `${finding.id}|${relatedSignIns.map(item => item.id).sort().join('|')}`),
+            detectionId: 'cloudflare_access_identity_correlation',
+            title: 'Cloudflare Access denials related to Microsoft sign-in activity',
+            description: `${cloudflareEvidence.length} aggregated Cloudflare Access denial record(s) and ${relatedSignIns.length} Microsoft sign-in record(s) share the same user within 24 hours${ipKeys.size ? ' and use matching IP evidence where available' : ''}. This relationship does not establish a compromise or successful Cloudflare access.`,
+            impact: 'Related identity and Access activity may warrant review of the user, sign-in outcome, Access policy, and application context.',
+            severity: 'unassessed',
+            confidence: 'medium',
+            confidenceReason: 'The records share a stable user identity and time window. IP equality is used only when both sources provide an IP; application/session identity is not otherwise proven.',
+            status: 'related_evidence',
+            source: 'Cloudflare + Microsoft Graph',
+            affectedEntities: {
+                users: [...new Set(relatedSignIns.map(item => item.userPrincipalName || item.user).filter(Boolean))],
+                devices: [...new Set(relatedSignIns.map(item => item.deviceName).filter(Boolean))],
+                ipAddresses: [...new Set([...ipKeys, ...relatedSignIns.map(item => normalizeIdentity(item.ipAddress)).filter(Boolean)])],
+                resources: [...new Set(cloudflareEvidence.map(item => item?.details?.resource).filter(Boolean))]
+            },
+            evidence: [...cloudflareEvidence, ...relatedSignIns.map(signIn => evidenceReference('sign_in', signIn, `${signIn.outcome || signIn.status || 'Unknown'} Microsoft sign-in`))].slice(0, 8),
+            recommendedAction: 'Review the Cloudflare Access denials and Microsoft sign-in context together; verify whether the activity was expected before changing policy or containing an account.',
+            assessmentBasis: 'Stack CTRL linked Cloudflare Access and Microsoft sign-in records only by a matching user within 24 hours, with matching IP used when both records supplied one.'
+        });
+    });
+    return findings;
+}
+
 function buildIncidentFindings(incidents = []) {
     return incidents.filter(incident => incident && text(incident.id || incident.displayName || incident.title)).map(incident => {
         const sourceSystem = text(incident.reportingSecuritySystem || incident.source || incident.vendor) || 'Security provider';
@@ -524,11 +570,15 @@ function buildSecurityFindings({
     signIns = [],
     riskyUsers = [],
     riskDetections = [],
+    additionalFindings = [],
     sourceStatuses = {}
 } = {}) {
     const useRiskDetectionFallback = !riskyUsers.length && sourceStatuses.riskyUsers === 'unavailable';
     const impossibleTravel = buildImpossibleTravelFindings(signIns);
+    const cloudflareAdditionalFindings = Array.isArray(additionalFindings) ? additionalFindings : [];
     const findings = [
+        ...cloudflareAdditionalFindings,
+        ...buildCloudflareMicrosoftCorrelationFindings(cloudflareAdditionalFindings, signIns),
         ...buildCloudflareFindings(alerts),
         ...buildIncidentFindings(incidents),
         ...buildAnonymousIpFindings(alerts, signIns),
@@ -550,6 +600,8 @@ function buildSecurityFindings({
     const anonymousStatus = coverageStatus(anonymousSources);
     const riskyUserStatus = coverageStatus(identitySources);
     const incidentStatus = coverageStatus([sourceStatuses.incidents].filter(Boolean));
+    const cloudflareStatus = coverageStatus([sourceStatuses.cloudflare].filter(Boolean));
+    const cloudflareCorrelationStatus = coverageStatus([sourceStatuses.cloudflare, sourceStatuses.signIns].filter(Boolean));
 
     return {
         findings,
@@ -597,6 +649,26 @@ function buildSecurityFindings({
                     : incidentStatus === 'unavailable'
                         ? 'Provider incident records were unavailable, so incident findings could not be assessed.'
                         : null
+            },
+            cloudflareCurrentApi: {
+                title: 'Cloudflare current API evidence',
+                status: cloudflareStatus,
+                findingCount: findings.filter(item => String(item.source || '').toLowerCase() === 'cloudflare').length,
+                reason: cloudflareStatus === 'unavailable'
+                    ? 'Cloudflare current API evidence was unavailable for this collection.'
+                    : cloudflareStatus === 'partial'
+                        ? 'One or more Cloudflare API sections were incomplete or unavailable; findings use only returned records, not a full event stream.'
+                        : 'Cloudflare findings use current API records such as Access activity, audit records, Security Center insights, CASB, and application-security findings. This is not a full WAF, Gateway, DNS, or firewall event history.'
+            },
+            cloudflareAccessMicrosoftCorrelation: {
+                title: 'Cloudflare Access + Microsoft sign-in activity',
+                status: cloudflareCorrelationStatus,
+                findingCount: findings.filter(item => item.detectionId === 'cloudflare_access_identity_correlation').length,
+                reason: cloudflareCorrelationStatus === 'unavailable'
+                    ? 'Cloudflare or Microsoft sign-in evidence was unavailable, so cross-provider correlation could not be evaluated.'
+                    : cloudflareCorrelationStatus === 'partial'
+                        ? 'Cloudflare or Microsoft sign-in collection was incomplete; any correlation uses only returned records.'
+                        : 'Stack CTRL correlates only a matching stable user within 24 hours, using a matching IP only when both sources provide one. It does not establish compromise or successful Cloudflare access.'
             }
         }
     };
@@ -605,6 +677,7 @@ function buildSecurityFindings({
 module.exports = {
     buildSecurityFindings,
     buildCloudflareFindings,
+    buildCloudflareMicrosoftCorrelationFindings,
     buildIncidentFindings,
     getSignInOutcome
 };

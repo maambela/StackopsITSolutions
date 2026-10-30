@@ -53,3 +53,16 @@ test('legacy compatibility observations can never be WhatsApp eligible', () => {
     assert.equal(result.eligible.length, 0);
     assert.match(result.ineligible[0].reasons.join(' '), /legacy compatibility evidence/);
 });
+
+test('Cloudflare evidence cannot notify when its current API coverage is partial', () => {
+    const result = selectSecurityFindingNotifications({
+        findings: [finding({
+            detectionId: 'cloudflare_access_identity_correlation',
+            source: 'Cloudflare + Microsoft Graph',
+            status: 'correlated'
+        })],
+        scenarioCoverage: { cloudflareAccessMicrosoftCorrelation: { status: 'partial' } }
+    });
+    assert.equal(result.eligible.length, 0);
+    assert.match(result.ineligible[0].reasons.join(' '), /scenario coverage is partial/);
+});

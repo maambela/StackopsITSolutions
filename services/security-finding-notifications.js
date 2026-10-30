@@ -12,6 +12,8 @@ function scenarioCoverageForFinding(finding = {}, scenarioCoverage = {}) {
     if (['risky_user_successful_sign_in', 'identity_risk_detection_successful_sign_in'].includes(finding.detectionId)) {
         return scenarioCoverage.riskyUserSuccessfulSignIn;
     }
+    if (finding.detectionId === 'cloudflare_access_identity_correlation') return scenarioCoverage.cloudflareAccessMicrosoftCorrelation;
+    if (String(finding.source || '').toLowerCase() === 'cloudflare') return scenarioCoverage.cloudflareCurrentApi;
     return null;
 }
 

@@ -26,6 +26,26 @@ test('Cloudflare provider events become inspectable observations without invente
     assert.equal(observation.evidence.length, 1);
 });
 
+test('Cloudflare Access and Microsoft records correlate only on matching user and time evidence', () => {
+    const result = buildSecurityFindings({
+        additionalFindings: [{
+            id: 'cloudflare-denials', detectionId: 'cloudflare_repeated_access_denials', source: 'Cloudflare',
+            evidence: [{ sourceType: 'cloudflare_access_log', eventTime: '2026-10-30T10:00:00Z', details: { user: 'user@example.com', ipAddress: '203.0.113.8', resource: 'portal.example.com' } }]
+        }],
+        signIns: [
+            { id: 'matching', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success', eventTime: '2026-10-30T10:10:00Z' },
+            { id: 'different-user', userPrincipalName: 'other@example.com', ipAddress: '203.0.113.8', outcome: 'success', eventTime: '2026-10-30T10:10:00Z' }
+        ]
+    });
+    const correlation = result.findings.find(finding => finding.detectionId === 'cloudflare_access_identity_correlation');
+    assert.ok(correlation);
+    assert.equal(correlation.severity, 'unassessed');
+    assert.equal(correlation.confidence, 'medium');
+    assert.match(correlation.description, /does not establish/i);
+    assert.equal(correlation.evidence.length, 2);
+    assert.equal(result.scenarioCoverage.cloudflareAccessMicrosoftCorrelation.status, 'not_assessed');
+});
+
 test('provider security incidents become evidence-backed AI assessment candidates without inventing scope', () => {
     const result = buildSecurityFindings({
         incidents: [{

@@ -35,6 +35,7 @@ const SYSTEM_PROMPT = `You are StackCTRL Intelligence, an enterprise technology 
 StackCTRL-calculated tenant evidence is the primary source of truth. Use external/grounding knowledge only to interpret risk, best practices, and recommendations.
 Analyse only the frozen StackCTRL snapshot supplied in the request. Never call, request, or imply direct access to Microsoft Graph, Cloudflare, Duo, or another vendor API.
 Do not invent tenant facts. Clearly identify stale, missing, partial, or not-expected evidence. Return valid JSON only.`;
+
 const PROMPT_VERSION = 'stackctrl-intelligence-v2';
 const INTELLIGENCE_TIME_ZONE = 'Africa/Johannesburg';
 

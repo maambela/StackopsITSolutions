@@ -65,6 +65,8 @@ const { createSecurityEvidenceAutomation } = require('./services/intelligence/se
 const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/microsoft-identity-risk-source');
 const { buildSecurityFindings, buildCloudflareFindings } = require('./services/intelligence/security-findings');
 const { createSecurityFindingAiAssessment } = require('./services/intelligence/security-finding-ai-assessment');
+const { createCloudflareLogpushStore } = require('./services/intelligence/cloudflare-logpush-store');
+const { buildCloudflareLogpushFindings, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
@@ -128,6 +130,7 @@ let networkEvidenceService = null;
 let backupEvidenceService = null;
 let applicationsEvidenceService = null;
 let securityEvidenceService = null;
+let cloudflareLogpushStore = null;
 let governanceEvidenceService = null;
 let complianceEvidenceService = null;
 let operationsEvidenceService = null;
@@ -14991,9 +14994,18 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
     const realtimeAlerts = rows.map(row => {
         try { return JSON.parse(row.Payload); } catch (_) { return null; }
     }).filter(Boolean);
+    const logpushEvents = cloudflareLogpushStore
+        ? await cloudflareLogpushStore.recentEvents(companyId).catch(error => {
+            console.warn('[Cloudflare Logpush] Could not read stored events:', error.message);
+            return [];
+        })
+        : [];
     const alerts = mergeUniqueSecurityAlerts(payload.alerts, realtimeAlerts);
     const findingsById = new Map((Array.isArray(payload.findings) ? payload.findings : []).map(finding => [finding.id, finding]));
-    const newRealtimeFindings = buildCloudflareFindings(alerts)
+    const newRealtimeFindings = [
+        ...buildCloudflareFindings(alerts),
+        ...buildCloudflareLogpushFindings(logpushEvents)
+    ]
         .filter(finding => !findingsById.has(finding.id));
     if (newRealtimeFindings.length) {
         const assessment = await securityFindingAiAssessment.assessSecurityFindings({
@@ -15446,12 +15458,16 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ipAddress: detection.ipAddress || null,
         location: detection.location || null
     }));
+    const cloudflareApiFindings = cloudflareResult.summary
+        ? buildCloudflareApiFindings(cloudflareResult.summary)
+        : [];
     let { findings, scenarioCoverage } = buildSecurityFindings({
         alerts: processedAlerts,
         incidents: processedIncidents,
         signIns: normalizedSignIns,
         riskyUsers: processedRiskyUsers,
         riskDetections: processedRiskDetections,
+        additionalFindings: cloudflareApiFindings,
         sourceStatuses: {
             alerts: !alertsResult.ok ? 'unavailable' : alertsResult.warnings?.length ? 'partial' : 'complete',
             incidents: !incidentsResult.ok ? 'unavailable' : incidentsResult.warnings?.length ? 'partial' : 'complete',
@@ -15459,7 +15475,12 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 ? (signIns.length ? 'partial' : 'unavailable')
                 : signInsResult.warnings?.length ? 'partial' : 'complete',
             riskyUsers: identityRiskResult.sources?.riskyUsers?.status || 'unavailable',
-            riskDetections: identityRiskResult.sources?.riskDetections?.status || 'unavailable'
+            riskDetections: identityRiskResult.sources?.riskDetections?.status || 'unavailable',
+            cloudflare: !cloudflareResult.ok
+                ? 'unavailable'
+                : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable'].includes(section?.status))
+                    ? 'partial'
+                    : 'complete'
         }
     });
 
@@ -16034,6 +16055,35 @@ app.post('/api/webhooks/cloudflare-security-alerts', async (req, res) => {
     } catch (error) {
         console.error('[Cloudflare Security Webhook] Request failed:', error.message);
         if (!res.headersSent) res.sendStatus(500);
+    }
+});
+
+// Logpush is separate from Cloudflare alert notifications. The account ID in
+// this path is verified against an explicit tenant mapping before any record
+// is stored, so an event payload cannot choose its own customer scope.
+app.post('/api/webhooks/cloudflare-logpush/:accountId/:dataset', async (req, res) => {
+    try {
+        const authorization = req.get('authorization') || '';
+        const bearerSecret = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+        const secret = req.get('cf-logpush-auth') || bearerSecret;
+        const mapping = await cloudflareLogpushStore?.authenticate({ accountId: req.params.accountId, secret });
+        if (!mapping) {
+            console.warn('[Cloudflare Logpush] Rejected delivery for an unknown account mapping.');
+            return res.sendStatus(403);
+        }
+        const result = await cloudflareLogpushStore.ingest({
+            companyId: mapping.companyId,
+            accountId: mapping.accountId,
+            dataset: req.params.dataset,
+            payload: req.body
+        });
+        if (!result.received) {
+            return res.status(400).json({ success: false, message: 'No supported Cloudflare Logpush records were supplied.' });
+        }
+        return res.status(202).json({ success: true, ...result });
+    } catch (error) {
+        console.error('[Cloudflare Logpush] Ingestion failed:', error.message);
+        return res.status(500).json({ success: false, message: 'Cloudflare Logpush ingestion failed.' });
     }
 });
 
@@ -17675,6 +17725,11 @@ const applicationsEvidenceAutomation = createApplicationsEvidenceAutomation({
 securityEvidenceService = createSecurityEvidenceStore({ pool });
 const securityEvidenceSchemaReady = securityEvidenceService.ensureSchema().catch(error => {
     console.error('[Security Evidence] Schema initialization failed:', error.message);
+    return { error };
+});
+cloudflareLogpushStore = createCloudflareLogpushStore({ pool });
+const cloudflareLogpushSchemaReady = cloudflareLogpushStore.ensureSchema().catch(error => {
+    console.error('[Cloudflare Logpush] Schema initialization failed:', error.message);
     return { error };
 });
 const securityEvidenceAutomation = createSecurityEvidenceAutomation({
