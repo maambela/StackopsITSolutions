@@ -135,6 +135,35 @@ function buildCloudflareLogpushFindings(records = [], { minimumRepeatedBlocks = 
     return findings;
 }
 
+// Raw Logpush rows belong in the provider ledger even if they do not meet a
+// deterministic finding threshold.  They are deliberately not marked as an
+// API/webhook finding candidate: correlation remains a separate decision.
+function buildCloudflareLogpushRawAlerts(events = []) {
+    return (Array.isArray(events) ? events : []).map((event, index) => {
+        if (!event || typeof event !== 'object') return null;
+        const dataset = text(event.dataset || 'security event').replace(/_/g, ' ');
+        const action = text(event.action || 'observed');
+        return {
+            id: `cloudflare-logpush-${text(event.eventKey || event.sourceEventId || index).slice(0, 180)}`,
+            title: `Cloudflare ${dataset} ${action} event`,
+            description: [event.user, event.resource, event.ipAddress, event.policy].filter(Boolean).join(' | ') || 'Cloudflare Logpush returned a security event.',
+            severity: /block|deny|drop|challenge|reject|quarantine/i.test(action) ? 'medium' : 'low',
+            status: 'observed',
+            created: event.eventTime || null,
+            eventTime: event.eventTime || null,
+            category: `Cloudflare Logpush / ${dataset}`,
+            source: 'Cloudflare Logpush',
+            reportingSecuritySystem: 'Cloudflare',
+            vendor: 'Cloudflare',
+            user: event.user || null,
+            ipAddress: event.ipAddress || null,
+            domain: event.resource || null,
+            cloudflareLogpush: true,
+            rawProviderEvent: true
+        };
+    }).filter(Boolean);
+}
+
 function apiEvidence(sourceType, record, summary) {
     return {
         sourceType,
@@ -219,5 +248,6 @@ module.exports = {
     normaliseCloudflareLogpushRecord,
     normaliseCloudflareLogpushPayload,
     buildCloudflareLogpushFindings,
+    buildCloudflareLogpushRawAlerts,
     buildCloudflareApiFindings
 };

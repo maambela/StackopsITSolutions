@@ -105,6 +105,51 @@ test('empty state distinguishes incomplete coverage from a clean result', () => 
     assert.doesNotMatch(html, /Current findings/);
 });
 
+test('empty correlated layer directs operators to raw provider evidence without calling it clean', () => {
+    const html = context.renderSunbirdSecurityAlertsOverview([], {
+        rawEvidence: { displayedRecordCount: 4 },
+        allEvents: [{}, {}, {}, {}],
+        scenarioCoverage: { identity: { status: 'complete' } }
+    });
+    assert.match(html, /No correlated finding generated/);
+    assert.match(html, /4 raw provider records/);
+    assert.match(html, /View raw provider evidence/);
+    assert.doesNotMatch(html, /clean result/i);
+});
+
+test('security shell names the two evidence layers explicitly', () => {
+    assert.match(source, /Correlated findings &amp; AI assessment/);
+    assert.match(source, /Raw provider evidence/);
+    assert.match(source, /Raw provider activity does not automatically create a finding or AI summary/);
+    assert.match(source, /sunbird-security-raw-evidence-header/);
+});
+
+test('raw evidence header keeps Cloudflare counts and the last evaluation time when collection is partial', () => {
+    const target = { innerHTML: '' };
+    const headerContext = vm.createContext({
+        document: { getElementById: id => id === 'sunbird-security-raw-evidence-header' ? target : null },
+        sunbirdSecurityEscape: value => String(value ?? ''),
+        sunbirdSecurityStatusClass: value => String(value || ''),
+        sunbirdSecurityStatusLabel: value => String(value || '').replace(/_/g, ' '),
+        sunbirdSecurityFormatTime: value => `formatted:${value}`
+    });
+    vm.runInContext(extract('renderSunbirdSecurityRawEvidenceHeader'), headerContext);
+    headerContext.renderSunbirdSecurityRawEvidenceHeader({
+        allEvents: [{}],
+        rawEvidence: {
+            displayedRecordCount: 1,
+            rawEvidenceUpdatedAt: '2026-10-30T12:15:00Z',
+            correlationEvaluatedAt: '2026-10-30T12:00:00Z',
+            correlationStatus: 'awaiting_next_evaluation',
+            cloudflare: { status: 'partial', recordsReturned: 1, reason: 'Audit permission is unavailable.' }
+        }
+    });
+    assert.match(target.innerHTML, /1 retained raw Cloudflare record/);
+    assert.match(target.innerHTML, /Cloudflare collection is partial/);
+    assert.match(target.innerHTML, /Last evaluated formatted:2026-10-30T12:00:00Z/);
+    assert.match(target.innerHTML, /awaiting the next correlation and AI evaluation/);
+});
+
 test('a failed cached request falls back to live data and errors if both fail', async () => {
     const start = source.indexOf('async function fetchSunbirdSecurityEventsData(');
     const end = source.indexOf('\nasync function ', start + 1);

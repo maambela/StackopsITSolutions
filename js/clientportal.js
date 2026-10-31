@@ -5229,6 +5229,7 @@ function renderSunbirdSecurityShell() {
             <div class="sunbird-id-signins" id="sunbird-security-panels"></div>
 
             <section id="sunbird-security-evidence-table-section" class="sunbird-id-table-section">
+                <header class="sunbird-security-raw-evidence-header" id="sunbird-security-raw-evidence-header" aria-live="polite"></header>
                 <div class="sunbird-id-table-toolbar sunbird-security-table-toolbar">
                     <input id="sunbird-security-search" class="sunbird-id-search" type="search" placeholder="Search incident, alert, user, source, MITRE, region">
                     <select id="sunbird-security-severity-filter" class="sunbird-id-select">
@@ -5478,6 +5479,19 @@ function normalizeSunbirdSecurityData(data = {}) {
     const activeIncidents = summary.activeIncidents ?? incidents.filter(i => ['active', 'inprogress', 'newalert'].includes(String(i.status || '').toLowerCase())).length;
     const totalAlerts = summary.totalAlerts ?? alerts.length;
     const securityScore = summary.securityScore ?? calculateSunbirdSecurityScore({ alerts, incidents, threats, suspiciousSignIns });
+    const cloudflareCollection = payload.rawEvidence?.cloudflare || payload.collection?.sources?.cloudflare || {};
+    const rawEvidence = {
+        ...(payload.rawEvidence && typeof payload.rawEvidence === 'object' ? payload.rawEvidence : {}),
+        rawRecordCount: payload.rawEvidence?.rawRecordCount ?? (alerts.length + incidents.length + suspiciousSignIns.length + threats.length),
+        rawEvidenceUpdatedAt: payload.rawEvidence?.rawEvidenceUpdatedAt || payload.fetchedAt || null,
+        correlationEvaluatedAt: payload.rawEvidence?.correlationEvaluatedAt || payload.assessmentMeta?.assessedAt || payload.fetchedAt || null,
+        correlationStatus: payload.rawEvidence?.correlationStatus || 'evaluation_time_not_supplied',
+        cloudflare: {
+            ...cloudflareCollection,
+            status: cloudflareCollection.status || 'not_reported',
+            recordsReturned: cloudflareCollection.recordsReturned ?? cloudflareCollection.recordsPrepared ?? 0
+        }
+    };
     return {
         ...payload,
         alerts,
@@ -5495,6 +5509,7 @@ function normalizeSunbirdSecurityData(data = {}) {
         attackTimeline: Array.isArray(payload.attackTimeline) ? payload.attackTimeline : buildSunbirdSecurityTimeline(alerts, incidents, suspiciousSignIns, threats),
         dailyOverview: payload.dailyOverview && typeof payload.dailyOverview === 'object' ? payload.dailyOverview : null,
         assessmentMeta: payload.assessmentMeta && typeof payload.assessmentMeta === 'object' ? payload.assessmentMeta : null,
+        rawEvidence,
         aiSummary: payload.aiSummary || 'Security posture is currently based on cached Microsoft security evidence.',
         recommendations: Array.isArray(payload.recommendations) ? payload.recommendations : buildSunbirdSecurityRecommendations({ highSeverityAlerts, activeIncidents, usersUnderAttack, threats }),
         summary: {
@@ -5578,6 +5593,10 @@ function buildSunbirdSecurityModel(data = sunbirdSecurityDashboardData) {
     return {
         ...normalized,
         allEvents,
+        rawEvidence: {
+            ...(normalized.rawEvidence || {}),
+            displayedRecordCount: allEvents.length
+        },
         recommendations,
         evidence: {
             allAlerts: normalized.alerts,
@@ -5681,7 +5700,7 @@ function renderSunbirdSecurityInvestigationSummary(data = {}) {
     const collectionText = collection ? sunbirdSecurityStatusLabel(collection) : 'Collection status not supplied';
     const warnings = getSunbirdSecurityCollectionWarnings(data);
     return `<section class="sunbird-security-investigation-summary">
-        <div><p class="sunbird-security-eyebrow">Investigation summary</p><h3>${findings.length} evidence-backed finding${findings.length === 1 ? '' : 's'}</h3><p>${limited ? 'Collection is limited or incomplete. No finding does not mean no risk was present.' : 'Findings are based on returned evidence; provider values stay separate from Stack CTRL’s assessment.'}</p></div>
+        <div><p class="sunbird-security-eyebrow">Correlation boundary</p><h3>${findings.length} evidence-backed finding${findings.length === 1 ? '' : 's'}</h3><p>${limited ? 'Collection is limited or incomplete. No finding does not mean no risk was present.' : 'These are correlated findings, not the raw provider ledger. Provider values stay separate from Stack CTRL’s assessment.'}</p></div>
         <dl><div><dt>High severity alerts</dt><dd>${sunbirdSecurityEscape(data.summary?.highSeverityAlerts ?? 0)}</dd></div><div><dt>Active incidents</dt><dd>${sunbirdSecurityEscape(data.summary?.activeIncidents ?? 0)}</dd></div><div class="sunbird-security-collection-state"><dt>Collection state</dt><dd><span class="sunbird-security-status ${sunbirdSecurityStatusClass(collection)}">${sunbirdSecurityEscape(collectionText)}</span>${warnings.length ? `<small>${warnings.length} source warning${warnings.length === 1 ? '' : 's'}</small>` : ''}</dd></div></dl>
     </section>`;
 }
@@ -5773,6 +5792,7 @@ function renderSunbirdSecurityAlertsOverview(findings = [], data = {}) {
     const records = Array.isArray(findings) ? findings : [];
     const scenarioCoverage = data?.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
     const coverageIsLimited = Object.values(scenarioCoverage).some(item => /partial|unavailable|not_assessed/i.test(String(item?.status || '')));
+    const rawRecordCount = Number(data?.rawEvidence?.displayedRecordCount ?? data?.rawEvidence?.rawRecordCount ?? data?.allEvents?.length ?? 0);
 
     if (!records.length && /^(loading|error)$/.test(String(data.findingLoadState || ''))) {
         return `<div class="sunbird-security-findings-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><div><strong>${data.findingLoadState === 'loading' ? 'Loading alerts' : 'Alerts could not be loaded'}</strong><p>${data.findingLoadState === 'loading' ? 'Collecting the latest available evidence.' : 'Please retry; unavailable data does not mean there are no alerts.'}</p></div></div>`;
@@ -5780,7 +5800,7 @@ function renderSunbirdSecurityAlertsOverview(findings = [], data = {}) {
     if (!records.length) {
         return `<div class="sunbird-security-findings-empty">
             <i class="fas fa-circle-info" aria-hidden="true"></i>
-            <div><strong>No alert generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage before treating this as a clean result.' : 'The returned evidence did not produce an evidence-backed alert.'}</p></div>
+            <div><strong>No correlated finding generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage before treating this as a clean result.' : 'Raw provider activity does not automatically create a correlation or AI summary.'}</p>${rawRecordCount ? `<p>${sunbirdSecurityEscape(rawRecordCount)} raw provider record${rawRecordCount === 1 ? '' : 's'} ${rawRecordCount === 1 ? 'is' : 'are'} available in the ledger.</p><button type="button" class="sunbird-security-alert-detail-btn" onclick="focusSunbirdSecurityInvestigation('sunbird-security-evidence-table-section')">View raw provider evidence</button>` : ''}</div>
         </div>`;
     }
 
@@ -5915,7 +5935,7 @@ function renderSunbirdSecurityInvestigation(model) {
         ${renderSunbirdSecurityInvestigationSummary(model)}
         ${renderSunbirdSecurityDailyOverview(model)}
         ${renderSunbirdSecurityFindingOverview(model)}
-        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01</p><h3>Alerts</h3><p>Review concise AI summaries here, then open an alert for the full investigation and cited evidence.</p>${model.findingLoadState === 'error' && model.findings?.length ? '<p>Refresh failed; showing previously saved alerts, which may be out of date.</p>' : ''}</div>${renderSunbirdSecurityAlertsOverview(model.findings, model)}</section>
+        <section id="sunbird-security-findings-section" class="sunbird-security-investigation-section sunbird-security-findings-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">01 · correlated layer</p><h3>Correlated findings &amp; AI assessment</h3><p>Only evidence-backed detections appear here. Raw provider activity does not automatically create a finding or AI summary.</p>${model.findingLoadState === 'error' && model.findings?.length ? '<p>Refresh failed; showing previously saved findings, which may be out of date.</p>' : ''}</div>${renderSunbirdSecurityAlertsOverview(model.findings, model)}</section>
         <section id="sunbird-security-coverage-section" class="sunbird-security-investigation-section sunbird-security-coverage-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">02</p><h3>Detection coverage</h3><p>Scenario-specific availability and limitations.</p></div>${renderSunbirdSecurityCoverage(model)}</section>
         <section id="sunbird-security-sources-section" class="sunbird-security-investigation-section"><div class="sunbird-security-section-title"><p class="sunbird-security-eyebrow">03</p><h3>Connected security evidence</h3><p>Only sources represented in the returned security model are shown. Cloudflare posture and coverage are kept separate from incident activity.</p></div>${renderSunbirdSecuritySources(model)}</section>
     `;
@@ -6268,7 +6288,46 @@ function getSunbirdSecurityDisplayAsset(event = {}) {
     return asset && !isSunbirdSecurityIdentifier(asset) ? asset : 'Not found';
 }
 
+function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityModel()) {
+    const target = document.getElementById('sunbird-security-raw-evidence-header');
+    if (!target) return;
+    const rawEvidence = model.rawEvidence || {};
+    const rawCount = Number(rawEvidence.displayedRecordCount ?? model.allEvents?.length ?? 0);
+    const cloudflare = rawEvidence.cloudflare || {};
+    const cloudflareStatus = String(cloudflare.status || 'not_reported').toLowerCase();
+    const cloudflareCount = Number(cloudflare.rawRecordsReturned ?? cloudflare.recordsReturned ?? 0);
+    const rawUpdatedAt = rawEvidence.rawEvidenceUpdatedAt;
+    const evaluatedAt = rawEvidence.correlationEvaluatedAt;
+    const awaitingEvaluation = rawEvidence.correlationStatus === 'awaiting_next_evaluation';
+    const cloudflareCountText = cloudflareCount
+        ? `${cloudflareCount} retained raw Cloudflare record${cloudflareCount === 1 ? '' : 's'}. `
+        : '';
+    const cloudflareMessage = cloudflareStatus === 'available' || cloudflareStatus === 'complete'
+        ? (cloudflareCount ? `${cloudflareCountText}Cloudflare collection returned this evidence.` : 'Cloudflare collection completed; no raw Cloudflare alert was returned.')
+        : cloudflareStatus === 'partial'
+            ? `${cloudflareCountText}Cloudflare collection is partial. ${cloudflare.reason || 'Some Cloudflare evidence could not be collected.'}`
+            : cloudflareStatus === 'unavailable'
+                ? `${cloudflareCountText}Cloudflare collection is unavailable. ${cloudflare.reason || 'No Cloudflare result is being represented as a clean result.'}`
+                : 'Cloudflare collection state was not reported by this snapshot.';
+    const evaluationMessage = evaluatedAt
+        ? `Last evaluated ${sunbirdSecurityFormatTime(evaluatedAt)}.${awaitingEvaluation ? ' New raw records are awaiting the next correlation and AI evaluation.' : ''}`
+        : awaitingEvaluation
+            ? 'Evaluation time not supplied. New raw records are awaiting the next correlation and AI evaluation.'
+            : 'Evaluation time not supplied.';
+    target.innerHTML = `
+        <div class="sunbird-security-raw-evidence-title">
+            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Individual Microsoft and Cloudflare records retained for review. They are not AI conclusions and are never sent directly to WhatsApp.</p></div>
+            <span class="sunbird-security-raw-count">${sunbirdSecurityEscape(rawCount)} returned record${rawCount === 1 ? '' : 's'}</span>
+        </div>
+        <div class="sunbird-security-raw-statuses">
+            <p><b>Cloudflare</b><span class="sunbird-security-status ${sunbirdSecurityStatusClass(cloudflareStatus)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(cloudflareStatus))}</span><small>${sunbirdSecurityEscape(cloudflareMessage)}</small></p>
+            <p><b>Raw evidence updated</b><small>${sunbirdSecurityEscape(rawUpdatedAt ? sunbirdSecurityFormatTime(rawUpdatedAt) : 'Time not supplied')}</small></p>
+            <p><b>Correlation / AI evaluated</b><small>${sunbirdSecurityEscape(evaluationMessage)}</small></p>
+        </div>`;
+}
+
 function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
+    renderSunbirdSecurityRawEvidenceHeader(model);
     const body = document.getElementById('sunbird-security-body');
     if (!body) return;
     const events = getFilteredSunbirdSecurityEvents(model);

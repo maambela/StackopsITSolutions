@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     normaliseCloudflareLogpushPayload,
     buildCloudflareLogpushFindings,
+    buildCloudflareLogpushRawAlerts,
     buildCloudflareApiFindings
 } = require('../services/intelligence/cloudflare-logpush');
 
@@ -41,4 +42,16 @@ test('aggregates repeated Cloudflare blocks without claiming compromise', () => 
     assert.equal(finding.confidence, 'medium');
     assert.match(finding.description, /not proof/i);
     assert.equal(finding.evidence.length, 5);
+});
+
+test('retains Logpush rows in the raw provider ledger without creating a finding marker', () => {
+    const [rawAlert] = buildCloudflareLogpushRawAlerts([{
+        eventKey: 'gateway_dns:row-1', dataset: 'gateway_dns', action: 'blocked',
+        eventTime: '2026-10-30T12:00:00Z', user: 'person@example.com', resource: 'example.test', ipAddress: '203.0.113.9'
+    }]);
+    assert.equal(rawAlert.source, 'Cloudflare Logpush');
+    assert.equal(rawAlert.cloudflareLogpush, true);
+    assert.equal(rawAlert.cloudflareApiSignal, undefined);
+    assert.equal(rawAlert.rawProviderEvent, true);
+    assert.match(rawAlert.title, /gateway dns blocked/i);
 });

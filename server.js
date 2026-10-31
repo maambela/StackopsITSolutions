@@ -66,7 +66,7 @@ const { fetchMicrosoftIdentityRiskEvidence } = require('./services/intelligence/
 const { buildSecurityFindings, buildCloudflareFindings } = require('./services/intelligence/security-findings');
 const { createSecurityFindingAiAssessment } = require('./services/intelligence/security-finding-ai-assessment');
 const { createCloudflareLogpushStore } = require('./services/intelligence/cloudflare-logpush-store');
-const { buildCloudflareLogpushFindings, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
+const { buildCloudflareLogpushFindings, buildCloudflareLogpushRawAlerts, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
@@ -15000,7 +15000,8 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
             return [];
         })
         : [];
-    const alerts = mergeUniqueSecurityAlerts(payload.alerts, realtimeAlerts);
+    const logpushAlerts = buildCloudflareLogpushRawAlerts(logpushEvents);
+    const alerts = mergeUniqueSecurityAlerts(payload.alerts, [...realtimeAlerts, ...logpushAlerts]);
     const findingsById = new Map((Array.isArray(payload.findings) ? payload.findings : []).map(finding => [finding.id, finding]));
     const newRealtimeFindings = [
         ...buildCloudflareFindings(alerts),
@@ -15023,7 +15024,42 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
         totalAlerts: alerts.length,
         highSeverityAlerts: alerts.filter(alert => ['critical', 'high'].includes(normalizeWhatsAppSeverity(alert.severity))).length
     };
-    return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, findings, summary };
+    const rawEventTimes = [...realtimeAlerts, ...logpushAlerts]
+        .map(alert => {
+            const value = alert?.eventTime || alert?.created || null;
+            return value ? new Date(value).getTime() : NaN;
+        })
+        .filter(Number.isFinite);
+    const evaluatedAt = payload?.rawEvidence?.correlationEvaluatedAt
+        || payload?.assessmentMeta?.assessedAt
+        || payload?.fetchedAt
+        || null;
+    const evaluatedAtMs = new Date(evaluatedAt || 0).getTime();
+    const hasUnevaluatedRawEvidence = rawEventTimes.some(time => !Number.isFinite(evaluatedAtMs) || time > evaluatedAtMs);
+    const existingRawUpdatedAt = payload?.rawEvidence?.rawEvidenceUpdatedAt || payload?.fetchedAt || null;
+    const rawFreshnessTimes = [existingRawUpdatedAt, ...rawEventTimes]
+        .map(value => value ? new Date(value).getTime() : NaN)
+        .filter(Number.isFinite);
+    const rawIncidents = Array.isArray(payload.incidents) ? payload.incidents : [];
+    const rawSignIns = Array.isArray(payload.signIns?.suspicious) ? payload.signIns.suspicious : (Array.isArray(payload.suspiciousSignIns) ? payload.suspiciousSignIns : []);
+    const rawThreats = Array.isArray(payload.threats) ? payload.threats : (Array.isArray(payload.threatIndicators) ? payload.threatIndicators : []);
+    const cloudflareRawCount = [...alerts, ...rawIncidents]
+        .filter(alert => /cloudflare/i.test(String(alert?.source || alert?.vendor || alert?.reportingSecuritySystem || '')))
+        .length;
+    const previousCloudflareRawCount = Number(payload?.rawEvidence?.cloudflare?.rawRecordsReturned || payload?.rawEvidence?.cloudflare?.recordsReturned || 0);
+    const rawEvidence = {
+        ...(payload.rawEvidence || {}),
+        rawRecordCount: alerts.length + rawIncidents.length + rawSignIns.length + rawThreats.length,
+        rawEvidenceUpdatedAt: rawFreshnessTimes.length ? new Date(Math.max(...rawFreshnessTimes)).toISOString() : null,
+        correlationEvaluatedAt: evaluatedAt,
+        correlationStatus: hasUnevaluatedRawEvidence ? 'awaiting_next_evaluation' : (payload?.rawEvidence?.correlationStatus || 'evaluated'),
+        cloudflare: {
+            ...(payload?.rawEvidence?.cloudflare || {}),
+            logpushRecordsReturned: Math.max(Number(payload?.rawEvidence?.cloudflare?.logpushRecordsReturned || 0), logpushAlerts.length),
+            rawRecordsReturned: Math.max(previousCloudflareRawCount, cloudflareRawCount)
+        }
+    };
+    return { ...payload, success: payload.success !== false || alerts.length > 0, alerts, findings, summary, rawEvidence };
 }
 
 function sanitizeCachedSecurityIndicators(payload = {}) {
@@ -15143,6 +15179,25 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
             ipAddress: log.ipAddress,
             domain: log.appName
         }));
+
+    // Audit rows are raw provider evidence in their own right.  Keep only
+    // security-control changes here; a general account-audit stream would be
+    // misleadingly broad for the Security Alerts ledger.
+    (Array.isArray(summary.auditLogs) ? summary.auditLogs : []).forEach((record, index) => {
+        const action = String(record.action || record.action_type || record.type || record.operation || '').trim();
+        const resource = String(record.resource || record.resource_type || record.zone_name || record.zone || record.name || '').trim();
+        if (!/create|update|delete|modify|change/i.test(action) || !/security|firewall|waf|gateway|access|policy|dns|rule/i.test(`${action} ${resource}`)) return;
+        addAlert({
+            id: record.id || record.uuid || `audit-${index}`,
+            title: 'Cloudflare security configuration change observed',
+            description: `Cloudflare audit record: ${action || 'change'}${resource ? ` affecting ${resource}` : ''}.`,
+            severity: 'medium',
+            category: 'Cloudflare Audit',
+            eventTime: record.created_at || record.timestamp || record.createdAt || record.updatedAt,
+            user: record.actor?.email || record.user_email || record.email || null,
+            domain: resource || null
+        });
+    });
 
     const addFindingRows = (rows, category, fallbackTitle) => {
         (Array.isArray(rows) ? rows : []).forEach((finding, index) => addAlert({
@@ -15804,6 +15859,36 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         }
     ].filter(Boolean);
 
+    const cloudflareSourceStatus = !cloudflareResult.ok
+        ? 'unavailable'
+        : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable'].includes(section?.status))
+            ? 'partial'
+            : 'available';
+    const cloudflareSourceReason = !cloudflareResult.ok
+        ? String(cloudflareResult.warnings?.[0] || 'Cloudflare security collection was unavailable.')
+        : cloudflareSourceStatus === 'partial'
+            ? [
+                ...(cloudflareResult.warnings || []),
+                ...Object.values(cloudflareResult.summary?.sections || {})
+                    .filter(section => ['error', 'permission_unavailable'].includes(section?.status))
+                    .map(section => section?.message || `${section?.label || 'Cloudflare section'} is unavailable.`)
+            ].filter(Boolean).slice(0, 3).join(' ')
+            : cloudflareAlerts.length
+                ? 'Cloudflare returned raw security evidence for this collection.'
+                : 'Cloudflare collection completed but did not return a raw security alert in this collection.';
+    const rawEvidence = {
+        rawRecordCount: processedAlerts.length + processedIncidents.length + suspiciousSignIns.length + processedThreats.length,
+        rawEvidenceUpdatedAt: new Date().toISOString(),
+        correlationEvaluatedAt: new Date().toISOString(),
+        correlationStatus: 'evaluated',
+        cloudflare: {
+            status: cloudflareSourceStatus,
+            reason: cloudflareSourceReason,
+            recordsReturned: cloudflareAlerts.length,
+            logpushRecordsReturned: 0
+        }
+    };
+
     const payload = {
         success: hasPrimaryEvidence,
         fetchedAt: new Date().toISOString(),
@@ -15856,7 +15941,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 cloudflare: {
                     recordsFetched: cloudflareAlerts.length,
                     recordsPrepared: cloudflareAlerts.length,
-                    status: cloudflareResult.warnings?.length && !cloudflareAlerts.length ? 'warning' : 'complete'
+                    status: cloudflareSourceStatus,
+                    reason: cloudflareSourceReason
                 }
             },
             accounting: allMetrics,
@@ -15877,6 +15963,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         threats: processedThreats,
         threatIndicators: processedThreats,
         findings,
+        rawEvidence,
         scenarioCoverage,
         identityRisk: {
             riskDetections: processedRiskDetections,
