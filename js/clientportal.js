@@ -17759,7 +17759,13 @@ function initializeSunbirdLeftMenu() {
     const leftMenu = document.createElement('div');
     leftMenu.className = 'sunbird-left-menu';
     leftMenu.innerHTML = `
-        <div class="sunbird-menu-heading">Control Center</div>
+        <div class="sunbird-menu-heading">
+            <span class="sunbird-menu-heading-label">Control Center</span>
+            <span class="sunbird-control-center-brand" aria-hidden="true">
+                <img src="Images/Logos/Ctrl big.png" alt="">
+                <span><b>StackCTRL</b><small>Control Center</small></span>
+            </span>
+        </div>
         <button class="sunbird-menu-current" type="button" aria-expanded="false" onclick="window.toggleSunbirdMobileMenu()"></button>
         <button class="sunbird-menu-item" type="button" data-menu="security" onclick="window.switchBillingMenu('security')">
             <i class="fas fa-shield-alt"></i><span>Security Alerts</span>
@@ -17773,6 +17779,7 @@ function initializeSunbirdLeftMenu() {
         <button class="sunbird-menu-item" type="button" data-menu="reports" onclick="window.switchBillingMenu('reports')">
             <i class="fas fa-chart-line"></i><span>Reports</span>
         </button>
+        <span class="sunbird-control-center-emblem" aria-hidden="true"><i class="fas fa-sliders-h"></i></span>
         <button class="sunbird-menu-item" type="button" data-menu="risks" onclick="window.switchBillingMenu('risks')">
             <i class="fas fa-triangle-exclamation"></i><span>Risks</span>
         </button>
