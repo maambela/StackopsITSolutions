@@ -10905,6 +10905,97 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   }
 }
 
+/* Desktop Control Center — final material polish.  These refinements stay
+   inside the desktop boundary so the established tablet and phone switcher is
+   completely untouched. */
+@media (min-width: 1101px) {
+  .sunbird-left-menu {
+    /* Centre the complete header / control grid / billing composition inside
+       the fixed rail rather than pinning the content to its upper edge. */
+    grid-template-rows: 63.84375px repeat(3, 83px) 42px;
+    align-content: center;
+    row-gap: 7px;
+
+    /* A reflected warm edge sits on the lower-right glass perimeter.  It is
+       deliberately an inset reflection, not a solid orange recolour. */
+    border-color: rgba(255, 255, 255, 0.29);
+    border-right-color: rgba(255, 141, 62, 0.7);
+    border-bottom-color: rgba(255, 127, 45, 0.58);
+    background:
+      radial-gradient(150px 128px at 108% 102%, rgba(255, 118, 29, 0.21), transparent 69%),
+      radial-gradient(124px 90px at -8% -4%, rgba(94, 181, 255, 0.12), transparent 71%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.035));
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.25),
+      12px 10px 28px rgba(255, 102, 27, 0.11),
+      inset -1px 0 0 rgba(255, 184, 123, 0.58),
+      inset 0 -1px 0 rgba(255, 165, 93, 0.46),
+      inset 0 1px 2px rgba(255, 255, 255, 0.5),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.15);
+  }
+
+  .sunbird-left-menu::after {
+    opacity: 0.62;
+    background:
+      linear-gradient(118deg, rgba(255, 255, 255, 0.12), transparent 26%, transparent 67%, rgba(255, 146, 76, 0.12)),
+      linear-gradient(180deg, transparent 68%, rgba(255, 121, 37, 0.055));
+  }
+
+  .sunbird-left-menu .sunbird-menu-item i {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    transition: transform 190ms ease, border-color 190ms ease, background 190ms ease, box-shadow 190ms ease;
+  }
+
+  .sunbird-left-menu .sunbird-menu-item i::before {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The moving highlight is clipped to the icon disc, keeping every caption
+     outside the glass treatment as requested. */
+  .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]) i::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    top: -42%;
+    left: -82%;
+    width: 65%;
+    height: 188%;
+    pointer-events: none;
+    opacity: 0.78;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+    transform: rotate(24deg) translateX(-128%);
+    transition: transform 340ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  body .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):hover:not(:disabled) i,
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):focus-visible:not(:disabled) i {
+    transform: translateY(-3px) scale(1.035);
+    border-color: rgba(255, 224, 198, 0.76);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 154, 80, 0.1) 78%, rgba(255, 255, 255, 0.055));
+    box-shadow:
+      0 0 0 3px rgba(255, 174, 112, 0.09),
+      0 9px 18px rgba(0, 0, 0, 0.29),
+      0 0 13px rgba(255, 129, 47, 0.17),
+      inset 0 1px 2px rgba(255, 255, 255, 0.48),
+      inset 0 -6px 12px rgba(0, 0, 0, 0.17);
+  }
+
+  body .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):hover:not(:disabled) i::after,
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):focus-visible:not(:disabled) i::after {
+    transform: rotate(24deg) translateX(292%);
+  }
+}
+
+@media (min-width: 1101px) and (prefers-reduced-motion: reduce) {
+  .sunbird-left-menu .sunbird-menu-item i { transition: none; }
+  .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]) i::after { display: none; }
+  body .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):hover:not(:disabled) i,
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):focus-visible:not(:disabled) i { transform: none; }
+}
+
 /* Reports use the existing StackCTRL dark glass language.
    The exported PDF intentionally remains white for readability and printing. */
 .dashboard-view.sunbird-reports-active {
