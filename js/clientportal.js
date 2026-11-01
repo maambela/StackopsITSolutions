@@ -14601,89 +14601,104 @@ window.openSunbirdArchitecture = function() {
                         <i class="fas fa-arrow-left"></i> Back
                     </button>
                 </div>
-                <div class="sunbird-architecture-grid">
-                    <div class="sunbird-architecture-section-label">Individual domain paths: API → Process → Google Cloud → Retrieve → StackCTRL, with direct API paths shown separately</div>
-                    <section class="sunbird-architecture-group microsoft">
-                        <h3><img class="sunbird-architecture-brand" src="Images/Microsoft.webp" alt=""> Microsoft</h3>
+                <div class="sunbird-architecture-flow vertical-flow">
+                    <span class="sunbird-architecture-stream"></span><span class="sunbird-architecture-stream s2"></span><span class="sunbird-architecture-stream s3"></span>
+                    <section class="sunbird-architecture-group source-stack">
+                        <h3><img class="sunbird-architecture-brand" src="Images/Microsoft.webp" alt=""> External Sources</h3>
+                        <div class="source-grid">
+                            <div class="sunbird-architecture-domain"><i class="fab fa-microsoft"></i>Microsoft APIs</div>
+                            <div class="sunbird-architecture-domain"><img class="sunbird-architecture-brand" src="Images/1password.webp" alt="">1Password Events API</div>
+                            <div class="sunbird-architecture-domain"><i class="fas fa-cloud"></i>Cloudflare APIs &amp; Webhooks</div>
+                        </div>
+                    </section>
+                    <div class="vertical-arrow process"><i class="fas fa-circle-nodes"></i> INGEST</div>
+                    <section class="sunbird-architecture-group process-stage">
+                        <h3><i class="fas fa-cogs sunbird-architecture-gears"></i> Data Load &amp; Event Queue</h3>
+                        <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-filter"></i>Validate</div><div class="sunbird-architecture-domain"><i class="fas fa-route"></i>Route by domain</div><div class="sunbird-architecture-domain"><i class="fas fa-file-code"></i>Raw event files</div></div>
+                    </section>
+                    <div class="vertical-arrow process"><i class="fas fa-arrow-down"></i> COMPUTE</div>
+                    <section class="sunbird-architecture-group process-stage domain-lane-stack">
+                        <h3><i class="fas fa-gears sunbird-architecture-gears"></i> Individual Process → Store → Retrieve Paths</h3>
                         ${[
-                            ['fa-user-shield','Identity Protection'],['fa-laptop-medical','Device Protection'],['fa-envelope-open-text','Email Security'],
-                            ['fa-shield-halved','Security Alerts'],['fa-gears','Operations'],['fa-cloud-arrow-down','Backup & Recovery'],
-                            ['fa-triangle-exclamation','Risks'],['fa-cubes','Applications'],['fa-scale-balanced','Governance & Compliance']
-                        ].map(([icon, label]) => `<div class="sunbird-architecture-domain"><i class="fas ${icon}"></i>${label}</div>`).join('')}
-                    </section>
-                    <div class="sunbird-architecture-column">${Array.from({ length: 9 }, () => '<div class="sunbird-architecture-lane-card process"><i class="fas fa-cogs"></i>&nbsp; Process</div>').join('')}</div>
-                    <section class="sunbird-architecture-group google">
-                        <h3><img class="sunbird-architecture-brand" src="Images/GoogleSquare.webp" alt=""> Google Cloud</h3>
-                        ${['Identity Data','Device Data','Email Data','Security Alerts','Operations Data','Backup Data','Risk Data','Application Data','Compliance Data'].map(label => `<div class="sunbird-architecture-storage"><i class="fas fa-database"></i>${label}</div>`).join('')}
-                    </section>
-                    <div class="sunbird-architecture-column">${Array.from({ length: 9 }, () => '<div class="sunbird-architecture-lane-card retrieve"><i class="fas fa-arrow-right"></i>&nbsp; Retrieve</div>').join('')}</div>
-                    <div class="sunbird-architecture-column">${Array.from({ length: 9 }, () => '<div class="sunbird-architecture-lane-card direct"><i class="fas fa-eye"></i>&nbsp; API → View</div>').join('')}</div>
-                    <section class="sunbird-architecture-dashboard">
-                        <h3><img class="sunbird-architecture-brand" src="Images/Logos/Ctrlbig2.png" alt=""> StackCTRL</h3>
-                        ${['Microsoft Security','Identity Protection','Device Protection','Email Security','Operations','Backup & Recovery','Risks','Applications','Governance & Compliance'].map((label, index) => `<div class="sunbird-architecture-dashboard-item"><i class="fas ${['fa-shield-halved','fa-user-shield','fa-laptop','fa-envelope','fa-gears','fa-cloud-arrow-down','fa-triangle-exclamation','fa-cubes','fa-scale-balanced'][index]}"></i>${label}</div>`).join('')}
+                            ['Identity Protection','Identity Data','Identity'],['Device Protection','Device Data','Devices'],['Email Security','Email Data','Email Security'],
+                            ['Security Alerts','Security Alert Data','Alerts'],['Operations','Operations Data','Operations'],['Backup & Recovery','Backup Data','Backup'],
+                            ['Risks','Risk Data','Risks'],['Applications','Application Data','Applications'],['Governance & Compliance','Compliance Data','Compliance']
+                        ].map(([processed, stored, view]) => `
+                            <div class="domain-lane">
+                                <div class="sunbird-architecture-domain"><i class="fas fa-file-lines"></i>${processed}<span class="data-file"><i class="fas fa-file"></i></span></div>
+                                <span class="lane-line process-line"></span>
+                                <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>${stored}<span class="storage-dot"></span></div>
+                                <span class="lane-line retrieve-line"></span>
+                                <div class="sunbird-architecture-dashboard-item"><i class="fas fa-chart-line"></i>${view}</div>
+                            </div>
+                        `).join('')}
                     </section>
 
-                    <section class="sunbird-architecture-group credentials">
-                        <h3><img class="sunbird-architecture-brand" src="Images/1password.webp" alt=""> Credential Security</h3>
-                        <div class="sunbird-architecture-domain"><i class="fas fa-key"></i>1Password Events API</div>
+                    <div class="sunbird-architecture-section-label">Interconnected reporting and intelligent-output pipeline</div>
+                    <section class="sunbird-architecture-group reporting-input">
+                        <h3><i class="fas fa-arrows-to-circle"></i> Reporting Inputs</h3>
+                        <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-layer-group"></i>StackCTRL processed domains</div><div class="sunbird-architecture-domain"><i class="fas fa-plug"></i>Direct API reporting inputs</div></div>
                     </section>
-                    <div class="sunbird-architecture-lane-card process"><i class="fas fa-cogs"></i>&nbsp; Process</div>
-                    <section class="sunbird-architecture-group google"><div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Credential Data</div></section>
-                    <div class="sunbird-architecture-lane-card retrieve"><i class="fas fa-arrow-right"></i>&nbsp; Retrieve</div>
-                    <div class="sunbird-architecture-lane-card direct"><i class="fas fa-eye"></i>&nbsp; View</div>
-                    <section class="sunbird-architecture-dashboard"><div class="sunbird-architecture-dashboard-item"><i class="fas fa-key"></i>Credential Security</div></section>
-
-                    <section class="sunbird-architecture-group network">
-                        <h3><i class="fas fa-cloud"></i> Network Security</h3>
-                        <div class="sunbird-architecture-domain"><i class="fas fa-cloud-arrow-up"></i>Cloudflare API &amp; Webhooks</div>
+                    <div class="vertical-arrow report"><i class="fas fa-arrow-down"></i> INPUT</div>
+                    <section class="sunbird-architecture-group report-stage">
+                        <h3><i class="fas fa-chart-line"></i> Reporting Process</h3>
+                        <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-download"></i>Collect</div><div class="sunbird-architecture-domain"><i class="fas fa-gears"></i>Process</div><div class="sunbird-architecture-domain"><i class="fas fa-file-export"></i>Generate per-domain reports</div></div>
                     </section>
-                    <div class="sunbird-architecture-lane-card process"><i class="fas fa-cogs"></i>&nbsp; Process</div>
-                    <section class="sunbird-architecture-group google"><div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Network Data</div></section>
-                    <div class="sunbird-architecture-lane-card retrieve"><i class="fas fa-arrow-right"></i>&nbsp; Retrieve</div>
-                    <div class="sunbird-architecture-lane-card direct"><i class="fas fa-bell"></i>&nbsp; Alert</div>
-                    <section class="sunbird-architecture-dashboard"><div class="sunbird-architecture-dashboard-item"><i class="fas fa-globe"></i>Network Security</div></section>
-
-                    <div class="sunbird-architecture-section-label">Separate reporting, input/output and AI pipeline</div>
-                    <section class="sunbird-architecture-reporting">
-                        <section class="sunbird-architecture-group microsoft">
-                            <h3><img class="sunbird-architecture-brand" src="Images/Logos/Ctrlbig2.png" alt=""> StackCTRL Processed Data</h3>
-                            ${['Identity','Devices','Security','Compliance','Risks'].map(label => `<div class="sunbird-architecture-domain"><i class="fas fa-file-lines"></i>${label} input</div>`).join('')}
-                        </section>
-                        <div class="sunbird-architecture-lane-card process">Input</div>
-                        <section class="sunbird-architecture-group network">
-                            <h3><i class="fas fa-chart-line"></i> Reporting Engine</h3>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-download"></i>Collect</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-gears"></i>Process</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-wand-magic-sparkles"></i>Transform</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-file-export"></i>Generate</div>
-                        </section>
-                        <div class="sunbird-architecture-lane-card process">Per-domain<br>data</div>
-                        <section class="sunbird-architecture-group ai">
-                            <h3><i class="fas fa-wand-magic-sparkles"></i> Azure AI</h3>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-magnifying-glass"></i>Analyse</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-ranking-star"></i>Assess</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-file-lines"></i>Summarise</div>
-                            <div class="sunbird-architecture-domain"><i class="fas fa-lightbulb"></i>Recommend</div>
-                        </section>
-                        <div class="sunbird-architecture-lane-card retrieve">Output</div>
-                        <section class="sunbird-architecture-group google">
-                            <h3><img class="sunbird-architecture-brand" src="Images/GoogleSquare.webp" alt=""> Google Cloud Results</h3>
-                            <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Identity Results</div>
-                            <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Risk Results</div>
-                            <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Report Results</div>
-                            <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>AI Results</div>
-                        </section>
+                    <div class="vertical-arrow ai"><i class="fas fa-arrow-down"></i> INPUT / OUTPUT</div>
+                    <section class="sunbird-architecture-group ai-stage">
+                        <h3><i class="fas fa-wand-magic-sparkles"></i> Azure AI Analysis</h3>
+                        <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-magnifying-glass"></i>Analyse</div><div class="sunbird-architecture-domain"><i class="fas fa-ranking-star"></i>Assess</div><div class="sunbird-architecture-domain"><i class="fas fa-lightbulb"></i>Recommend</div></div>
                     </section>
-
-                    <div class="sunbird-architecture-section-label">Alerts: Microsoft + Cloudflare + StackCTRL risk data</div>
-                    <section class="sunbird-architecture-reporting">
-                        <section class="sunbird-architecture-group network"><h3><i class="fas fa-bell"></i> Alert Inputs</h3><div class="sunbird-architecture-domain"><i class="fab fa-microsoft"></i>Microsoft Alerts</div><div class="sunbird-architecture-domain"><i class="fas fa-cloud"></i>Cloudflare Alerts</div><div class="sunbird-architecture-domain"><i class="fas fa-layer-group"></i>StackCTRL Risks</div></section>
-                        <div class="sunbird-architecture-lane-card direct">Process</div>
-                        <section class="sunbird-architecture-group network"><h3><i class="fas fa-bell"></i> Alert Processing</h3><div class="sunbird-architecture-domain"><i class="fas fa-filter"></i>Validate</div><div class="sunbird-architecture-domain"><i class="fas fa-link"></i>Correlate</div></section>
-                        <div class="sunbird-architecture-lane-card direct">Output</div>
-                        <section class="sunbird-architecture-group ai"><h3><i class="fas fa-wand-magic-sparkles"></i> Azure AI</h3><div class="sunbird-architecture-domain"><i class="fas fa-magnifying-glass"></i>Assess alerts</div></section>
-                        <div class="sunbird-architecture-lane-card retrieve">Store</div>
-                        <section class="sunbird-architecture-group google"><h3><img class="sunbird-architecture-brand" src="Images/GoogleSquare.webp" alt=""> Google Cloud</h3><div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Alert Results</div></section>
+                    <div class="vertical-arrow storage"><i class="fas fa-arrow-down"></i> STORE INTELLIGENT OUTPUTS</div>
+                    <section class="sunbird-architecture-group google intelligent-stage">
+                        <h3><img class="sunbird-architecture-brand" src="Images/GoogleSquare.webp" alt=""> Google Cloud — Intelligent Data Outputs Storage</h3>
+                        <div class="domain-processing-grid">${['Identity report output','Device report output','Risk intelligence','Compliance summary','AI findings','Recommendations'].map(label => `<div class="sunbird-architecture-storage"><i class="fas fa-database"></i>${label}<span class="storage-dot"></span></div>`).join('')}</div>
+                    </section>
+                    <div class="sunbird-architecture-section-label">Dedicated credential and network paths</div>
+                    <section class="sunbird-architecture-group specialist-paths">
+                        <div class="specialist-path">
+                            <h3><img class="sunbird-architecture-brand" src="Images/1password.webp" alt=""> Credential Security</h3>
+                            <div class="specialist-lane">
+                                <div class="sunbird-architecture-domain"><i class="fas fa-key"></i>1Password API</div>
+                                <span class="lane-line process-line"></span>
+                                <div class="sunbird-architecture-domain"><i class="fas fa-gears"></i>Process</div>
+                                <span class="lane-line process-line"></span>
+                                <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Credential Data</div>
+                                <span class="lane-line retrieve-line"></span>
+                                <div class="sunbird-architecture-dashboard-item"><i class="fas fa-key"></i>StackCTRL Credential Security</div>
+                            </div>
+                        </div>
+                        <div class="specialist-path network-path">
+                            <h3><i class="fas fa-cloud"></i> Network Security</h3>
+                            <div class="specialist-lane">
+                                <div class="sunbird-architecture-domain"><i class="fas fa-cloud-arrow-up"></i>Cloudflare API</div>
+                                <span class="lane-line process-line"></span>
+                                <div class="sunbird-architecture-domain"><i class="fas fa-gears"></i>Process</div>
+                                <span class="lane-line process-line"></span>
+                                <div class="sunbird-architecture-storage"><i class="fas fa-database"></i>Network Data</div>
+                                <span class="lane-line retrieve-line"></span>
+                                <div class="sunbird-architecture-dashboard-item"><i class="fas fa-globe"></i>StackCTRL Network Security</div>
+                            </div>
+                            <div class="network-alert-branch">
+                                <span class="branch-line"></span>
+                                <div class="sunbird-architecture-domain"><i class="fas fa-bell"></i>Network Alert</div>
+                                <span class="lane-line alert-line"></span>
+                                <div class="sunbird-architecture-dashboard-item"><i class="fas fa-triangle-exclamation"></i>Alerting</div>
+                            </div>
+                        </div>
+                    </section>
+                    <div class="vertical-arrow retrieve"><i class="fas fa-arrow-down"></i> RETRIEVE SUMMARY</div>
+                    <section class="sunbird-architecture-dashboard final-stage">
+                        <h3><img class="sunbird-architecture-brand" src="Images/Logos/Ctrlbig2.png" alt=""> StackCTRL Reporting Summary</h3>
+                        <div class="source-grid"><div class="sunbird-architecture-dashboard-item"><i class="fas fa-file-lines"></i>Reports</div><div class="sunbird-architecture-dashboard-item"><i class="fas fa-bell"></i>Alerts</div><div class="sunbird-architecture-dashboard-item"><i class="fas fa-sparkles"></i>AI Insights</div></div>
+                    </section>
+                    <div class="vertical-arrow report"><i class="fas fa-bell"></i> SECURITY NOTIFICATION</div>
+                    <section class="sunbird-architecture-group whatsapp-stage">
+                        <h3><i class="fab fa-whatsapp"></i> WhatsApp Alerting</h3>
+                        <div class="source-grid">
+                            <div class="sunbird-architecture-dashboard-item"><i class="fas fa-triangle-exclamation"></i>Validated security alert</div>
+                            <div class="sunbird-architecture-dashboard-item"><i class="fas fa-paper-plane"></i>Notification sent</div>
+                        </div>
                     </section>
                 </div>
             </div>

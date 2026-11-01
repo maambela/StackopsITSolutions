@@ -1228,9 +1228,278 @@
 
         @keyframes sunbirdArchitectureWireFlow { to { background-position: 180px 0; } }
 
+        .sunbird-architecture-flow.vertical-flow {
+            display: grid;
+            gap: 14px;
+        }
+
+        .vertical-flow::before { top: 0; bottom: 0; left: 50%; }
+        .vertical-flow .sunbird-architecture-group,
+        .vertical-flow .sunbird-architecture-dashboard {
+            width: min(100%, 900px);
+            margin: 0 auto;
+            grid-row: auto;
+            padding: 16px;
+        }
+
+        .vertical-flow .source-stack { --arch-border: rgba(36, 163, 255, .75); --arch-bg: rgba(9, 52, 94, .8); }
+        .vertical-flow .process-stage { --arch-border: rgba(255, 174, 66, .72); --arch-bg: rgba(106, 57, 14, .8); }
+        .vertical-flow .storage-stage,
+        .vertical-flow .intelligent-stage { --arch-border: rgba(73, 226, 128, .7); --arch-bg: rgba(8, 78, 59, .8); }
+        .vertical-flow .reporting-input,
+        .vertical-flow .report-stage { --arch-border: rgba(255, 132, 49, .72); --arch-bg: rgba(98, 45, 16, .8); }
+        .vertical-flow .ai-stage { --arch-border: rgba(183, 117, 255, .76); --arch-bg: rgba(61, 28, 112, .82); }
+        .vertical-flow .stackctrl-summary,
+        .vertical-flow .final-stage { --arch-border: rgba(255, 174, 66, .8); --arch-bg: rgba(91, 48, 12, .8); }
+
+        .source-grid,
+        .domain-processing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 7px;
+        }
+
+        .domain-processing-grid .sunbird-architecture-domain,
+        .domain-processing-grid .sunbird-architecture-storage,
+        .domain-processing-grid .sunbird-architecture-dashboard-item { position: relative; }
+
+        .domain-lane {
+            display: grid;
+            grid-template-columns: minmax(105px, 1fr) 34px minmax(105px, 1fr) 34px minmax(105px, 1fr);
+            align-items: center;
+            gap: 7px;
+            padding: 5px 0;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .vertical-flow .sunbird-architecture-domain,
+        .vertical-flow .sunbird-architecture-storage,
+        .vertical-flow .sunbird-architecture-dashboard-item {
+            min-height: 78px;
+            justify-content: center;
+            flex-direction: column;
+            gap: 7px;
+            padding: 10px 8px;
+            text-align: center;
+            font-size: 10px;
+            line-height: 1.2;
+        }
+
+        .vertical-flow .source-grid {
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        }
+
+        .vertical-flow .source-grid > .sunbird-architecture-domain,
+        .vertical-flow .source-grid > .sunbird-architecture-storage,
+        .vertical-flow .source-grid > .sunbird-architecture-dashboard-item {
+            min-height: 88px;
+        }
+
+        .vertical-flow .sunbird-architecture-domain i,
+        .vertical-flow .sunbird-architecture-storage i,
+        .vertical-flow .sunbird-architecture-dashboard-item i {
+            width: auto;
+            font-size: 20px;
+        }
+
+        .vertical-flow .sunbird-architecture-domain .sunbird-architecture-brand {
+            width: 28px;
+            height: 28px;
+        }
+
+        .vertical-flow .domain-lane .sunbird-architecture-domain,
+        .vertical-flow .domain-lane .sunbird-architecture-storage,
+        .vertical-flow .domain-lane .sunbird-architecture-dashboard-item {
+            min-height: 92px;
+        }
+
+        .vertical-flow .data-file,
+        .vertical-flow .storage-dot {
+            position: absolute;
+            right: 7px;
+            top: 7px;
+            margin: 0;
+        }
+
+        .domain-lane + .domain-lane {
+            border-top: 1px solid rgba(255,255,255,.09);
+        }
+
+        .domain-lane .sunbird-architecture-domain,
+        .domain-lane .sunbird-architecture-storage,
+        .domain-lane .sunbird-architecture-dashboard-item {
+            min-width: 0;
+        }
+
+        .lane-line {
+            position: relative;
+            display: block;
+            height: 2px;
+            background: var(--lane-line, #ffae45);
+            box-shadow: 0 0 9px var(--lane-line, #ffae45);
+            background-image: linear-gradient(90deg, transparent 0 25%, #fff 45% 55%, transparent 75%);
+            background-size: 80px 100%;
+            animation: sunbirdArchitectureWireFlow 1.4s linear infinite;
+        }
+
+        .lane-line::after {
+            content: "";
+            position: absolute;
+            right: -1px;
+            top: -4px;
+            border-left: 7px solid var(--lane-line, #ffae45);
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+        }
+
+        .process-line { --lane-line: #ffae45; }
+        .retrieve-line { --lane-line: #55e897; }
+        .alert-line { --lane-line: #ff586d; }
+
+        .specialist-paths {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            --arch-border: rgba(91, 178, 255, .6);
+            --arch-bg: rgba(10, 35, 61, .8);
+        }
+
+        .specialist-path {
+            min-width: 0;
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 12px;
+            background: rgba(0,0,0,.16);
+        }
+
+        .specialist-path h3 {
+            margin-bottom: 10px;
+        }
+
+        .specialist-lane {
+            display: grid;
+            grid-template-columns: minmax(72px, 1fr) 24px minmax(72px, 1fr) 24px minmax(72px, 1fr) 24px minmax(82px, 1.1fr);
+            align-items: center;
+            gap: 5px;
+        }
+
+        .specialist-lane .sunbird-architecture-domain,
+        .specialist-lane .sunbird-architecture-storage,
+        .specialist-lane .sunbird-architecture-dashboard-item {
+            min-height: 78px;
+            font-size: 9px;
+        }
+
+        .network-alert-branch {
+            display: grid;
+            grid-template-columns: 18px minmax(82px, 1fr) 24px minmax(82px, 1fr);
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed rgba(255, 88, 109, .55);
+        }
+
+        .network-alert-branch .sunbird-architecture-domain,
+        .network-alert-branch .sunbird-architecture-dashboard-item {
+            min-height: 62px;
+            font-size: 9px;
+        }
+
+        .branch-line {
+            width: 2px;
+            height: 24px;
+            justify-self: center;
+            background: #ff586d;
+            box-shadow: 0 0 9px #ff586d;
+        }
+
+        .data-file {
+            margin-left: auto;
+            color: #ffd070;
+            animation: sunbirdArchitectureFile 1.8s ease-in-out infinite;
+        }
+
+        .data-file::after {
+            content: "";
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            width: 20px;
+            height: 2px;
+            background: #ff9a42;
+            box-shadow: 0 0 8px #ff9a42;
+            animation: sunbirdArchitectureFileLine 1.8s linear infinite;
+        }
+
+        .storage-dot {
+            width: 6px;
+            height: 6px;
+            margin-left: auto;
+            border-radius: 50%;
+            background: #57ef94;
+            box-shadow: 0 0 10px #57ef94;
+            animation: sunbirdArchitecturePulse 1.4s ease-in-out infinite;
+        }
+
+        .vertical-arrow {
+            position: relative;
+            z-index: 1;
+            width: min(100%, 220px);
+            margin: 0 auto;
+            padding: 7px 12px;
+            border: 1px solid var(--arrow, #ffae45);
+            border-radius: 999px;
+            background: rgba(7, 17, 30, .9);
+            color: #e9f4ff;
+            text-align: center;
+            font-size: 10px;
+            letter-spacing: .08em;
+            box-shadow: 0 0 16px var(--arrow, #ffae45);
+        }
+
+        .vertical-arrow::after {
+            content: "";
+            position: absolute;
+            left: calc(50% - 5px);
+            bottom: -11px;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 9px solid var(--arrow, #ffae45);
+        }
+
+        .vertical-arrow.process { --arrow: #ffae45; }
+        .vertical-arrow.storage,
+        .vertical-arrow.retrieve { --arrow: #55e897; }
+        .vertical-arrow.report { --arrow: #ff8b3d; }
+        .vertical-arrow.ai { --arrow: #bd82ff; }
+
+        .vertical-flow .whatsapp-stage {
+            width: min(100%, 300px);
+            --arch-border: rgba(37, 211, 102, .8);
+            --arch-bg: rgba(8, 84, 48, .82);
+            --arch-glow: rgba(37, 211, 102, .28);
+        }
+
+        .vertical-flow .whatsapp-stage h3 i { color: #25d366; }
+
+        .vertical-arrow i { animation: sunbirdArchitectureArrowPulse 1.2s ease-in-out infinite; }
+
+        @keyframes sunbirdArchitectureFileLine { from { transform: translateX(-8px); opacity: .2; } 50% { opacity: 1; } to { transform: translateX(14px); opacity: 0; } }
+        @keyframes sunbirdArchitecturePulse { 0%, 100% { transform: scale(.7); opacity: .55; } 50% { transform: scale(1.35); opacity: 1; } }
+        @keyframes sunbirdArchitectureArrowPulse { 0%, 100% { transform: translateY(-2px); } 50% { transform: translateY(3px); } }
+
         @media (max-width: 1050px) {
             .sunbird-architecture-grid,
             .sunbird-architecture-reporting { grid-template-columns: 1fr; }
+            .specialist-paths { grid-template-columns: 1fr; }
+            .domain-lane { grid-template-columns: 1fr; }
+            .specialist-lane { grid-template-columns: 1fr; }
+            .specialist-lane .lane-line { width: 70%; margin: 0 auto; transform: rotate(90deg); }
+            .network-alert-branch { grid-template-columns: 1fr; }
+            .branch-line { width: 70%; height: 2px; margin: 0 auto; }
+            .lane-line { width: 70%; margin: 0 auto; transform: rotate(90deg); }
             .sunbird-architecture-wire { min-height: 20px; }
             .sunbird-architecture-wire::before { left: 50%; right: auto; top: -4px; width: 2px; height: 28px; }
             .sunbird-architecture-wire::after { top: 20px; right: calc(50% - 5px); border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 9px solid var(--wire, #2dbdff); border-bottom: 0; }
