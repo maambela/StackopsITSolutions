@@ -17763,7 +17763,7 @@ function initializeSunbirdLeftMenu() {
             <span class="sunbird-menu-heading-label">Control Center</span>
             <span class="sunbird-control-center-brand" aria-hidden="true">
                 <img src="Images/Logos/Ctrl big.png" alt="">
-                <span><b>StackCTRL</b><small>Control Center</small></span>
+                <span><small>Control Center</small></span>
             </span>
         </div>
         <button class="sunbird-menu-current" type="button" aria-expanded="false" onclick="window.toggleSunbirdMobileMenu()"></button>
