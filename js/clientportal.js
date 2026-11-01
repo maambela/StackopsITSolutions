@@ -14552,6 +14552,22 @@ function renderSunbirdFullDashboardButton(target) {
 }
 
 function renderSunbirdPlaceholderView(title, icon, subtitle = 'Coming soon') {
+    if (title === 'Architecture') {
+        return `
+            <div class="sunbird-panel-view sunbird-architecture-preview">
+                <div class="billing-card-header">
+                    <i class="fas ${icon}"></i>
+                    <h3>Architecture</h3>
+                </div>
+                <p>Follow the living path from each source API through processing, storage, AI, reporting and back to StackCTRL.</p>
+                <button type="button" class="sunbird-architecture-open" onclick="window.openSunbirdArchitecture()">
+                    <i class="fas fa-up-right-and-down-left-from-center"></i>
+                    Open full architecture
+                </button>
+            </div>
+        `;
+    }
+
     return `
         <div class="sunbird-panel-view">
             <div class="billing-card-header">
@@ -14562,6 +14578,91 @@ function renderSunbirdPlaceholderView(title, icon, subtitle = 'Coming soon') {
         </div>
     `;
 }
+
+window.openSunbirdArchitecture = function() {
+    let modal = document.getElementById('sunbird-architecture-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'sunbird-architecture-modal';
+        modal.className = 'sunbird-architecture-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'sunbird-architecture-title');
+        modal.innerHTML = `
+            <div class="sunbird-architecture-shell">
+                <div class="sunbird-architecture-head">
+                    <div>
+                        <h2 id="sunbird-architecture-title"><i class="fas fa-sitemap"></i> Full Architecture</h2>
+                        <p>Live data movement from source APIs to the StackCTRL dashboard</p>
+                    </div>
+                    <button type="button" class="sunbird-architecture-close" aria-label="Close architecture">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+                <div class="sunbird-architecture-flow">
+                    <span class="sunbird-architecture-stream"></span>
+                    <span class="sunbird-architecture-stream s2"></span>
+                    <span class="sunbird-architecture-stream s3"></span>
+                    <article class="sunbird-architecture-node api">
+                        <h3><i class="fab fa-microsoft"></i> Microsoft Security APIs</h3>
+                        <small>Identity Protection · Devices · Email · Risks · Governance · Alerts</small>
+                    </article>
+                    <article class="sunbird-architecture-node api">
+                        <h3><i class="fas fa-key"></i> Credential Security</h3>
+                        <small>1Password Events API · credential activity</small>
+                    </article>
+                    <article class="sunbird-architecture-node api">
+                        <h3><i class="fas fa-cloud"></i> Network Security</h3>
+                        <small>Cloudflare APIs · webhooks · network alerts</small>
+                    </article>
+                    <article class="sunbird-architecture-node process">
+                        <h3><i class="fas fa-cogs sunbird-architecture-gears"></i> Processing &amp; Ingestion</h3>
+                        <small>Collecting · validating · normalising · routing</small>
+                        <div class="sunbird-architecture-files" aria-hidden="true"><i class="fas fa-file-code"></i><i class="fas fa-file-lines"></i><i class="fas fa-file-shield"></i></div>
+                    </article>
+                    <article class="sunbird-architecture-node storage">
+                        <h3><i class="fas fa-database"></i> Google Cloud Domain Storage</h3>
+                        <small>Identity · device · credential · network · risk data stored separately</small>
+                    </article>
+                    <article class="sunbird-architecture-node storage">
+                        <h3><i class="fas fa-arrow-rotate-left"></i> Retrieval Paths</h3>
+                        <small>Each stored domain returns on its own line to its StackCTRL view</small>
+                    </article>
+                    <article class="sunbird-architecture-node ai">
+                        <h3><i class="fas fa-wand-magic-sparkles"></i> Azure AI Analysis</h3>
+                        <small>Assessing · scoring · summarising · recommending</small>
+                    </article>
+                    <article class="sunbird-architecture-node report">
+                        <h3><i class="fas fa-chart-line"></i> Reporting &amp; Alerting</h3>
+                        <small>API inputs + StackCTRL processed data → reports → alerts → AI</small>
+                    </article>
+                    <article class="sunbird-architecture-node storage">
+                        <h3><i class="fas fa-database"></i> Google Cloud AI Results</h3>
+                        <small>AI findings and reporting output stored for retrieval</small>
+                    </article>
+                    <article class="sunbird-architecture-node final">
+                        <h3><i class="fas fa-layer-group"></i> StackCTRL Dashboard</h3>
+                        <small>Security · identity · devices · compliance · risks · reports · AI insights</small>
+                    </article>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('.sunbird-architecture-close').addEventListener('click', () => {
+            modal.classList.remove('is-open');
+            document.body.classList.remove('sunbird-architecture-open');
+        });
+        modal.addEventListener('click', event => {
+            if (event.target === modal) {
+                modal.classList.remove('is-open');
+                document.body.classList.remove('sunbird-architecture-open');
+            }
+        });
+    }
+
+    modal.classList.add('is-open');
+    document.body.classList.add('sunbird-architecture-open');
+};
 
 window.openSunbirdFullDashboard = function(target) {
     let project = null;

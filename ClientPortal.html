@@ -840,6 +840,201 @@
             font-weight: 200;
         }
 
+        .sunbird-architecture-preview {
+            padding: 18px 22px 22px;
+            text-align: left;
+        }
+
+        .sunbird-architecture-preview p {
+            color: #a7b3c9;
+            font-size: 13px;
+            line-height: 1.55;
+            margin: 8px 0 16px;
+        }
+
+        .sunbird-architecture-open,
+        .sunbird-architecture-close {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255, 145, 70, .62);
+            border-radius: 999px;
+            padding: 10px 16px;
+            background: linear-gradient(135deg, rgba(255, 119, 36, .22), rgba(13, 30, 52, .78));
+            color: #fff;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12px;
+            box-shadow: 0 0 18px rgba(255, 111, 34, .18), inset 0 1px rgba(255,255,255,.2);
+            transition: transform .25s ease, box-shadow .25s ease;
+        }
+
+        .sunbird-architecture-open:hover,
+        .sunbird-architecture-close:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 26px rgba(255, 111, 34, .38), inset 0 1px rgba(255,255,255,.28);
+        }
+
+        .sunbird-architecture-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            display: none;
+            padding: clamp(12px, 3vw, 36px);
+            background: rgba(3, 7, 15, .78);
+            backdrop-filter: blur(18px);
+            overflow-y: auto;
+        }
+
+        .sunbird-architecture-modal.is-open {
+            display: block;
+            animation: sunbirdArchitectureFadeIn .35s ease both;
+        }
+
+        .sunbird-architecture-shell {
+            position: relative;
+            width: min(760px, 100%);
+            margin: 0 auto;
+            padding: clamp(20px, 4vw, 38px) clamp(14px, 4vw, 44px) 48px;
+            border: 1px solid rgba(126, 202, 255, .34);
+            border-radius: 28px;
+            background: linear-gradient(145deg, rgba(18, 30, 48, .9), rgba(5, 10, 20, .92));
+            box-shadow: 0 28px 90px rgba(0,0,0,.62), inset 0 1px rgba(255,255,255,.18);
+        }
+
+        .sunbird-architecture-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            border-radius: inherit;
+            background: linear-gradient(120deg, rgba(87, 190, 255, .12), transparent 35%, rgba(255, 120, 45, .08));
+        }
+
+        .sunbird-architecture-head {
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 30px;
+        }
+
+        .sunbird-architecture-head h2 {
+            margin: 0 0 5px;
+            color: #fff;
+            font-size: clamp(20px, 4vw, 30px);
+            font-weight: 300;
+        }
+
+        .sunbird-architecture-head p {
+            margin: 0;
+            color: #9eb4d2;
+            font-size: 12px;
+        }
+
+        .sunbird-architecture-close {
+            flex: 0 0 auto;
+            padding: 8px 12px;
+            border-color: rgba(160, 185, 218, .4);
+            background: rgba(255,255,255,.07);
+        }
+
+        .sunbird-architecture-flow {
+            position: relative;
+            display: grid;
+            gap: 18px;
+        }
+
+        .sunbird-architecture-flow::before {
+            content: "";
+            position: absolute;
+            top: 24px;
+            bottom: 24px;
+            left: 50%;
+            width: 2px;
+            transform: translateX(-50%);
+            background: linear-gradient(#24b7ff, #8b5cff 38%, #ff8c35 70%, #18d4a0);
+            box-shadow: 0 0 14px rgba(36,183,255,.65);
+        }
+
+        .sunbird-architecture-node {
+            position: relative;
+            z-index: 1;
+            width: min(100%, 520px);
+            margin: 0 auto;
+            padding: 15px 18px;
+            border: 1px solid var(--node-border, rgba(92, 189, 255, .5));
+            border-radius: 18px;
+            background: linear-gradient(135deg, var(--node-bg, rgba(23, 71, 108, .75)), rgba(8, 15, 28, .9));
+            box-shadow: 0 12px 30px rgba(0,0,0,.3), inset 0 1px rgba(255,255,255,.18), 0 0 24px var(--node-glow, rgba(36,183,255,.13));
+            overflow: hidden;
+        }
+
+        .sunbird-architecture-node::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,.14), transparent 55%);
+            transform: translateX(-120%);
+            animation: sunbirdArchitectureSheen 5s ease-in-out infinite;
+        }
+
+        .sunbird-architecture-node h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 5px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 300;
+        }
+
+        .sunbird-architecture-node h3 i { color: var(--node-accent, #69d7ff); }
+        .sunbird-architecture-node small { color: #9bb0c9; font-size: 11px; }
+
+        .sunbird-architecture-node.api { --node-accent: #65d8ff; --node-border: rgba(46, 187, 255, .65); --node-bg: rgba(11, 86, 126, .72); --node-glow: rgba(46, 187, 255, .3); }
+        .sunbird-architecture-node.process { --node-accent: #ffc15c; --node-border: rgba(255, 180, 59, .62); --node-bg: rgba(105, 61, 14, .7); --node-glow: rgba(255, 156, 35, .3); }
+        .sunbird-architecture-node.storage { --node-accent: #55e897; --node-border: rgba(57, 224, 146, .62); --node-bg: rgba(11, 100, 79, .7); --node-glow: rgba(24, 212, 160, .28); }
+        .sunbird-architecture-node.ai { --node-accent: #c29aff; --node-border: rgba(155, 91, 255, .72); --node-bg: rgba(65, 30, 132, .72); --node-glow: rgba(139, 92, 255, .38); }
+        .sunbird-architecture-node.report { --node-accent: #ffae67; --node-border: rgba(255, 129, 44, .68); --node-bg: rgba(116, 49, 18, .72); --node-glow: rgba(255, 126, 45, .3); }
+        .sunbird-architecture-node.final { --node-accent: #55e4d7; --node-border: rgba(37, 220, 202, .72); --node-bg: rgba(9, 94, 103, .72); --node-glow: rgba(37, 220, 202, .35); }
+
+        .sunbird-architecture-stream {
+            position: absolute;
+            left: calc(50% - 5px);
+            z-index: 2;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff6b35;
+            box-shadow: 0 0 0 5px rgba(255,107,53,.13), 0 0 20px #ff6b35;
+            animation: sunbirdArchitectureStream 2.4s linear infinite;
+            pointer-events: none;
+        }
+
+        .sunbird-architecture-stream.s2 { animation-delay: .8s; }
+        .sunbird-architecture-stream.s3 { animation-delay: 1.6s; }
+        .sunbird-architecture-gears { animation: sunbirdArchitectureGear 5s linear infinite; display: inline-block; }
+        .sunbird-architecture-files { display: flex; gap: 7px; margin-top: 12px; }
+        .sunbird-architecture-files i { color: #ffcf6e; animation: sunbirdArchitectureFile 2.6s ease-in-out infinite; }
+        .sunbird-architecture-files i:nth-child(2) { animation-delay: .45s; }
+        .sunbird-architecture-files i:nth-child(3) { animation-delay: .9s; }
+
+        @keyframes sunbirdArchitectureFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes sunbirdArchitectureSheen { 0%, 35% { transform: translateX(-120%); } 65%, 100% { transform: translateX(120%); } }
+        @keyframes sunbirdArchitectureStream { from { transform: translateY(-18px); opacity: 0; } 15%, 80% { opacity: 1; } to { transform: translateY(88px); opacity: 0; } }
+        @keyframes sunbirdArchitectureGear { to { transform: rotate(360deg); } }
+        @keyframes sunbirdArchitectureFile { 0%, 100% { transform: translateY(0); opacity: .65; } 50% { transform: translateY(8px); opacity: 1; } }
+
+        @media (prefers-reduced-motion: reduce) {
+            .sunbird-architecture-node::after,
+            .sunbird-architecture-stream,
+            .sunbird-architecture-gears,
+            .sunbird-architecture-files i { animation: none; }
+        }
+
         /* Override background for ClientPortal only */
         .background {
             position: fixed;
