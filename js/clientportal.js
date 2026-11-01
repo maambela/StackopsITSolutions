@@ -14611,14 +14611,15 @@ window.openSunbirdArchitecture = function() {
                             <div class="sunbird-architecture-domain"><i class="fas fa-cloud"></i>Cloudflare APIs &amp; Webhooks</div>
                         </div>
                     </section>
-                    <div class="vertical-arrow process"><i class="fas fa-circle-nodes"></i> INGEST</div>
+                    <div class="stage-transition orange"><span>ALL SOURCES ENTER THE QUEUE</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group process-stage">
                         <h3><i class="fas fa-cogs sunbird-architecture-gears"></i> Data Load &amp; Event Queue</h3>
                         <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-filter"></i>Validate</div><div class="sunbird-architecture-domain"><i class="fas fa-route"></i>Route by domain</div><div class="sunbird-architecture-domain"><i class="fas fa-file-code"></i>Raw event files</div></div>
                     </section>
-                    <div class="vertical-arrow process"><i class="fas fa-arrow-down"></i> COMPUTE</div>
+                    <div class="stage-transition orange"><span>QUEUE RELEASES EVENTS INTO DOMAIN PROCESSORS</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group process-stage domain-lane-stack">
-                        <h3><i class="fas fa-gears sunbird-architecture-gears"></i> Individual Process → Store → Retrieve Paths</h3>
+                        <h3><i class="fas fa-gears sunbird-architecture-gears"></i> Compute: independent domain lanes</h3>
+                        <p class="architecture-stage-note">Each row below is a separate path. It does not share one central data line.</p>
                         ${[
                             ['Identity Protection','Identity Data','Identity'],['Device Protection','Device Data','Devices'],['Email Security','Email Data','Email Security'],
                             ['Security Alerts','Security Alert Data','Alerts'],['Operations','Operations Data','Operations'],['Backup & Recovery','Backup Data','Backup'],
@@ -14635,21 +14636,22 @@ window.openSunbirdArchitecture = function() {
                     </section>
 
                     <div class="sunbird-architecture-section-label">Interconnected reporting and intelligent-output pipeline</div>
+                    <div class="stage-transition green"><span>PROCESSED DOMAIN OUTPUTS FEED REPORTING</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group reporting-input">
                         <h3><i class="fas fa-arrows-to-circle"></i> Reporting Inputs</h3>
                         <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-layer-group"></i>StackCTRL processed domains</div><div class="sunbird-architecture-domain"><i class="fas fa-plug"></i>Direct API reporting inputs</div></div>
                     </section>
-                    <div class="vertical-arrow report"><i class="fas fa-arrow-down"></i> INPUT</div>
+                    <div class="stage-transition orange"><span>STACKCTRL DATA + DIRECT API INPUTS</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group report-stage">
                         <h3><i class="fas fa-chart-line"></i> Reporting Process</h3>
                         <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-download"></i>Collect</div><div class="sunbird-architecture-domain"><i class="fas fa-gears"></i>Process</div><div class="sunbird-architecture-domain"><i class="fas fa-file-export"></i>Generate per-domain reports</div></div>
                     </section>
-                    <div class="vertical-arrow ai"><i class="fas fa-arrow-down"></i> INPUT / OUTPUT</div>
+                    <div class="stage-transition purple"><span>REPORTING OUTPUT ENTERS AI ANALYSIS</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group ai-stage">
                         <h3><i class="fas fa-wand-magic-sparkles"></i> Azure AI Analysis</h3>
                         <div class="source-grid"><div class="sunbird-architecture-domain"><i class="fas fa-magnifying-glass"></i>Analyse</div><div class="sunbird-architecture-domain"><i class="fas fa-ranking-star"></i>Assess</div><div class="sunbird-architecture-domain"><i class="fas fa-lightbulb"></i>Recommend</div></div>
                     </section>
-                    <div class="vertical-arrow storage"><i class="fas fa-arrow-down"></i> STORE INTELLIGENT OUTPUTS</div>
+                    <div class="stage-transition green"><span>EACH INTELLIGENT OUTPUT IS STORED</span><span class="transition-arrow"></span></div>
                     <section class="sunbird-architecture-group google intelligent-stage">
                         <h3><img class="sunbird-architecture-brand" src="Images/GoogleSquare.webp" alt=""> Google Cloud — Intelligent Data Outputs Storage</h3>
                         <div class="domain-processing-grid">${['Identity report output','Device report output','Risk intelligence','Compliance summary','AI findings','Recommendations'].map(label => `<div class="sunbird-architecture-storage"><i class="fas fa-database"></i>${label}<span class="storage-dot"></span></div>`).join('')}</div>

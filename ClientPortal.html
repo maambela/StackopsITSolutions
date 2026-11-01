@@ -1233,10 +1233,11 @@
             gap: 14px;
         }
 
-        .vertical-flow::before { top: 0; bottom: 0; left: 50%; }
+        .vertical-flow::before { display: none; }
         .vertical-flow .sunbird-architecture-group,
         .vertical-flow .sunbird-architecture-dashboard {
-            width: min(100%, 900px);
+            width: 95%;
+            max-width: 1180px;
             margin: 0 auto;
             grid-row: auto;
             padding: 16px;
@@ -1484,6 +1485,78 @@
 
         .vertical-flow .whatsapp-stage h3 i { color: #25d366; }
 
+        .vertical-flow .stage-transition {
+            width: 95%;
+            max-width: 1180px;
+            margin: 0 auto;
+            display: grid;
+            justify-items: center;
+            gap: 5px;
+            color: #b9d8f4;
+            font-size: 10px;
+            letter-spacing: .12em;
+        }
+
+        .vertical-flow .stage-transition .transition-arrow {
+            height: 34px;
+            width: 2px;
+            background: var(--transition, #ffae45);
+            box-shadow: 0 0 12px var(--transition, #ffae45);
+            position: relative;
+        }
+
+        .vertical-flow .stage-transition .transition-arrow::after {
+            content: "";
+            position: absolute;
+            bottom: -1px;
+            left: -5px;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 10px solid var(--transition, #ffae45);
+        }
+
+        .vertical-flow .stage-transition::before,
+        .vertical-flow .stage-transition::after {
+            content: "";
+            width: 72%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--transition, #ffae45), transparent);
+            box-shadow: 0 0 10px var(--transition, #ffae45);
+        }
+
+        .vertical-flow .stage-transition.green { --transition: #55e897; }
+        .vertical-flow .stage-transition.orange { --transition: #ffae45; }
+        .vertical-flow .stage-transition.purple { --transition: #bd82ff; }
+
+        .architecture-stage-note {
+            margin: -4px 0 12px;
+            color: #a9c5df;
+            font-size: 11px;
+            text-align: center;
+        }
+
+        .vertical-flow .source-stack .source-grid {
+            grid-template-columns: repeat(3, minmax(130px, 190px));
+            justify-content: center;
+        }
+
+        .vertical-flow .source-stack .sunbird-architecture-domain {
+            min-height: 108px;
+        }
+
+        .vertical-flow .source-stack .sunbird-architecture-domain i,
+        .vertical-flow .source-stack .sunbird-architecture-domain .sunbird-architecture-brand {
+            font-size: 28px;
+            width: 34px;
+            height: 34px;
+        }
+
+        .vertical-flow .domain-lane-stack {
+            background:
+                linear-gradient(rgba(7, 24, 39, .92), rgba(7, 24, 39, .92)),
+                repeating-linear-gradient(0deg, transparent 0 104px, rgba(255,255,255,.035) 104px 105px);
+        }
+
         .vertical-arrow i { animation: sunbirdArchitectureArrowPulse 1.2s ease-in-out infinite; }
 
         @keyframes sunbirdArchitectureFileLine { from { transform: translateX(-8px); opacity: .2; } 50% { opacity: 1; } to { transform: translateX(14px); opacity: 0; } }
@@ -1500,6 +1573,11 @@
             .network-alert-branch { grid-template-columns: 1fr; }
             .branch-line { width: 70%; height: 2px; margin: 0 auto; }
             .lane-line { width: 70%; margin: 0 auto; transform: rotate(90deg); }
+            .vertical-flow .source-stack .source-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); }
+        }
+
+        @media (max-width: 620px) {
+            .vertical-flow .source-stack .source-grid { grid-template-columns: 1fr; }
             .sunbird-architecture-wire { min-height: 20px; }
             .sunbird-architecture-wire::before { left: 50%; right: auto; top: -4px; width: 2px; height: 28px; }
             .sunbird-architecture-wire::after { top: 20px; right: calc(50% - 5px); border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 9px solid var(--wire, #2dbdff); border-bottom: 0; }
