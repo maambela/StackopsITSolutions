@@ -20495,6 +20495,12 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     position: relative;
     grid-column: 1 / -1;
     grid-row: 1;
+    /* The compacted navigation grid is 9.6px narrower and shorter.  Keep the
+       protected header geometry at its original centered dimensions instead
+       of allowing that grid change to shift the title, corner mark or rule. */
+    top: -4.8px;
+    width: calc(100% + 9.6px);
+    justify-self: center;
     height: 63.84375px;
     padding: 9px 11px 8px;
     justify-content: center;
@@ -20642,10 +20648,16 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"],
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active,
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover,
-  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible {
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible,
+  body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover:not(:disabled),
+  body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible:not(:disabled),
+  body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active {
+    border: 0 !important;
+    border-radius: 0 !important;
     background: transparent !important;
     background-image: none !important;
     box-shadow: none !important;
+    outline: none !important;
     filter: none !important;
   }
 
@@ -20654,5 +20666,12 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active i {
     transform: none !important;
     filter: none !important;
+  }
+
+  /* Keep keyboard focus on the 58px instrument disc, not on its 96px grid
+     cell.  This is a compact accessibility cue rather than a second halo. */
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible i,
+  body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible:not(:disabled) i {
+    box-shadow: 0 0 0 2px rgba(221, 242, 255, 0.9), inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19) !important;
   }
 }
