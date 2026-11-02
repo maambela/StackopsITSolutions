@@ -20479,12 +20479,12 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     width: var(--sunbird-menu-width, 310px) !important;
     height: var(--sunbird-control-rail-height) !important;
     min-height: var(--sunbird-control-rail-height) !important;
-    grid-template-columns: repeat(3, 96px);
-    grid-template-rows: 63.84375px repeat(3, 96px);
+    grid-template-columns: repeat(3, 80px);
+    grid-template-rows: 63.84375px repeat(3, 80px);
     align-content: center;
     /* Keep the circular controls compact while preserving their existing cells. */
     row-gap: 0;
-    column-gap: 4px;
+    column-gap: 0;
     justify-content: center;
     padding: 10px 10px 16px;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
@@ -20496,7 +20496,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     grid-row: 1;
     /* Keep the protected header geometry fixed while the controls move closer
        together below it. */
-    top: -12px;
+    top: -20px;
     width: calc(100% + 9.6px);
     justify-self: center;
     height: 63.84375px;
@@ -20548,9 +20548,9 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item {
     position: relative;
-    top: 10px;
+    top: 18px;
     width: 100%;
-    height: 96px;
+    height: 80px;
     padding: 0;
     grid-template-rows: 60px minmax(0, 1fr);
     gap: 7px;
@@ -20701,7 +20701,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover:not(:disabled),
   body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible:not(:disabled) {
     width: 100% !important;
-    height: 96px !important;
+    height: 80px !important;
     min-height: 0 !important;
     padding: 0 1px !important;
     border: 0 !important;
