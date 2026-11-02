@@ -20693,4 +20693,61 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible:not(:disabled) i {
     box-shadow: 0 0 0 2px rgba(221, 242, 255, 0.9), inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19) !important;
   }
+
+  /* Billing is recreated as a regular control, so it shares the same
+     transparent grid cell and circular icon treatment as every other action. */
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"],
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover:not(:disabled),
+  body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible:not(:disabled) {
+    width: 100% !important;
+    height: 96px !important;
+    min-height: 0 !important;
+    padding: 0 1px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    display: grid !important;
+    grid-template-rows: 48px minmax(0, 1fr) !important;
+    place-items: start center !important;
+    align-content: start !important;
+    gap: 5px !important;
+    overflow: visible !important;
+    font-size: 0.66rem !important;
+    font-weight: 400 !important;
+    line-height: 1.08 !important;
+    text-align: center !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::before,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] i {
+    width: 48px !important;
+    height: 48px !important;
+    margin: 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 50% !important;
+    color: rgba(218, 239, 255, 0.96) !important;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.045)) !important;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19), 0 5px 12px rgba(0, 0, 0, 0.2) !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] > span {
+    width: 100% !important;
+    min-height: 1.9em !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover > span,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible > span {
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
 }

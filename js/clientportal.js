@@ -17866,10 +17866,15 @@ function initializeSunbirdLeftMenu() {
         <button class="sunbird-menu-item" type="button" data-menu="applications" onclick="window.switchBillingMenu('applications')">
             <i class="fas fa-cubes"></i><span>Applications</span>
         </button>
-        <button class="sunbird-menu-item" type="button" data-menu="billing" onclick="window.switchBillingMenu('billing')">
-            <i class="fas fa-file-invoice"></i><span>Billing Statement</span>
-        </button>
     `;
+    const billingButton = document.createElement('button');
+    billingButton.className = 'sunbird-menu-item';
+    billingButton.type = 'button';
+    billingButton.dataset.menu = 'billing';
+    billingButton.title = 'Billing Statement';
+    billingButton.innerHTML = '<i class="fas fa-file-invoice"></i><span>Billing Statement</span>';
+    billingButton.addEventListener('click', () => window.switchBillingMenu('billing'));
+    leftMenu.appendChild(billingButton);
     
     // Insert wrapper before dashboard-cards-section
     dashboardCardsSection.parentElement.insertBefore(wrapper, dashboardCardsSection);
