@@ -20707,10 +20707,11 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
+    background-color: transparent !important;
     background-image: none !important;
     box-shadow: none !important;
     display: grid !important;
-    grid-template-rows: 48px minmax(0, 1fr) !important;
+    grid-template-rows: 60px minmax(0, 1fr) !important;
     place-items: start center !important;
     align-content: start !important;
     gap: 5px !important;
@@ -20728,8 +20729,8 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] i {
-    width: 48px !important;
-    height: 48px !important;
+    width: 58px !important;
+    height: 58px !important;
     margin: 0 !important;
     border: 1px solid rgba(255, 255, 255, 0.3) !important;
     border-radius: 50% !important;
