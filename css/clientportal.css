@@ -10587,6 +10587,43 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     -webkit-appearance: none;
   }
 
+  body.sunbird-client-portal .site-header .btn-logout {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid rgba(255, 104, 104, 0.72);
+    border-radius: 50%;
+    color: rgba(255, 190, 190, 0.98);
+    background:
+      linear-gradient(145deg, rgba(255, 132, 132, 0.2), rgba(255, 255, 255, 0.045)),
+      rgba(112, 18, 26, 0.54);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.3),
+      inset 0 -7px 14px rgba(0, 0, 0, 0.2),
+      0 6px 16px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  body.sunbird-client-portal .site-header .btn-logout:hover,
+  body.sunbird-client-portal .site-header .btn-logout:focus-visible {
+    color: #fff;
+    background:
+      linear-gradient(145deg, rgba(255, 175, 175, 0.3), rgba(255, 104, 104, 0.22)),
+      rgba(148, 22, 32, 0.62);
+    border-color: rgba(255, 160, 160, 0.92);
+    box-shadow:
+      0 0 0 3px rgba(255, 100, 100, 0.12),
+      0 8px 20px rgba(0, 0, 0, 0.28),
+      inset 0 1px 1px rgba(255, 255, 255, 0.36),
+      inset 0 -7px 14px rgba(0, 0, 0, 0.18);
+  }
+
   body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control::before,
   body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control::after {
     content: none !important;
@@ -20558,6 +20595,27 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     justify-content: center;
     padding: 10px 10px 16px;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+    animation: sunbird-control-center-glow 3.2s ease-in-out infinite;
+  }
+
+  @keyframes sunbird-control-center-glow {
+    0%, 100% {
+      border-color: rgba(255, 128, 30, 0.48);
+      box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.25),
+        0 0 10px rgba(255, 112, 24, 0.18),
+        inset 0 1px 2px rgba(255, 255, 255, 0.5),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.15);
+    }
+    50% {
+      border-color: rgba(255, 166, 82, 0.9);
+      box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.25),
+        0 0 25px rgba(255, 112, 24, 0.48),
+        0 0 48px rgba(255, 112, 24, 0.2),
+        inset 0 1px 2px rgba(255, 255, 255, 0.5),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.15);
+    }
   }
 
   body.sunbird-client-portal .sunbird-menu-heading {
@@ -20589,6 +20647,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     letter-spacing: 0.16em;
     line-height: 1;
     text-transform: uppercase;
+    transform: translateY(8px);
   }
 
   body.sunbird-client-portal .sunbird-control-center-brand {
