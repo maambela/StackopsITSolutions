@@ -20521,8 +20521,10 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
 
   body.sunbird-client-portal .sunbird-control-center-brand {
     position: absolute;
-    top: 8px;
-    right: 0;
+    /* The brand is a quiet corner signature: keep it above the heading rule,
+       pinned to the true top-right inset without shifting the fixed grid. */
+    top: -30px;
+    right: 10px;
     display: block;
     transform: none;
   }
@@ -20598,6 +20600,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     border-radius: 0;
     background: transparent !important;
     box-shadow: none !important;
+    overflow: visible !important;
     display: grid;
     grid-template-rows: 60px minmax(0, 1fr);
     gap: 7px;
@@ -20615,5 +20618,12 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::after {
     content: none !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::before {
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    box-shadow: none !important;
   }
 }
