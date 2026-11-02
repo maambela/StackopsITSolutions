@@ -14554,22 +14554,6 @@ function renderSunbirdFullDashboardButton(target) {
 }
 
 function renderSunbirdPlaceholderView(title, icon, subtitle = 'Coming soon') {
-    if (title === 'Architecture') {
-        return `
-            <div class="sunbird-panel-view sunbird-architecture-preview">
-                <div class="billing-card-header">
-                    <i class="fas ${icon}"></i>
-                    <h3>Architecture</h3>
-                </div>
-                <p>Follow the living path from each source API through processing, storage, AI, reporting and back to StackCTRL.</p>
-                <button type="button" class="sunbird-architecture-open" onclick="window.location.assign('architecture.html')">
-                    <i class="fas fa-up-right-and-down-left-from-center"></i>
-                    Open full architecture
-                </button>
-            </div>
-        `;
-    }
-
     return `
         <div class="sunbird-panel-view">
             <div class="billing-card-header">
