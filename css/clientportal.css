@@ -11058,7 +11058,6 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     border-right-color: rgba(255, 141, 62, 0.7);
     border-bottom-color: rgba(255, 127, 45, 0.58);
     background:
-      radial-gradient(150px 128px at 108% 102%, rgba(255, 118, 29, 0.21), transparent 69%),
       radial-gradient(124px 90px at -8% -4%, rgba(94, 181, 255, 0.12), transparent 71%),
       linear-gradient(135deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.035));
     box-shadow:
@@ -11073,8 +11072,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   .sunbird-left-menu::after {
     opacity: 0.62;
     background:
-      linear-gradient(118deg, rgba(255, 255, 255, 0.12), transparent 26%, transparent 67%, rgba(255, 146, 76, 0.12)),
-      linear-gradient(180deg, transparent 68%, rgba(255, 121, 37, 0.055));
+      linear-gradient(118deg, rgba(255, 255, 255, 0.12), transparent 26%, transparent 76%, rgba(255, 255, 255, 0.04));
   }
 
   .sunbird-left-menu .sunbird-menu-item i {
