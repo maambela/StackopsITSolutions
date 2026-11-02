@@ -20629,7 +20629,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     letter-spacing: 0.16em;
     line-height: 1;
     text-transform: uppercase;
-    transform: translateY(8px);
+    transform: translateY(14px);
   }
 
   body.sunbird-client-portal .sunbird-control-center-brand {
