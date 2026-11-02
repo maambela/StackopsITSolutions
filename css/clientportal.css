@@ -20482,10 +20482,9 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     grid-template-columns: repeat(3, 96px);
     grid-template-rows: 63.84375px repeat(3, 96px);
     align-content: center;
-    /* Keep the circular controls compact without changing their 96px cells:
-       4.8px and 7.2px are exactly 60% of the previous 8px / 12px gaps. */
-    row-gap: 4.8px;
-    column-gap: 7.2px;
+    /* Keep the circular controls compact while preserving their existing cells. */
+    row-gap: 0;
+    column-gap: 4px;
     justify-content: center;
     padding: 10px 10px 16px;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
@@ -20495,10 +20494,9 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     position: relative;
     grid-column: 1 / -1;
     grid-row: 1;
-    /* The compacted navigation grid is 9.6px narrower and shorter.  Keep the
-       protected header geometry at its original centered dimensions instead
-       of allowing that grid change to shift the title, corner mark or rule. */
-    top: -4.8px;
+    /* Keep the protected header geometry fixed while the controls move closer
+       together below it. */
+    top: -12px;
     width: calc(100% + 9.6px);
     justify-self: center;
     height: 63.84375px;
@@ -20516,7 +20514,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     clip: auto;
     clip-path: none;
     color: rgba(248, 251, 255, 0.94);
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     font-weight: 300;
     letter-spacing: 0.16em;
     line-height: 1;
@@ -20534,7 +20532,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 
   body.sunbird-client-portal .sunbird-control-center-brand img {
-    width: 76px;
+    width: 60px;
     max-width: none;
     height: auto;
     opacity: 0.9;
@@ -20549,6 +20547,8 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item {
+    position: relative;
+    top: 10px;
     width: 100%;
     height: 96px;
     padding: 0;
