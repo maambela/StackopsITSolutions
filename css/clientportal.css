@@ -14737,7 +14737,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     border-radius: 14px;
     background: transparent;
     color: rgba(255, 255, 255, 0.72);
-    font-size: 0.50rem;
+    font-size: 0.20rem;
     font-weight: 200;
     cursor: pointer;
     transition: background 0.2s ease, color 0.2s ease;
@@ -20584,7 +20584,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     clip: auto;
     clip-path: none;
     color: rgba(248, 251, 255, 0.94);
-    font-size: 0.68rem;
+    font-size: 0.4rem;
     font-weight: 300;
     letter-spacing: 0.16em;
     line-height: 1;
