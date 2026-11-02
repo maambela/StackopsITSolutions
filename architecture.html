@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Stack CTRL source-to-dashboard architecture map">
+  <title>Stack CTRL · Architecture</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="css/architecture-page.css">
+</head>
+<body class="architecture-page">
+  <div class="architecture-page__background" aria-hidden="true"></div>
+  <main class="architecture-page__shell">
+    <header class="architecture-page__header glass-panel">
+      <a class="architecture-page__back" href="ClientPortal.html"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Back to Client Portal</a>
+      <div class="architecture-page__brand">
+        <img src="Images/Logos/Ctrl big.png" alt="Stack CTRL">
+        <div><p>Source to insight</p><h1>Stack CTRL Architecture</h1><span>Connected provider paths, shared processing and safeguarded alerting.</span></div>
+      </div>
+      <div class="architecture-page__legend" aria-label="Provider line legend">
+        <span class="legend-item legend-item--microsoft"><i></i>Microsoft Graph</span>
+        <span class="legend-item legend-item--onepassword"><i></i>1Password</span>
+        <span class="legend-item legend-item--cloudflare"><i></i>Cloudflare</span>
+        <span class="legend-item legend-item--stack"><i></i>Stack CTRL</span>
+      </div>
+    </header>
+
+    <section class="architecture-intro glass-panel" aria-labelledby="map-title">
+      <div><p class="eyebrow">Connected data flow</p><h2 id="map-title">Every provider enters shared processing once.</h2></div>
+      <p>Coloured lines identify the provider at entry. Neutral lines show Stack CTRL-owned processing and outputs.</p>
+    </section>
+
+    <section class="architecture-map-panel glass-panel" aria-label="Stack CTRL connected architecture map">
+      <div class="map-panel-heading">
+        <span><i class="fa-solid fa-arrows-left-right-to-line" aria-hidden="true"></i> Follow the coloured input lines, then the neutral Stack CTRL flow.</span>
+        <span class="map-scroll-note">Scroll the map horizontally when needed <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+      </div>
+      <div class="architecture-scroll" tabindex="0" aria-label="Architecture diagram; coloured provider inputs enter shared Stack CTRL processing and flow to dashboards">
+        <div class="flow-canvas" role="group" aria-label="Microsoft, 1Password and Cloudflare data flow through shared collection, snapshots, dashboard, risk and alerts">
+          <svg class="flow-lines" viewBox="0 0 2020 1420" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="arrow-neutral" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="rgba(238,235,229,.62)" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-yellow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#e6c75c" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#76aceb" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-orange" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#e99a5d" d="M0 0L8 4L0 8Z"/></marker>
+            </defs>
+            <g class="line-microsoft"><path d="M260 199H330M260 251H330M260 303H330M260 355H330M260 407H330M260 459H330M260 511H330M260 563H330M260 615H330"/><path d="M330 199V615M330 411H390" marker-end="url(#arrow-yellow)"/></g>
+            <path class="line-onepassword" d="M260 699H466V457" marker-end="url(#arrow-blue)"/>
+            <path class="line-cloudflare" d="M260 779H504V457" marker-end="url(#arrow-orange)"/>
+            <g class="line-stack" marker-end="url(#arrow-neutral)"><path d="M580 411H670"/><path d="M860 411H920"/></g>
+            <g class="line-stack line-fine"><path d="M1160 385H1170V239V387"/><path d="M1160 411H1180V461V683"/><path d="M1160 437H1190V757V979"/><path d="M1170 239H1210"/><path d="M1170 313H1210"/><path d="M1170 387H1210"/><path d="M1180 461H1210"/><path d="M1180 535H1210"/><path d="M1180 609H1210"/><path d="M1180 683H1210"/><path d="M1190 757H1210"/><path d="M1190 831H1210"/><path d="M1190 905H1210"/><path d="M1190 979H1210"/></g>
+            <g class="line-stack line-risk"><path d="M1400 239H1420V540H1530"/><path d="M1400 313H1430V552H1530"/><path d="M1400 387H1440V564H1530"/><path d="M1400 461H1450V576H1530"/><path d="M1400 535H1460V588H1530"/><path d="M1400 609H1470V600H1530"/><path d="M1400 683H1480V612H1530"/><path d="M1400 757H1490V624H1530"/><path d="M1400 831H1500V636H1530"/><path d="M1400 905H1510V648H1530"/></g>
+            <path class="line-stack" d="M1720 610H1780" marker-end="url(#arrow-neutral)"/>
+            <path class="line-microsoft line-dashed" d="M260 355H300V1226H560" marker-end="url(#arrow-yellow)"/>
+            <path class="line-cloudflare line-dashed" d="M150 804V1254H560" marker-end="url(#arrow-orange)"/>
+            <g class="line-stack" marker-end="url(#arrow-neutral)"><path d="M750 1240H810"/><path d="M1000 1240H1060"/><path d="M1250 1240H1310"/><path d="M1500 1240H1560"/></g>
+          </svg>
+          <div class="flow-label provider-label ms-label"><img class="provider-logo" src="Images/Microsoft.webp" alt="Microsoft"><span>Microsoft Graph · 9 direct domains</span></div>
+          <div class="flow-label provider-label op-label"><i class="fa-solid fa-key provider-caption-icon" aria-hidden="true"></i><span>1Password</span></div>
+          <div class="flow-label provider-label cf-label"><i class="fa-solid fa-cloud provider-caption-icon" aria-hidden="true"></i><span>Cloudflare</span></div>
+          <div class="source-stack microsoft-sources" aria-label="Microsoft Graph direct domain inputs">
+            <div class="source-chip"><i class="fa-solid fa-user-shield"></i>Identity Protection</div><div class="source-chip"><i class="fa-solid fa-laptop-shield"></i>Device Protection</div><div class="source-chip"><i class="fa-solid fa-envelope"></i>Email Security</div><div class="source-chip source-chip--alerts"><i class="fa-solid fa-bell"></i>Security Alerts</div><div class="source-chip"><i class="fa-solid fa-hard-drive"></i>Backup &amp; Recovery</div><div class="source-chip"><i class="fa-solid fa-cubes"></i>Applications</div><div class="source-chip"><i class="fa-solid fa-scale-balanced"></i>Governance</div><div class="source-chip"><i class="fa-solid fa-clipboard-check"></i>Compliance</div><div class="source-chip"><i class="fa-solid fa-gears"></i>Operations</div>
+          </div>
+          <div class="source-chip provider-source onepassword-source"><img class="provider-logo" src="Images/1password.webp" alt="1Password"><span><small>Credential Security</small>1Password</span></div>
+          <div class="source-chip provider-source cloudflare-source"><img class="provider-logo" src="Images/cloudflare.png" alt="Cloudflare"><span><small>Network Security</small>Cloudflare</span><em>Access · Audit · Security API · Logpush</em></div>
+          <article class="stage-node collect-node"><span class="port port-left"></span><span class="port port-top"></span><span class="port port-bottom provider-port provider-port--cloudflare" aria-label="Cloudflare input port"></span><span class="port port-bottom provider-port provider-port--onepassword" aria-label="1Password input port"></span><span class="port port-right"></span><i class="fa-solid fa-filter" aria-hidden="true"></i><small>Stack CTRL</small><strong>Collect &amp; validate</strong></article>
+          <article class="stage-node snapshot-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-database" aria-hidden="true"></i><small>Shared evidence</small><strong>Evidence snapshots</strong></article>
+          <article class="stage-node dashboard-node"><span class="port port-left"></span><span class="port port-right dashboard-port dashboard-port--top"></span><span class="port port-right dashboard-port dashboard-port--middle"></span><span class="port port-right dashboard-port dashboard-port--bottom"></span><img class="dashboard-logo" src="Images/Logos/Ctrl big.png" alt="Stack CTRL"><small>One view</small><strong>Dashboard overview</strong></article>
+          <p class="direct-views-note">Direct Microsoft domain views · Network Security from Cloudflare · Credential Security from 1Password</p>
+          <div class="domain-views" aria-label="Stack CTRL dashboard domain views"><div>Identity</div><div>Devices</div><div>Email</div><div>Security Alerts</div><div>Backup</div><div>Applications</div><div>Governance<small>Direct Microsoft evidence</small></div><div>Compliance<small>Direct Microsoft evidence</small></div><div>Operations<small>Direct Microsoft evidence</small></div><div>Network Security</div><div>Credential Security</div></div>
+          <div class="risk-annotation"><i class="fa-solid fa-code-branch" aria-hidden="true"></i>Only cross-domain aggregate</div>
+          <article class="stage-node risk-engine"><span class="port port-left risk-input-port risk-input-port--1"></span><span class="port port-left risk-input-port risk-input-port--2"></span><span class="port port-left risk-input-port risk-input-port--3"></span><span class="port port-left risk-input-port risk-input-port--4"></span><span class="port port-left risk-input-port risk-input-port--5"></span><span class="port port-left risk-input-port risk-input-port--6"></span><span class="port port-left risk-input-port risk-input-port--7"></span><span class="port port-left risk-input-port risk-input-port--8"></span><span class="port port-left risk-input-port risk-input-port--9"></span><span class="port port-left risk-input-port risk-input-port--10"></span><span class="port port-right"></span><i class="fa-solid fa-wave-square" aria-hidden="true"></i><small>Ten direct inputs</small><strong>Stack CTRL Risk Engine</strong></article>
+          <article class="stage-node risks-node"><span class="port port-left"></span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><small>Dashboard view</small><strong>Risks</strong></article>
+          <div class="alert-branch-label"><i class="fa-solid fa-code-fork" aria-hidden="true"></i> Security alert branch</div>
+          <article class="stage-node raw-node"><span class="port port-left raw-port raw-port--microsoft"></span><span class="port port-left raw-port raw-port--cloudflare"></span><span class="port port-right"></span><i class="fa-solid fa-list" aria-hidden="true"></i><small>Provider events</small><strong>Raw Provider Evidence</strong></article>
+          <article class="stage-node correlation-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><small>Stack CTRL finding</small><strong>Deterministic correlation</strong></article>
+          <article class="stage-node ai-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-sparkles" aria-hidden="true"></i><small>Azure AI</small><strong>Azure AI summary</strong></article>
+          <article class="stage-node alert-dashboard-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-bell" aria-hidden="true"></i><small>Dashboard view</small><strong>Security Alerts</strong></article>
+          <article class="stage-node whatsapp-node"><span class="port port-left"></span><i class="fa-brands fa-whatsapp" aria-hidden="true"></i><small>Eligible findings only</small><strong>WhatsApp alert</strong></article>
+          <p class="whatsapp-guard">High/critical · high confidence · eligible findings only</p>
+        </div>
+      </div>
+    </section>
+    <footer class="architecture-page__footer"><span>Lines reflect currently configured Stack CTRL collection and processing paths.</span><a href="ClientPortal.html">Back to Client Portal <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a></footer>
+  </main>
+</body>
+</html>

@@ -18,6 +18,142 @@
   --text-muted: rgba(189, 189, 189, 0.8);
 }
 
+/* Architecture truth map: intentionally neutral liquid glass.  This view uses
+   named, terminating links rather than decorative or inferred connections. */
+#dashboard-view .sunbird-architecture-truth-map {
+  position: relative;
+  width: min(1440px, calc(100% - 32px));
+  margin: 22px auto 46px;
+  color: rgba(245, 248, 252, 0.95);
+}
+
+#dashboard-view .sunbird-architecture-truth-map .sunbird-truth-shell {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(18px, 2.4vw, 34px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.035));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), inset 0 1px rgba(255, 255, 255, 0.26), inset 0 -1px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(28px) saturate(130%);
+  -webkit-backdrop-filter: blur(28px) saturate(130%);
+}
+
+#dashboard-view .sunbird-architecture-truth-map .sunbird-truth-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.14), transparent 30%, rgba(255, 255, 255, 0.02) 66%, rgba(255, 255, 255, 0.09));
+}
+
+.sunbird-truth-head,
+.sunbird-truth-section-head,
+.sunbird-truth-brand,
+.sunbird-truth-special-lane,
+.sunbird-truth-alert-flow,
+.sunbird-truth-alert-inputs,
+.sunbird-truth-risk-flow,
+.sunbird-truth-diagram-scroll { position: relative; z-index: 1; }
+
+.sunbird-truth-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.16); }
+.sunbird-truth-brand { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.sunbird-truth-brand img { width: 44px; height: 44px; object-fit: contain; }
+.sunbird-truth-brand p, .sunbird-truth-section-head p { margin: 0 0 4px; color: rgba(255, 255, 255, 0.56); font-size: 0.65rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.sunbird-truth-brand h1 { margin: 0; font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -0.025em; }
+.sunbird-truth-brand span, .sunbird-truth-section-head > span { display: block; color: rgba(255, 255, 255, 0.64); font-size: 0.76rem; line-height: 1.45; }
+
+.sunbird-truth-legend { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 13px 0 3px; color: rgba(255, 255, 255, 0.61); font-size: 0.7rem; }
+.sunbird-truth-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sunbird-truth-legend-line { width: 26px; height: 1px; background: rgba(245, 248, 252, 0.72); }
+.sunbird-truth-legend-line.dashed { background: repeating-linear-gradient(90deg, rgba(245, 248, 252, 0.78) 0 5px, transparent 5px 9px); }
+
+.sunbird-truth-section, .sunbird-truth-panel { position: relative; z-index: 1; margin-top: 22px; padding: clamp(13px, 1.4vw, 20px); border: 1px solid rgba(255, 255, 255, 0.17); border-radius: 16px; background: rgba(8, 10, 14, 0.2); box-shadow: inset 0 1px rgba(255, 255, 255, 0.08); }
+.sunbird-truth-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 15px; }
+.sunbird-truth-section-head h2 { margin: 0; color: rgba(255, 255, 255, 0.94); font-size: 1rem; }
+.sunbird-truth-section-head > span { max-width: 330px; text-align: right; }
+
+.sunbird-truth-lanes { display: grid; gap: 7px; }
+.sunbird-truth-lane { display: grid; grid-template-columns: minmax(132px, 1.35fr) 28px minmax(104px, 1fr) 28px minmax(92px, .88fr) 28px minmax(125px, 1.15fr); align-items: stretch; gap: 0; }
+.sunbird-truth-node { position: relative; display: grid; align-content: center; min-height: 58px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 11px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)); box-shadow: inset 0 1px rgba(255, 255, 255, 0.15); }
+.sunbird-truth-node i { position: absolute; top: 10px; right: 10px; color: rgba(255, 255, 255, 0.66); font-size: 0.75rem; }
+.sunbird-truth-node span { color: rgba(255, 255, 255, 0.58); font-size: 0.61rem; letter-spacing: .04em; }
+.sunbird-truth-node strong { margin-top: 3px; color: rgba(255, 255, 255, 0.94); font-size: 0.73rem; font-weight: 650; line-height: 1.2; }
+.sunbird-truth-node.source { background: rgba(255, 255, 255, 0.075); }
+.sunbird-truth-node.destination { background: rgba(255, 255, 255, 0.13); }
+.sunbird-truth-node.engine, .sunbird-truth-node.ledger, .sunbird-truth-node.ai, .sunbird-truth-node.whatsapp { min-width: 126px; }
+.sunbird-truth-link, .sunbird-truth-risk-link, .sunbird-truth-dashed-link { position: relative; min-width: 24px; }
+.sunbird-truth-link::before, .sunbird-truth-risk-link::before, .sunbird-truth-dashed-link::before { content: ""; position: absolute; top: 50%; left: 4px; right: 4px; height: 1px; background: rgba(255, 255, 255, 0.58); }
+.sunbird-truth-link::after, .sunbird-truth-risk-link::after, .sunbird-truth-dashed-link::after { content: ""; position: absolute; top: calc(50% - 3px); right: 4px; width: 6px; height: 6px; border-top: 1px solid rgba(255, 255, 255, 0.75); border-right: 1px solid rgba(255, 255, 255, 0.75); transform: rotate(45deg); }
+.sunbird-truth-dashed-link::before { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.72) 0 5px, transparent 5px 10px); }
+.sunbird-truth-link.guarded::before { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.78) 0 2px, transparent 2px 6px); }
+
+.sunbird-truth-specialists { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.sunbird-truth-special-scroll { min-width: 0; }
+.sunbird-truth-special-lane { display: grid; grid-template-columns: minmax(108px, 1.15fr) 18px minmax(94px, 1fr) 18px minmax(90px, 1fr) 18px minmax(110px, 1.15fr); align-items: stretch; }
+.sunbird-truth-special-lane .sunbird-truth-node { min-height: 72px; }
+.sunbird-truth-special-lane .sunbird-truth-link::before { left: 2px; right: 2px; }
+.sunbird-truth-special-lane .sunbird-truth-link::after { right: 2px; }
+
+.sunbird-truth-diagram-scroll:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.72); outline-offset: 4px; }
+.sunbird-truth-risk-flow { display: grid; grid-template-columns: minmax(220px, 1fr) 156px minmax(34px, 1fr) 130px; column-gap: 0; align-items: stretch; }
+.sunbird-truth-risk-flow ul { display: grid; grid-template-columns: 1fr; gap: 5px; margin: 0 42px 0 0; padding: 0; list-style: none; }
+.sunbird-truth-risk-input { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 4px 7px 4px 9px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; color: rgba(255, 255, 255, 0.78); font-size: 0.68rem; background: rgba(255, 255, 255, 0.035); }
+.sunbird-truth-risk-input i { color: rgba(255, 255, 255, 0.52); font-size: .57rem; }
+.sunbird-truth-risk-input::before { content: ""; position: absolute; z-index: -1; top: 50%; left: 100%; width: 42px; height: 1px; background: rgba(255, 255, 255, 0.62); }
+.sunbird-truth-risk-input::after { content: ""; position: absolute; z-index: -1; top: calc(50% - 3px); left: calc(100% + 34px); width: 6px; height: 6px; border-top: 1px solid rgba(255, 255, 255, 0.75); border-right: 1px solid rgba(255, 255, 255, 0.75); transform: rotate(45deg); }
+.sunbird-truth-risk-flow .engine { grid-column: 2; align-self: stretch; justify-items: center; text-align: center; }
+.sunbird-truth-risk-flow > .sunbird-truth-link { grid-column: 3; }
+.sunbird-truth-risk-flow > .sunbird-truth-link::before { left: 0; right: 0; }
+.sunbird-truth-risk-flow > .sunbird-truth-link::after { right: 0; }
+.sunbird-truth-risk-flow > .destination { grid-column: 4; align-self: center; }
+
+.sunbird-truth-alert-inputs { position: relative; display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); grid-template-rows: 73px 58px; gap: 27px 82px; max-width: 720px; min-width: 720px; margin: 0 auto; }
+.sunbird-truth-alert-inputs .sunbird-truth-node { min-height: 73px; }
+.sunbird-truth-alert-inputs .source { display: grid; grid-template-columns: 16px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 7px; align-content: center; padding-left: 12px; }
+.sunbird-truth-alert-inputs .source i { position: static; grid-row: 1 / span 2; grid-column: 1; align-self: start; margin-top: 3px; }
+.sunbird-truth-alert-inputs .source span, .sunbird-truth-alert-inputs .source strong { grid-column: 2; }
+.sunbird-truth-alert-inputs .ledger { grid-column: 1 / -1; grid-row: 2; width: 156px; min-height: 58px; justify-self: center; z-index: 2; text-align: center; }
+.sunbird-truth-alert-input-connectors { position: absolute; z-index: 1; inset: 0; width: 100%; height: 164px; overflow: visible; pointer-events: none; }
+.sunbird-truth-alert-input-connectors path { fill: none; stroke: rgba(255, 255, 255, 0.78); stroke-width: 1.5; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
+.sunbird-truth-alert-stage { position: relative; min-width: 760px; width: 760px; margin: 0 auto; }
+.sunbird-truth-alert-ledger-connector { display: block; width: 760px; height: 52px; overflow: visible; pointer-events: none; }
+.sunbird-truth-alert-ledger-connector path { fill: none; stroke: rgba(255, 255, 255, 0.7); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.sunbird-truth-alert-ledger-connector path.arrow { stroke-width: 1.5; }
+.sunbird-truth-alert-flow { display: grid; grid-template-columns: 152px 28px 152px 28px 152px 96px 152px; align-items: stretch; min-width: 760px; }
+.sunbird-truth-alert-flow .sunbird-truth-node { min-height: 83px; }
+.sunbird-truth-link.guarded { display: grid; place-items: center; text-align: center; }
+.sunbird-truth-link.guarded b { position: absolute; z-index: 2; top: calc(50% - 30px); left: 50%; width: max-content; max-width: 88px; padding: 3px 5px; transform: translateX(-50%); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 5px; color: rgba(255, 255, 255, 0.78); background: rgba(12, 14, 18, 0.82); font-size: .57rem; font-weight: 600; line-height: 1.25; }
+.sunbird-truth-alert-note { position: relative; z-index: 1; margin: 13px 0 0; padding-top: 11px; border-top: 1px solid rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.6); font-size: .71rem; text-align: center; line-height: 1.45; }
+
+@media (max-width: 1000px) {
+  #dashboard-view .sunbird-architecture-truth-map { width: min(100% - 22px, 900px); }
+  .sunbird-truth-specialists { grid-template-columns: 1fr; }
+  .sunbird-truth-diagram-scroll { overflow-x: auto; padding: 2px 2px 9px; scrollbar-color: rgba(255, 255, 255, 0.36) transparent; }
+  .sunbird-truth-diagram-scroll::after { content: "Scroll diagram →"; display: block; width: max-content; margin: 8px 0 0 auto; color: rgba(255, 255, 255, 0.5); font-size: .64rem; letter-spacing: .04em; }
+}
+
+@media (max-width: 760px) {
+  #dashboard-view .sunbird-architecture-truth-map { width: calc(100% - 16px); margin-top: 12px; }
+  #dashboard-view .sunbird-architecture-truth-map .sunbird-truth-shell { padding: 15px; border-radius: 16px; }
+  .sunbird-truth-head, .sunbird-truth-section-head { align-items: flex-start; flex-direction: column; }
+  .sunbird-truth-section-head > span { text-align: left; }
+  .sunbird-truth-lanes { overflow-x: auto; padding-bottom: 5px; }
+  .sunbird-truth-lane { min-width: 650px; }
+  .sunbird-truth-panel { min-width: 0; overflow: hidden; }
+  .sunbird-truth-special-scroll { width: 100%; min-width: 0; overflow-x: auto; padding: 2px 2px 9px; scrollbar-color: rgba(255, 255, 255, 0.36) transparent; }
+  .sunbird-truth-special-scroll::after { content: "Scroll path →"; display: block; width: max-content; margin: 8px 0 0 auto; color: rgba(255, 255, 255, 0.5); font-size: .64rem; letter-spacing: .04em; }
+  .sunbird-truth-special-scroll:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.72); outline-offset: 3px; }
+  .sunbird-truth-special-lane { min-width: 690px; overflow: visible; }
+  .sunbird-truth-risk-flow { min-width: 640px; }
+  .sunbird-truth-alert-inputs { margin-left: 0; }
+  .sunbird-truth-brand img { width: 38px; height: 38px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sunbird-truth-shell *, .sunbird-truth-shell *::before, .sunbird-truth-shell *::after { transition: none !important; animation: none !important; }
+}
+
 /* ============================================
    SUNBIRD AUTOMATED REPORTS
    ============================================ */
@@ -1572,7 +1708,7 @@
 
 .sunbird-report-identity-entities-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, 96px);
   gap: 14px;
 }
 
@@ -10948,6 +11084,23 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     transition: transform 190ms ease, border-color 190ms ease, background 190ms ease, box-shadow 190ms ease;
   }
 
+  /* Earlier portal button rules move and clip the entire menu item.  This
+     control centre deliberately keeps captions fixed; only the round icon
+     receives the small glass lift.  Visible overflow gives that icon shadow
+     room without changing any grid cell or allowing it into another cell. */
+  body .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
+  body .sunbird-left-menu .sunbird-menu-item:focus-visible:not(:disabled),
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:focus-visible:not(:disabled) {
+    transform: none !important;
+    animation: none !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item {
+    overflow: visible !important;
+    contain: none;
+  }
+
   .sunbird-left-menu .sunbird-menu-item i::before {
     position: relative;
     z-index: 1;
@@ -10992,6 +11145,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 @media (min-width: 1101px) and (prefers-reduced-motion: reduce) {
   .sunbird-left-menu .sunbird-menu-item i { transition: none; }
   .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]) i::after { display: none; }
+  body .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
+  body .sunbird-left-menu .sunbird-menu-item:focus-visible:not(:disabled),
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:hover:not(:disabled),
+  #dashboard-view .sunbird-left-menu .sunbird-menu-item:focus-visible:not(:disabled) { transform: none !important; }
   body .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):hover:not(:disabled) i,
   #dashboard-view .sunbird-left-menu .sunbird-menu-item:not([data-menu="billing"]):focus-visible:not(:disabled) i { transform: none; }
 }
@@ -20317,5 +20474,139 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     border: 1px solid rgba(255, 255, 255, 0.26) !important;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04)) !important;
     box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.24), inset 0 -6px 12px rgba(0, 0, 0, 0.16), 0 7px 16px rgba(0, 0, 0, 0.2) !important;
+  }
+}
+
+/* Final desktop Control Center composition. Tablet and phone switchers are
+   intentionally unaffected by this breakpoint-scoped refinement. */
+@media (min-width: 1101px) {
+  body.sunbird-client-portal .sunbird-left-menu {
+    --sunbird-control-rail-height: 520px;
+    width: 360px !important;
+    height: var(--sunbird-control-rail-height) !important;
+    min-height: var(--sunbird-control-rail-height) !important;
+    grid-template-columns: repeat(3, 96px);
+    grid-template-rows: 76px repeat(3, 96px);
+    align-content: center;
+    row-gap: 8px;
+    column-gap: 12px;
+    justify-content: center;
+    padding: 12px 16px 18px;
+  }
+
+  body.sunbird-client-portal .sunbird-menu-heading {
+    position: relative;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    height: 76px;
+    padding: 0;
+    justify-content: center;
+    text-align: center;
+  }
+
+  body.sunbird-client-portal .sunbird-menu-heading-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    color: rgba(248, 251, 255, 0.94);
+    font-size: 0.9rem;
+    font-weight: 300;
+    letter-spacing: 0.16em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  body.sunbird-client-portal .sunbird-control-center-brand {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    display: block;
+    transform: translateY(-50%);
+  }
+
+  body.sunbird-client-portal .sunbird-control-center-brand img {
+    width: 76px;
+    max-width: none;
+    height: auto;
+    opacity: 0.9;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item {
+    width: 100%;
+    height: 96px;
+    padding: 0;
+    grid-template-rows: 60px minmax(0, 1fr);
+    gap: 7px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    font-weight: 300 !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item i,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] i {
+    width: 58px;
+    height: 58px;
+    font-size: 1.12rem;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item > span {
+    min-height: 1.9em;
+    color: rgba(241, 246, 252, 0.9);
+    font-weight: 300 !important;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px);
+    transition: opacity 160ms ease, visibility 160ms ease, transform 160ms ease;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item:hover > span,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item:focus-visible > span {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="security"] { grid-column: 1; grid-row: 2; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="operations"] { grid-column: 2; grid-row: 2; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="backup"] { grid-column: 3; grid-row: 2; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="reports"] { grid-column: 1; grid-row: 3; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="risks"] { grid-column: 2; grid-row: 3; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="architecture"] { grid-column: 3; grid-row: 3; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="sla"] { grid-column: 1; grid-row: 4; }
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="applications"] { grid-column: 2; grid-row: 4; }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] {
+    grid-column: 3;
+    grid-row: 4;
+    align-self: start;
+    justify-self: center;
+    width: 96px;
+    height: 96px;
+    padding: 0;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    display: grid;
+    grid-template-rows: 60px minmax(0, 1fr);
+    gap: 7px;
+    font-weight: 300 !important;
+    text-align: center;
+    text-align: center;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] i {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.045));
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19), 0 5px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::after {
+    content: none !important;
   }
 }

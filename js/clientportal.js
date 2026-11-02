@@ -14562,7 +14562,7 @@ function renderSunbirdPlaceholderView(title, icon, subtitle = 'Coming soon') {
                     <h3>Architecture</h3>
                 </div>
                 <p>Follow the living path from each source API through processing, storage, AI, reporting and back to StackCTRL.</p>
-                <button type="button" class="sunbird-architecture-open" onclick="window.openSunbirdArchitecture()">
+                <button type="button" class="sunbird-architecture-open" onclick="window.location.assign('architecture.html')">
                     <i class="fas fa-up-right-and-down-left-from-center"></i>
                     Open full architecture
                 </button>
@@ -14581,7 +14581,7 @@ function renderSunbirdPlaceholderView(title, icon, subtitle = 'Coming soon') {
     `;
 }
 
-window.openSunbirdArchitecture = function() {
+window.openSunbirdArchitectureLegacy = function() {
     const projectsView = document.getElementById('projects-view');
     const dashboardView = document.getElementById('dashboard-view');
     if (!projectsView || !dashboardView) return;
@@ -14705,6 +14705,82 @@ window.openSunbirdArchitecture = function() {
                 </div>
             </div>
         </div>
+    `;
+};
+
+window.openSunbirdArchitecture = function() {
+    const projectsView = document.getElementById('projects-view');
+    const dashboardView = document.getElementById('dashboard-view');
+    if (!projectsView || !dashboardView) return;
+
+    const microsoftDomains = [
+        ['Identity Protection', 'fa-user-shield'],
+        ['Device Protection', 'fa-laptop-shield'],
+        ['Email Security', 'fa-envelope-open-text'],
+        ['Security Alerts', 'fa-bell'],
+        ['Backup & Recovery', 'fa-hard-drive'],
+        ['Applications', 'fa-cubes'],
+        ['Governance', 'fa-scale-balanced'],
+        ['Compliance', 'fa-clipboard-check'],
+        ['Operations', 'fa-gears']
+    ];
+    const domainLane = ([name, icon]) => `
+        <article class="sunbird-truth-lane" aria-label="Microsoft Graph ${name} path">
+            <div class="sunbird-truth-node source"><i class="fas ${icon}" aria-hidden="true"></i><span>Microsoft Graph</span><strong>${name}</strong></div>
+            <span class="sunbird-truth-link" aria-hidden="true"></span>
+            <div class="sunbird-truth-node"><i class="fas fa-shield-halved" aria-hidden="true"></i><span>Stack CTRL</span><strong>Collect &amp; validate</strong></div>
+            <span class="sunbird-truth-link" aria-hidden="true"></span>
+            <div class="sunbird-truth-node"><i class="fas fa-database" aria-hidden="true"></i><span>Evidence</span><strong>Snapshot</strong></div>
+            <span class="sunbird-truth-link" aria-hidden="true"></span>
+            <div class="sunbird-truth-node destination"><i class="fas fa-chart-pie" aria-hidden="true"></i><span>Dashboard</span><strong>${name}</strong></div>
+        </article>`;
+    const riskInput = name => `<li class="sunbird-truth-risk-input"><span>${name}</span><i class="fas fa-arrow-right" aria-hidden="true"></i></li>`;
+
+    projectsView.style.display = 'none';
+    dashboardView.style.display = 'block';
+    dashboardView.classList.add('sunbird-architecture-active');
+    dashboardView.innerHTML = `
+        <main id="sunbird-architecture-dashboard" class="sunbird-architecture-modal is-open sunbird-architecture-truth-map" aria-labelledby="sunbird-architecture-title">
+            <section class="sunbird-truth-shell">
+                <header class="sunbird-truth-head">
+                    <div class="sunbird-truth-brand"><img src="Images/Logos/Ctrl big.png" alt="Stack CTRL"><div><p>System map</p><h1 id="sunbird-architecture-title">Architecture Map</h1><span>Source-specific evidence paths into Stack CTRL.</span></div></div>
+                    <button type="button" class="sunbird-architecture-close" aria-label="Back to dashboard" onclick="goBackToProjects()"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back</button>
+                </header>
+
+                <div class="sunbird-truth-legend" aria-label="Diagram legend"><span><i class="sunbird-truth-legend-line" aria-hidden="true"></i> Direct data flow</span><span><i class="sunbird-truth-legend-line dashed" aria-hidden="true"></i> Correlation input</span><span>Lines reflect currently configured Stack CTRL paths.</span></div>
+
+                <section class="sunbird-truth-section" aria-labelledby="microsoft-paths-title">
+                    <div class="sunbird-truth-section-head"><div><p>01 · Microsoft Graph</p><h2 id="microsoft-paths-title">Individual domain paths</h2></div><span>Each domain keeps its own evidence path.</span></div>
+                    <div class="sunbird-truth-lanes">${microsoftDomains.map(domainLane).join('')}</div>
+                </section>
+
+                <section class="sunbird-truth-specialists" aria-label="Dedicated source paths">
+                    <article class="sunbird-truth-panel">
+                        <div class="sunbird-truth-section-head"><div><p>02 · Cloudflare</p><h2>Network Security</h2></div><span>Access · Audit · Security API · Logpush</span></div>
+                        <div class="sunbird-truth-special-scroll" role="region" aria-label="Cloudflare Network Security path" tabindex="0"><div class="sunbird-truth-special-lane">
+                            <div class="sunbird-truth-node source"><i class="fas fa-cloud" aria-hidden="true"></i><span>Cloudflare</span><strong>Network Security</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node"><i class="fas fa-filter" aria-hidden="true"></i><span>Stack CTRL</span><strong>Collect &amp; validate</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node"><i class="fas fa-database" aria-hidden="true"></i><span>Evidence</span><strong>Network snapshot</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node destination"><i class="fas fa-network-wired" aria-hidden="true"></i><span>Dashboard</span><strong>Network Security</strong></div>
+                        </div></div>
+                    </article>
+                    <article class="sunbird-truth-panel">
+                        <div class="sunbird-truth-section-head"><div><p>03 · 1Password</p><h2>Credential Security</h2></div><span>Credential and security events</span></div>
+                        <div class="sunbird-truth-special-scroll" role="region" aria-label="1Password Credential Security path" tabindex="0"><div class="sunbird-truth-special-lane">
+                            <div class="sunbird-truth-node source"><i class="fas fa-key" aria-hidden="true"></i><span>1Password</span><strong>Credential Security</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node"><i class="fas fa-filter" aria-hidden="true"></i><span>Stack CTRL</span><strong>Collect &amp; validate</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node"><i class="fas fa-lock" aria-hidden="true"></i><span>Evidence</span><strong>Credential evidence</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node destination"><i class="fas fa-key" aria-hidden="true"></i><span>Dashboard</span><strong>Credential Security</strong></div>
+                        </div></div>
+                    </article>
+                </section>
+
+                <section class="sunbird-truth-section sunbird-truth-risk" aria-labelledby="risk-path-title">
+                    <div class="sunbird-truth-section-head"><div><p>04 · Cross-domain aggregate</p><h2 id="risk-path-title">Risks</h2></div><span>Only confirmed aggregate path.</span></div>
+                    <div class="sunbird-truth-diagram-scroll" role="region" aria-label="Risk Engine input diagram" tabindex="0"><div class="sunbird-truth-risk-flow"><ul aria-label="Risk engine inputs">${[...microsoftDomains.map(([name]) => name), 'Network Security'].map(riskInput).join('')}</ul><div class="sunbird-truth-node engine"><i class="fas fa-wave-square" aria-hidden="true"></i><span>Stack CTRL</span><strong>Risk Engine</strong></div><span class="sunbird-truth-link" aria-hidden="true"></span><div class="sunbird-truth-node destination"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><span>Dashboard</span><strong>Risks</strong></div></div></div>
+                </section>
+
+                <section class="sunbird-truth-section sunbird-truth-alerts" aria-labelledby="alerts-path-title">
+                    <div class="sunbird-truth-section-head"><div><p>05 · Security Alerting</p><h2 id="alerts-path-title">Raw evidence to safeguarded notification</h2></div><span>Azure AI assesses findings; it does not create raw alerts.</span></div>
+                    <div class="sunbird-truth-diagram-scroll" role="region" aria-label="Security alerting evidence path" tabindex="0"><div class="sunbird-truth-alert-stage"><div class="sunbird-truth-alert-inputs"><svg class="sunbird-truth-alert-input-connectors" viewBox="0 0 720 164" preserveAspectRatio="none" aria-hidden="true"><path d="M180 73V99H360V113"/><path d="M540 73V99H360V113"/></svg><div class="sunbird-truth-node source"><i class="fab fa-microsoft" aria-hidden="true"></i><span>Microsoft Security Alerts</span><strong>Alerts · incidents · sign-ins · identity risk</strong></div><div class="sunbird-truth-node source"><i class="fas fa-cloud" aria-hidden="true"></i><span>Cloudflare Network Security</span><strong>Access · audit · API findings · Logpush</strong></div><div class="sunbird-truth-node ledger"><i class="fas fa-list" aria-hidden="true"></i><span>Raw Provider Evidence</span><strong>Ledger</strong></div></div><svg class="sunbird-truth-alert-ledger-connector" viewBox="0 0 760 52" preserveAspectRatio="none" aria-hidden="true"><path d="M380 0V25H76V46"/><path class="arrow" d="M72 41L76 46L80 41"/></svg><div class="sunbird-truth-alert-flow"><div class="sunbird-truth-node"><i class="fas fa-diagram-project" aria-hidden="true"></i><span>Stack CTRL</span><strong>Deterministic correlation</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node ai"><i class="fas fa-sparkles" aria-hidden="true"></i><span>Azure AI</span><strong>Assessment summary</strong></div><span class="sunbird-truth-link"></span><div class="sunbird-truth-node destination"><i class="fas fa-bell" aria-hidden="true"></i><span>Dashboard</span><strong>Security Alerts</strong></div><span class="sunbird-truth-link guarded"><b>High/critical<br>+ high confidence</b></span><div class="sunbird-truth-node whatsapp"><i class="fab fa-whatsapp" aria-hidden="true"></i><span>Eligible findings only</span><strong>WhatsApp alert</strong></div></div></div></div>
+                    <p class="sunbird-truth-alert-note">Raw Provider Evidence → Correlated Stack CTRL Findings → Azure AI Summary → WhatsApp: eligible high/critical, high-confidence findings only.</p>
+                </section>
+            </section>
+        </main>
     `;
 };
 
@@ -17763,7 +17839,6 @@ function initializeSunbirdLeftMenu() {
             <span class="sunbird-menu-heading-label">Control Center</span>
             <span class="sunbird-control-center-brand" aria-hidden="true">
                 <img src="Images/Logos/Ctrl big.png" alt="">
-                <span><small>Control Center</small></span>
             </span>
         </div>
         <button class="sunbird-menu-current" type="button" aria-expanded="false" onclick="window.toggleSunbirdMobileMenu()"></button>
@@ -17779,7 +17854,6 @@ function initializeSunbirdLeftMenu() {
         <button class="sunbird-menu-item" type="button" data-menu="reports" onclick="window.switchBillingMenu('reports')">
             <i class="fas fa-chart-line"></i><span>Reports</span>
         </button>
-        <span class="sunbird-control-center-emblem" aria-hidden="true"><i class="fas fa-sliders-h"></i></span>
         <button class="sunbird-menu-item" type="button" data-menu="risks" onclick="window.switchBillingMenu('risks')">
             <i class="fas fa-triangle-exclamation"></i><span>Risks</span>
         </button>
