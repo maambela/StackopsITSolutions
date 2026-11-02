@@ -20654,12 +20654,14 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal #dashboard-view .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active {
     border: 0 !important;
     border-radius: 0 !important;
-    background: transparent !important;
+    background: none !important;
     background-image: none !important;
     box-shadow: none !important;
     outline: none !important;
     filter: none !important;
     background-color: transparent !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
     background-image: none !important;
     clip-path: none !important;
     -webkit-clip-path: none !important;
