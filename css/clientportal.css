@@ -20597,8 +20597,8 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     grid-row: 4;
     align-self: start;
     justify-self: center;
-    width: 96px;
-    height: 96px;
+    width: 58px;
+    height: 58px;
     padding: 0;
     border: 0 !important;
     border-radius: 0;
@@ -20606,8 +20606,8 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     box-shadow: none !important;
     overflow: visible !important;
     display: grid;
-    grid-template-rows: 60px minmax(0, 1fr);
-    gap: 7px;
+    grid-template-rows: 58px;
+    gap: 0;
     font-weight: 300 !important;
     text-align: center;
     text-align: center;
