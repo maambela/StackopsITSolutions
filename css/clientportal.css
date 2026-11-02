@@ -20659,6 +20659,10 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     box-shadow: none !important;
     outline: none !important;
     filter: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    clip-path: circle(29px at center);
+    -webkit-clip-path: circle(29px at center);
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover i,
