@@ -10560,6 +10560,76 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 @media (min-width: 1101px) {
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control {
+    grid-column: 3;
+    grid-row: 4;
+    align-self: start;
+    justify-self: center;
+    width: 80px;
+    height: 80px;
+    margin: 18px 0 0;
+    padding: 0;
+    border: 0 !important;
+    border-radius: 0;
+    background: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    display: grid;
+    grid-template-rows: 60px minmax(0, 1fr);
+    place-items: start center;
+    gap: 5px;
+    overflow: visible;
+    color: inherit;
+    font: inherit;
+    text-align: center;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control::before,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control i {
+    width: 58px;
+    height: 58px;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    color: rgba(218, 239, 255, 0.96);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.045));
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19), 0 5px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control > span {
+    position: absolute;
+    top: 61px;
+    left: 50%;
+    width: max-content;
+    color: rgba(241, 246, 252, 0.9);
+    font-size: 0.62rem;
+    font-weight: 300;
+    line-height: 1.1;
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, -3px);
+    transition: opacity 160ms ease, visibility 160ms ease, transform 160ms ease;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control:hover > span,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-billing-control:focus-visible > span {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (min-width: 1101px) {
   .sunbird-left-menu {
     isolation: isolate;
     border-color: rgba(189, 220, 255, 0.34);
@@ -20567,12 +20637,21 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item > span {
-    min-height: 1.9em;
+    position: absolute;
+    top: 61px;
+    left: 50%;
+    width: max-content;
+    max-width: 118px;
+    min-height: 0;
+    transform: translate(-50%, -3px);
+    white-space: nowrap;
+    font-size: 0.62rem;
+    line-height: 1.1;
+    text-align: center;
     color: rgba(241, 246, 252, 0.9);
     font-weight: 300 !important;
     opacity: 0;
     visibility: hidden;
-    transform: translateY(-3px);
     transition: opacity 160ms ease, visibility 160ms ease, transform 160ms ease;
   }
 
@@ -20580,7 +20659,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item:focus-visible > span {
     opacity: 1;
     visibility: visible;
-    transform: translateY(0);
+    transform: translate(-50%, 0);
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="security"] { grid-column: 1; grid-row: 2; }
@@ -20740,8 +20819,15 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] > span {
-    width: 100% !important;
-    min-height: 1.9em !important;
+    top: 61px !important;
+    left: 50% !important;
+    width: max-content !important;
+    max-width: 118px !important;
+    min-height: 0 !important;
+    transform: translate(-50%, -3px) !important;
+    white-space: nowrap !important;
+    font-size: 0.62rem !important;
+    line-height: 1.1 !important;
     opacity: 0 !important;
     visibility: hidden !important;
   }
@@ -20750,5 +20836,6 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible > span {
     opacity: 1 !important;
     visibility: visible !important;
+    transform: translate(-50%, 0) !important;
   }
 }

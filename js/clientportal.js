@@ -15087,10 +15087,10 @@ window.switchBillingMenu = async function(menuItem) {
         leftMenu.querySelector('.sunbird-menu-current')?.setAttribute('aria-expanded', 'false');
     }
 
-    const menuItems = document.querySelectorAll('.sunbird-menu-item');
+    const menuItems = document.querySelectorAll('.sunbird-menu-item, .sunbird-billing-control');
     menuItems.forEach(item => item.classList.remove('active'));
     
-    const activeItem = document.querySelector(`.sunbird-menu-item[data-menu="${menuItem}"]`);
+    const activeItem = document.querySelector(`.sunbird-menu-item[data-menu="${menuItem}"], .sunbird-billing-control[data-menu="${menuItem}"]`);
     if (activeItem) {
         activeItem.classList.add('active');
     }
@@ -17868,7 +17868,7 @@ function initializeSunbirdLeftMenu() {
         </button>
     `;
     const billingButton = document.createElement('button');
-    billingButton.className = 'sunbird-menu-item';
+    billingButton.className = 'sunbird-billing-control';
     billingButton.type = 'button';
     billingButton.dataset.menu = 'billing';
     billingButton.title = 'Billing Statement';
