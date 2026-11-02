@@ -9210,7 +9210,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   }
 
   .header-info h1 {
-    font-size: 0.3rem;
+    font-size: 0.54rem;
   }
 
   .header-user {
@@ -20584,7 +20584,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     clip: auto;
     clip-path: none;
     color: rgba(248, 251, 255, 0.94);
-    font-size: 0.2rem;
+    font-size: 0.24rem;
     font-weight: 200;
     letter-spacing: 0.16em;
     line-height: 1;
