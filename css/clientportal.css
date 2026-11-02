@@ -20481,25 +20481,26 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
    intentionally unaffected by this breakpoint-scoped refinement. */
 @media (min-width: 1101px) {
   body.sunbird-client-portal .sunbird-left-menu {
-    --sunbird-control-rail-height: 520px;
-    width: 360px !important;
+    --sunbird-control-rail-height: 461.84375px;
+    width: var(--sunbird-menu-width, 310px) !important;
     height: var(--sunbird-control-rail-height) !important;
     min-height: var(--sunbird-control-rail-height) !important;
     grid-template-columns: repeat(3, 96px);
-    grid-template-rows: 76px repeat(3, 96px);
+    grid-template-rows: 63.84375px repeat(3, 96px);
     align-content: center;
     row-gap: 8px;
     column-gap: 12px;
     justify-content: center;
-    padding: 12px 16px 18px;
+    padding: 10px 10px 16px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
   }
 
   body.sunbird-client-portal .sunbird-menu-heading {
     position: relative;
     grid-column: 1 / -1;
     grid-row: 1;
-    height: 76px;
-    padding: 0;
+    height: 63.84375px;
+    padding: 9px 11px 8px;
     justify-content: center;
     text-align: center;
   }
@@ -20522,10 +20523,10 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
 
   body.sunbird-client-portal .sunbird-control-center-brand {
     position: absolute;
-    top: 50%;
+    top: 8px;
     right: 0;
     display: block;
-    transform: translateY(-50%);
+    transform: none;
   }
 
   body.sunbird-client-portal .sunbird-control-center-brand img {
@@ -20533,6 +20534,14 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     max-width: none;
     height: auto;
     opacity: 0.9;
+  }
+
+  body.sunbird-client-portal .sunbird-menu-heading::after {
+    bottom: 0;
+    left: 11px;
+    width: calc(100% - 22px);
+    height: 1px;
+    background: rgba(255, 255, 255, 0.22);
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item {
@@ -20603,7 +20612,7 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.045));
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19), 0 5px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19);
   }
 
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::after {
