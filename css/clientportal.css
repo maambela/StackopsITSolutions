@@ -20482,8 +20482,10 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     grid-template-columns: repeat(3, 96px);
     grid-template-rows: 63.84375px repeat(3, 96px);
     align-content: center;
-    row-gap: 8px;
-    column-gap: 12px;
+    /* Keep the circular controls compact without changing their 96px cells:
+       4.8px and 7.2px are exactly 60% of the previous 8px / 12px gaps. */
+    row-gap: 4.8px;
+    column-gap: 7.2px;
     justify-content: center;
     padding: 10px 10px 16px;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
@@ -20612,6 +20614,20 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -6px 12px rgba(0, 0, 0, 0.19);
   }
 
+  /* Billing is a normal instrument disc, never a backlit tile.  The portal's
+     shared action-button sheen is deliberately disabled on the parent and on
+     the icon's non-glyph pseudo layer in every interactive state. */
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"] i::after,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover i::after,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible i::after,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active i::after {
+    content: none !important;
+    display: none !important;
+    background: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+
   body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]::after {
     content: none !important;
   }
@@ -20630,6 +20646,13 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     background: transparent !important;
     background-image: none !important;
     box-shadow: none !important;
+    filter: none !important;
+  }
+
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:hover i,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"]:focus-visible i,
+  body.sunbird-client-portal .sunbird-left-menu .sunbird-menu-item[data-menu="billing"].active i {
+    transform: none !important;
     filter: none !important;
   }
 }
