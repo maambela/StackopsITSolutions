@@ -14947,6 +14947,12 @@ function securityRealtimeAlertKey(alert = {}) {
     return buildSecurityAlertSemanticNotificationKey(alert, 'security-dashboard');
 }
 
+function isSecurityFindingAiEnabled() {
+    return !['false', '0', 'no'].includes(
+        String(process.env.SECURITY_FINDING_AI_ENABLED || 'false').toLowerCase()
+    );
+}
+
 async function persistRealtimeSecurityAlert(companyId, alert) {
     if (!companyId) return;
     await ensureRealtimeSecurityAlertTable();
@@ -15014,7 +15020,8 @@ async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
             findings: newRealtimeFindings,
             scenarioCoverage: payload.scenarioCoverage || {},
             warnings: payload.warnings || payload.collection?.warnings || [],
-            collectionStatus: payload.collectionStatus || payload.collection?.status || 'complete'
+            collectionStatus: payload.collectionStatus || payload.collection?.status || 'complete',
+            skipAi: !isSecurityFindingAiEnabled()
         });
         assessment.findings.forEach(finding => findingsById.set(finding.id, finding));
     }
@@ -15774,7 +15781,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     let dailyOverview = null;
     let assessmentMeta = null;
-    const findingAiEnabled = !['false', '0', 'no'].includes(String(process.env.SECURITY_FINDING_AI_ENABLED || 'true').toLowerCase());
+    const findingAiEnabled = isSecurityFindingAiEnabled();
     if (findingAiEnabled && findings.length && !options.skipFindingAiAssessment) {
         stages.push({
             stage: 'security_finding_ai:start',

@@ -31,7 +31,7 @@ steps:
       '--cpu-throttling',
       '--timeout', '3600',
       '--set-cloudsql-instances', 'stackops-backend-475222:us-central1:stackops-db',
-      '--update-env-vars', 'CLOUD_SQL_CONNECTION_NAME=stackops-backend-475222:us-central1:stackops-db,DB_NAME=consultation_db,NODE_OPTIONS=--trace-uncaught --trace-warnings,ENTERPRISE_AI_AUTOMATION_ENABLED=false',
+      '--update-env-vars', 'CLOUD_SQL_CONNECTION_NAME=stackops-backend-475222:us-central1:stackops-db,DB_NAME=consultation_db,NODE_OPTIONS=--trace-uncaught --trace-warnings,ENTERPRISE_AI_AUTOMATION_ENABLED=false,SECURITY_FINDING_AI_ENABLED=false',
       # Remove legacy literal values before replacing them with Secret Manager
       # references in this same revision. Cloud Run rejects an in-place type change.
       '--remove-env-vars', 'DB_USER,DB_PASSWORD,AZURE_TENANT_ID,AZURE_CLIENT_ID,AZURE_CLIENT_SECRET,MICROSOFT_TENANT_ID,MICROSOFT_CLIENT_ID,MICROSOFT_CLIENT_SECRET,CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_API_TOKEN,STACKCTRL_AUTOMATION_TRIGGER_SECRET',
