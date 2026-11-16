@@ -20595,7 +20595,12 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     column-gap: 0;
     justify-content: center;
     padding: 10px 10px 16px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+    background:
+      radial-gradient(110% 72% at 7% 0%, rgba(255, 255, 255, 0.14), transparent 52%),
+      radial-gradient(82% 72% at 100% 100%, rgba(214, 87, 15, 0.09), transparent 64%),
+      linear-gradient(145deg, rgba(43, 43, 44, 0.6), rgba(7, 7, 8, 0.68) 55%, rgba(16, 13, 12, 0.56));
+    backdrop-filter: blur(32px) saturate(138%);
+    -webkit-backdrop-filter: blur(32px) saturate(138%);
     border-color: rgba(255, 128, 30, 0.48);
     animation: live-glow 6s ease-in-out infinite;
   }
@@ -20607,13 +20612,10 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     display: block;
     position: absolute;
     inset: 0;
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.055) 0%,
-      rgb(0, 0, 0) 50%,
-      rgba(255, 255, 255, 0) 100%
-    );
-    opacity: 0.6;
+    background:
+      linear-gradient(118deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.025) 27%, transparent 49%),
+      linear-gradient(295deg, transparent 54%, rgba(255, 255, 255, 0.055) 100%);
+    opacity: 1;
     pointer-events: none;
     z-index: 0;
     transition: opacity 0.4s ease;
