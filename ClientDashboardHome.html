@@ -1961,6 +1961,62 @@
         @media (max-width:360px) { .portal-benefits-section .container { margin-inline:1rem; } .portal-benefit { grid-template-columns:30px minmax(0,1fr); gap:.65rem; } .portal-feature-image { height:145px; } }
         @media (prefers-reduced-motion:reduce) { .portal-benefit { transition:none; } }
 
+        /* Phone-only Why Choose carousel: mirrors the existing Integrations rail. */
+        .benefits-progress { display:none; }
+        @media (max-width:768px) {
+            .portal-benefits-section { --bc-card:78vw; overflow:hidden; }
+            .portal-benefits-section .container { width:100%; margin:0; }
+            .portal-benefits-section .section-title { padding:0 clamp(1.1rem,5vw,1.6rem); }
+            .portal-benefits-section .benefits-grid { margin-top:clamp(1.4rem,5vw,1.8rem); }
+            .portal-benefits-section .benefits-list {
+                display:flex;
+                flex-wrap:nowrap;
+                gap:clamp(.8rem,3.5vw,1.1rem);
+                margin:0;
+                padding:.75rem 0 1rem;
+                overflow-x:auto;
+                overflow-y:visible;
+                overscroll-behavior-x:contain;
+                -webkit-overflow-scrolling:touch;
+                scroll-snap-type:x mandatory;
+                scroll-behavior:smooth;
+                scrollbar-width:none;
+            }
+            .portal-benefits-section .benefits-list::-webkit-scrollbar { display:none; }
+            .portal-benefits-section .benefits-list::before,
+            .portal-benefits-section .benefits-list::after { content:""; flex:0 0 calc((100vw - var(--bc-card)) / 2); }
+            .portal-benefits-section .portal-benefit {
+                position:relative;
+                isolation:isolate;
+                flex:0 0 var(--bc-card);
+                display:block;
+                min-width:0;
+                padding:0;
+                border:1px solid rgba(255,255,255,.18);
+                border-radius:22px;
+                overflow:hidden;
+                opacity:1;
+                transform:none;
+                scroll-snap-align:center;
+                background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(7,10,12,.48));
+                box-shadow:inset 0 1px 1px rgba(255,255,255,.16),0 16px 28px rgba(0,0,0,.2);
+                -webkit-backdrop-filter:blur(16px) saturate(135%);
+                backdrop-filter:blur(16px) saturate(135%);
+            }
+            .portal-benefits-section .portal-benefit::before { content:""; position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(135deg,rgba(255,255,255,.1),rgba(255,255,255,0) 32%,transparent 100%); }
+            .portal-benefits-section .portal-benefit.is-active { border-color:rgba(255,255,255,.18); transform:none; }
+            .portal-benefits-section .portal-benefit .benefit-check { display:none; }
+            .portal-benefits-section .portal-benefit .benefit-text { position:relative; z-index:2; display:flex; flex-direction:column; height:100%; min-width:0; }
+            .portal-benefits-section .portal-feature-image { order:-1; display:block; width:100%; height:150px; margin:0; border:0; border-radius:0; border-bottom:1px solid rgba(255,255,255,.08); box-shadow:none; object-fit:cover; filter:saturate(.82) contrast(1.08) brightness(.9); }
+            .portal-benefits-section .portal-benefit h4 { margin:1rem 1rem .75rem; color:rgba(255,255,255,.96); font-size:.98rem; line-height:1.35; font-weight:200; }
+            .portal-benefits-section .portal-benefit p { margin:0 1rem; color:rgba(255,255,255,.72); font-size:.78rem; line-height:1.52; font-weight:100; }
+            .portal-benefits-section .portal-benefit .benefit-text::after { content:"●  STACKCTRL FEATURE"; margin:.9rem 1rem 1.1rem; padding-top:.7rem; border-top:1px solid rgba(255,255,255,.08); color:rgba(255,255,255,.72); font-size:.54rem; letter-spacing:.1em; line-height:1; text-shadow:0 0 10px rgba(88,255,198,.45); }
+            .benefits-progress { display:flex; justify-content:center; align-items:center; gap:7px; width:min(220px,62vw); margin:.4rem auto 0; }
+            .benefits-progress button { display:block; flex:1 1 0; max-width:34px; height:2px; padding:0; border:0; border-radius:999px; background:rgba(255,255,255,.22); cursor:pointer; transition:background-color .25s ease,transform .25s ease; }
+            .benefits-progress button.is-active { background:#ff7802; transform:scaleY(2.6); }
+            .benefits-progress button:focus-visible { outline:2px solid #fff; outline-offset:4px; }
+        }
+
         .portal-benefit {
             grid-template-columns: minmax(0, 1fr);
             gap: 0;
@@ -3140,6 +3196,147 @@
             animation: pulse-fade 1s infinite !important;
             z-index: -2 !important;
         }
+
+        @media (max-width: 600px) {
+            body > .site-header {
+                margin-bottom: -112px !important;
+            }
+
+            .portal-benefits-section {
+                background: #fff;
+            }
+
+            .portal-benefits-section .section-title h2 {
+                color: #161616;
+            }
+
+            .portal-benefits-section .section-title p {
+                color: rgba(22, 22, 22, 0.68);
+            }
+
+            .portal-benefits-section .portal-benefit {
+                background: #08090b;
+                border-color: rgba(255, 255, 255, 0.18);
+                box-shadow: 0 12px 26px rgba(0, 0, 0, 0.2);
+                -webkit-backdrop-filter: none;
+                backdrop-filter: none;
+            }
+
+            .portal-benefits-section .portal-benefit::before {
+                display: none;
+            }
+
+            .portal-benefits-section .portal-benefit h4 {
+                color: rgba(255, 255, 255, 0.96);
+            }
+
+            .portal-benefits-section .portal-benefit p {
+                color: rgba(255, 255, 255, 0.72);
+            }
+
+            .portal-benefits-section .portal-benefit .benefit-text::after {
+                border-top-color: rgba(255, 255, 255, 0.08);
+                color: rgba(255, 255, 255, 0.72);
+                text-shadow: 0 0 10px rgba(88, 255, 198, 0.45);
+            }
+
+            .benefits-progress {
+                width: min(150px, 45vw);
+                gap: 5px;
+            }
+
+            .benefits-progress button {
+                max-width: 22px;
+                background: rgba(22, 22, 22, 0.2);
+            }
+
+            .hero-section {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 1rem;
+                margin: 0.75rem auto 1.5rem;
+                padding: 6.5rem 1rem 1.25rem;
+                text-align: center;
+            }
+
+            .hero-section > div:first-child {
+                grid-row: 2;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                column-gap: 0.65rem;
+                row-gap: 0.8rem;
+                max-width: none;
+                padding-top: 0;
+            }
+
+            .hero-section > div:first-child > h1,
+            .hero-section > div:first-child > p,
+            .hero-buttons {
+                grid-column: 1 / -1;
+            }
+
+            .hero-image {
+                grid-row: 1;
+                align-self: center;
+                width: 100%;
+                max-width: 520px;
+                margin: 0.65rem auto 0;
+            }
+
+            .hero-section h1 {
+                font-size: 1.5rem;
+                line-height: 1.12;
+            }
+
+            .hero-section > div:first-child > p {
+                max-width: 42rem;
+                margin: 0 auto 1rem;
+                font-size: 0.75rem;
+                line-height: 1.5;
+            }
+
+            .credential-box {
+                grid-column: 1 / -1;
+                min-width: 0;
+                flex-direction: row;
+                align-items: flex-start;
+                gap: 0.45rem;
+                padding: 0.75rem 0.65rem;
+                margin: 0;
+                border-radius: 12px;
+                text-align: left;
+            }
+
+            .credential-icon {
+                font-size: 0.9rem;
+            }
+
+            .credential-text {
+                min-width: 0;
+                flex: 1;
+            }
+
+            .credential-text h4 {
+                font-size: 0.7rem;
+                line-height: 1.3;
+                margin-top: 0;
+                margin-bottom: 0.25rem;
+            }
+
+            .credential-text p {
+                font-size: 0.66rem;
+                line-height: 1.4;
+            }
+
+            .hero-buttons {
+                justify-content: center;
+                gap: 0.65rem;
+                margin-top: 0.2rem;
+            }
+
+            .hero-buttons > .glow-wrap > .link-content {
+                font-size: 0.75rem !important;
+            }
+        }
   </style>
 </head>
 <body>
@@ -3210,7 +3407,7 @@
                         <i class="fas fa-users"></i>
                     </div>
                     <div class="credential-text">
-                        <h4>ONE PLATFORM. TOTAL VISIBILITY.</h4>
+                        <h4>ONE PLATFORM. TOTAL VISIBILITY. ZERO TRUST.</h4>
                         <p>Partner with StackOps IT to secure, manage, and scale your entire IT environment.</p>
                     </div>
                 </div>
@@ -3250,6 +3447,7 @@
                         <article class="portal-benefit" data-benefit="3"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Live Defense Map <span>PRO</span></h4><p>Visualize every login, threat, and system health metric on a real-time map. Know exactly what's happening across your environment, the moment it happens.</p><img class="portal-feature-image" src="Images/Defense.png?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Mobile phone displaying a responsive business dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
                         <article class="portal-benefit" data-benefit="4"><div class="benefit-check"><i class="fas fa-check"></i></div><div class="benefit-text"><h4>Project Transparency</h4><p>Follow your IT roadmap with total clarity. Track milestones, technical debt, and infrastructure upgrades through a transparent, live project tracker.</p><img class="portal-feature-image" src="https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&amp;fit=crop&amp;w=1100&amp;q=85" alt="Mobile phone displaying a responsive business dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';"></div></article>
                     </div>
+                    <div class="benefits-progress" aria-label="Why Choose StackCTRL carousel slides"></div>
                     <aside class="benefits-image" aria-label="Client portal live view">
                         <img class="portal-static-visual" src="images/Yebo.png?auto=format&amp;fit=fill&amp;w=1800&amp;q=90" alt="Client portal analytics dashboard" onerror="this.onerror=null;this.src='Images/Screnshot2.png';">
                         <p class="benefit-visual-label">StackCTRL portal / live view</p>
@@ -3852,6 +4050,105 @@
                     stopAuto();
                     clearTimeout(resumeTimer);
                     rail.scrollTo({ left: 0 });
+                    paint(0);
+                }
+            };
+
+            paint(0);
+            apply();
+            mq.addEventListener('change', apply);
+            addEventListener('resize', () => { if (mq.matches) goTo(active, 'auto'); }, { passive: true });
+        })();
+
+        /* "Why Choose StackCTRL" — mobile carousel mirrors Integrations with a longer reading pause. */
+        (() => {
+            const section = document.querySelector('.portal-benefits-section');
+            const rail = section && section.querySelector('.benefits-list');
+            const dotsWrap = section && section.querySelector('.benefits-progress');
+            if (!section || !rail || !dotsWrap) return;
+            const cards = [...rail.querySelectorAll('.portal-benefit')];
+            if (cards.length < 2) return;
+
+            const mq = matchMedia('(max-width: 768px)');
+            const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+            const AUTO_MS = 7000;
+            const RESUME_MS = 9000;
+            let dots = [];
+            let active = 0;
+            let onScreen = false;
+            let autoTimer = null;
+            let resumeTimer = null;
+            let settleTimer = null;
+
+            const paint = (index) => {
+                active = index;
+                dots.forEach((dot, dotIndex) => {
+                    const isActive = dotIndex === index;
+                    dot.classList.toggle('is-active', isActive);
+                    dot.setAttribute('aria-current', isActive ? 'true' : 'false');
+                });
+            };
+
+            const goTo = (index, behavior = 'smooth') => {
+                index = (index % cards.length + cards.length) % cards.length;
+                const card = cards[index];
+                const left = card.offsetLeft - (rail.clientWidth - card.offsetWidth) / 2;
+                rail.scrollTo({ left: Math.max(0, left), behavior });
+                paint(index);
+            };
+
+            const stopAuto = () => { clearInterval(autoTimer); autoTimer = null; };
+            const startAuto = () => {
+                stopAuto();
+                if (!mq.matches || reduceMotion.matches || !onScreen) return;
+                autoTimer = setInterval(() => goTo(active + 1), AUTO_MS);
+            };
+            const pauseAuto = () => {
+                stopAuto();
+                clearTimeout(resumeTimer);
+                resumeTimer = setTimeout(startAuto, RESUME_MS);
+            };
+
+            dots = cards.map((_, index) => {
+                const dot = document.createElement('button');
+                dot.type = 'button';
+                dot.setAttribute('aria-label', `Show Why Choose StackCTRL slide ${index + 1}`);
+                dot.addEventListener('click', () => { goTo(index); pauseAuto(); });
+                dotsWrap.appendChild(dot);
+                return dot;
+            });
+
+            rail.addEventListener('scroll', () => {
+                clearTimeout(settleTimer);
+                settleTimer = setTimeout(() => {
+                    const midpoint = rail.scrollLeft + rail.clientWidth / 2;
+                    let closest = 0;
+                    let distance = Infinity;
+                    cards.forEach((card, index) => {
+                        const nextDistance = Math.abs(card.offsetLeft + card.offsetWidth / 2 - midpoint);
+                        if (nextDistance < distance) { distance = nextDistance; closest = index; }
+                    });
+                    paint(closest);
+                }, 80);
+            }, { passive: true });
+
+            ['pointerdown', 'touchstart', 'wheel'].forEach((eventName) =>
+                rail.addEventListener(eventName, pauseAuto, { passive: true }));
+
+            const observer = new IntersectionObserver((entries) => {
+                onScreen = entries[0].isIntersecting;
+                onScreen ? startAuto() : stopAuto();
+            }, { threshold: 0.25 });
+            observer.observe(section);
+
+            const apply = () => {
+                if (mq.matches) {
+                    goTo(active, 'auto');
+                    startAuto();
+                } else {
+                    stopAuto();
+                    clearTimeout(resumeTimer);
+                    rail.scrollTo({ left: 0, behavior: 'auto' });
                     paint(0);
                 }
             };
