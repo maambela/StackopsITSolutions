@@ -20597,7 +20597,32 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     padding: 10px 10px 16px;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
     border-color: rgba(255, 128, 30, 0.48);
-    animation: live-glow 2s ease-in-out infinite;
+    animation: live-glow 6s ease-in-out infinite;
+  }
+
+  /* Reuse the sign-in panel's inner reflection only. The existing Control
+     Center border and right-edge layer remain deliberately untouched. */
+  body.sunbird-client-portal .sunbird-left-menu::after {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.055) 0%,
+      rgb(0, 0, 0) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 0;
+    transition: opacity 0.4s ease;
+  }
+
+  /* Keep Control Center controls above the copied inner reflection. */
+  body.sunbird-client-portal .sunbird-left-menu > * {
+    position: relative;
+    z-index: 2;
   }
 
   body.sunbird-client-portal .sunbird-menu-heading {
