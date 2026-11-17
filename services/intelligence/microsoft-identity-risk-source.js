@@ -2,7 +2,7 @@ const GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 
 const IDENTITY_RISK_ENDPOINTS = Object.freeze({
     riskDetections: '/identityProtection/riskDetections?$top=100&$orderby=activityDateTime%20desc',
-    riskyUsers: '/identityProtection/riskyUsers?$top=100&$select=id,userPrincipalName,userDisplayName,riskLevel,riskState,riskDetail,isDeleted,isProcessing'
+    riskyUsers: '/identityProtection/riskyUsers?$top=100'
 });
 
 async function fetchGraphCollection({
@@ -10,64 +10,13 @@ async function fetchGraphCollection({
     label,
     token,
     fetchImpl = globalThis.fetch,
+    graph,
     timeoutMs = 30000
 } = {}) {
-    if (!token) throw new Error('A Microsoft Graph access token is required');
-    if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required');
+    const { fetchGraphCollectionPagesWithRetry } = require('./microsoft-graph-collection');
+    const result = await (graph || fetchGraphCollectionPagesWithRetry)({ url: `${GRAPH_ROOT}${path}`, token, fetchImpl, timeoutMs, label, expectedUnavailableStatuses: [400, 403, 404] });
+    return { ...result, records: result.value, status: result.ok && !result.hasMore ? 'complete' : result.value.length ? 'partial' : 'unavailable' };
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-        const response = await fetchImpl(`${GRAPH_ROOT}${path}`, {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                Accept: 'application/json'
-            },
-            signal: controller.signal
-        });
-
-        if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            return {
-                records: [],
-                status: 'unavailable',
-                recordsFetched: 0,
-                warnings: [`${label} unavailable: Microsoft Graph returned ${response.status}${body ? `: ${body.slice(0, 240)}` : ''}`]
-            };
-        }
-
-        const data = await response.json();
-        if (!Array.isArray(data?.value)) {
-            return {
-                records: [],
-                status: 'invalid_response',
-                recordsFetched: 0,
-                warnings: [`${label} unavailable: Microsoft Graph returned no value collection`]
-            };
-        }
-
-        const hasMore = Boolean(data['@odata.nextLink']);
-        return {
-            records: data.value,
-            status: hasMore ? 'partial' : 'complete',
-            recordsFetched: data.value.length,
-            warnings: hasMore ? [`${label} is limited to the first ${data.value.length} records; more results are available.`] : []
-        };
-    } catch (error) {
-        const reason = error?.name === 'AbortError'
-            ? `timed out after ${timeoutMs}ms`
-            : error?.message || String(error);
-        return {
-            records: [],
-            status: 'unavailable',
-            recordsFetched: 0,
-            warnings: [`${label} unavailable: ${reason}`]
-        };
-    } finally {
-        clearTimeout(timeout);
-    }
 }
 
 async function fetchMicrosoftIdentityRiskEvidence(token, options = {}) {

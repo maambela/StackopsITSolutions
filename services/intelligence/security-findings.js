@@ -17,7 +17,7 @@ function getUserKeys(record = {}, includeRecordId = false) {
         record.userPrincipalName,
         record.user,
         record.userEmail
-    ].map(normalizeIdentity).filter(Boolean));
+    ].map(normalizeIdentity).filter(value => value && !['unknown', 'unknown user', 'unassigned'].includes(value)));
 }
 
 function getIp(record = {}) {
@@ -186,7 +186,7 @@ function buildAnonymousIpFindings(alerts, signIns) {
         const sourceSystem = text(alert.reportingSecuritySystem || alert.source || alert.vendor) || 'Security provider';
         const compatibilityOnly = ['legacy_alerts', 'legacy_alerts_compatibility'].includes(alert.sourceSchema);
         const relatedSignIns = !compatibilityOnly && ipAddresses.length
-            ? signIns.filter(signIn => ipAddresses.includes(getIp(signIn)))
+            ? signIns.filter(signIn => ipAddresses.includes(getIp(signIn)) && recordTime(alert) !== null && recordTime(signIn) !== null && Math.abs(recordTime(alert) - recordTime(signIn)) <= 30 * 60 * 1000 && (!getUserKeys(alert).size || [...getUserKeys(signIn)].some(key => getUserKeys(alert).has(key))))
             : [];
         const alertSummary = [
             text(alert.title) || `${sourceSystem} reported an anonymous-IP indicator`,
@@ -256,7 +256,7 @@ function buildAnonymousIpFindings(alerts, signIns) {
                 : 'Check Microsoft sign-in and identity-risk records for this IP; do not treat the indicator alone as proof of compromise.',
             assessmentBasis: compatibilityOnly
                 ? 'Legacy Graph alert retained temporarily as an observation only; it is excluded from correlation and notification.'
-                : 'Stack CTRL links the security alert to collected sign-ins using an exact IP match. Severity remains unassessed pending validated impact criteria.'
+                : 'Stack CTRL links the security alert to sign-ins within 30 minutes using an exact IP match and matching user when the alert supplies one. Severity remains unassessed pending validated impact criteria.'
         };
     });
 }
@@ -307,9 +307,9 @@ function buildCloudflareMicrosoftCorrelationFindings(cloudflareFindings = [], si
         const relatedSignIns = signIns.filter(signIn => {
             const signInUser = normalizeIdentity(signIn.userPrincipalName || signIn.user);
             if (!userKeys.has(signInUser) || recordTime(signIn) === null) return false;
-            const timeMatches = cloudflareTimes.some(time => Math.abs(recordTime(signIn) - time) <= 24 * 60 * 60 * 1000);
+            const timeMatches = cloudflareTimes.some(time => Math.abs(recordTime(signIn) - time) <= 30 * 60 * 1000);
             const signInIp = normalizeIdentity(signIn.ipAddress);
-            return timeMatches && (!ipKeys.size || !signInIp || ipKeys.has(signInIp));
+            return timeMatches && ipKeys.size > 0 && Boolean(signInIp) && ipKeys.has(signInIp);
         });
         if (!relatedSignIns.length) return;
         const successful = relatedSignIns.filter(item => getSignInOutcome(item) === 'success');
@@ -317,7 +317,7 @@ function buildCloudflareMicrosoftCorrelationFindings(cloudflareFindings = [], si
             id: createFindingId('cloudflare_access_identity_correlation', `${finding.id}|${relatedSignIns.map(item => item.id).sort().join('|')}`),
             detectionId: 'cloudflare_access_identity_correlation',
             title: 'Cloudflare Access denials related to Microsoft sign-in activity',
-            description: `${cloudflareEvidence.length} aggregated Cloudflare Access denial record(s) and ${relatedSignIns.length} Microsoft sign-in record(s) share the same user within 24 hours${ipKeys.size ? ' and use matching IP evidence where available' : ''}. This relationship does not establish a compromise or successful Cloudflare access.`,
+            description: `${cloudflareEvidence.length} aggregated Cloudflare Access denial record(s) and ${relatedSignIns.length} Microsoft sign-in record(s) share the same user within 30 minutes${ipKeys.size ? ' and use matching IP evidence where available' : ''}. This relationship does not establish a compromise or successful Cloudflare access.`,
             impact: 'Related identity and Access activity may warrant review of the user, sign-in outcome, Access policy, and application context.',
             severity: 'unassessed',
             confidence: 'medium',
@@ -332,7 +332,7 @@ function buildCloudflareMicrosoftCorrelationFindings(cloudflareFindings = [], si
             },
             evidence: [...cloudflareEvidence, ...relatedSignIns.map(signIn => evidenceReference('sign_in', signIn, `${signIn.outcome || signIn.status || 'Unknown'} Microsoft sign-in`))].slice(0, 8),
             recommendedAction: 'Review the Cloudflare Access denials and Microsoft sign-in context together; verify whether the activity was expected before changing policy or containing an account.',
-            assessmentBasis: 'Stack CTRL linked Cloudflare Access and Microsoft sign-in records only by a matching user within 24 hours, with matching IP used when both records supplied one.'
+            assessmentBasis: 'Stack CTRL linked Cloudflare Access and Microsoft sign-in records only by a matching user within 30 minutes, with matching IP used when both records supplied one.'
         });
     });
     return findings;
@@ -490,7 +490,7 @@ function buildRiskDetectionSignInFindings(riskDetections, signIns) {
             ...relatedSignIns.map(signIn => evidenceReference(
                 'sign_in',
                 signIn,
-                `${getSignInOutcome(signIn)} sign-in within 24 hours — ${text(signIn.ipAddress) || 'IP unavailable'} — ${signIn.eventTime || signIn.timestamp || ''}`
+                `${getSignInOutcome(signIn)} sign-in within 30 minutes — ${text(signIn.ipAddress) || 'IP unavailable'} — ${signIn.eventTime || signIn.timestamp || ''}`
             ))
         ];
 
@@ -503,7 +503,7 @@ function buildRiskDetectionSignInFindings(riskDetections, signIns) {
             description: successfulSignIns.length
                 ? `Microsoft recorded ${detectionLabels.join(', ')} for ${userLabel}; ${successfulSignIns.length} successful sign-in record(s) matched the same user within a 24-hour correlation window. This is an investigation lead, not proof that the account or session was compromised.`
                 : timedDetections.length
-                    ? `Microsoft recorded ${detectionLabels.join(', ')} for ${userLabel}, but no matching successful sign-in was found within 24 hours of the detection in the collected records.`
+                    ? `Microsoft recorded ${detectionLabels.join(', ')} for ${userLabel}, but no matching successful sign-in was found within 30 minutes of the detection in the collected records.`
                     : `Microsoft recorded identity-risk evidence for ${userLabel}, but the detection timestamp was unavailable so Stack CTRL did not correlate sign-ins.`,
             impact: successfulSignIns.length
                 ? 'A successful authentication was recorded near a Microsoft identity-risk detection for the same user.'
@@ -523,7 +523,7 @@ function buildRiskDetectionSignInFindings(riskDetections, signIns) {
             recommendedAction: successfulSignIns.length
                 ? 'Review the time-bounded sign-in context, device and session evidence, then check Microsoft identity-risk remediation state.'
                 : 'Review the identity-risk detection and its linked sign-in context; do not infer account compromise without corroborating evidence.',
-            assessmentBasis: 'This finding groups Microsoft identity-risk detections by user and correlates only sign-ins for the same user within 24 hours. The risky-user feed is unavailable, and source values remain separate from Stack CTRL assessment.'
+            assessmentBasis: 'This finding groups Microsoft identity-risk detections by user and correlates only sign-ins for the same user within 30 minutes. The risky-user feed is unavailable, and source values remain separate from Stack CTRL assessment.'
         };
     });
 }
@@ -573,6 +573,8 @@ function buildSecurityFindings({
     additionalFindings = [],
     sourceStatuses = {}
 } = {}) {
+    const unique = rows => [...new Map(rows.filter(Boolean).map(row => [String(row.source || row.vendor || '') + ':' + String(row.id || JSON.stringify(row)), row])).values()];
+    alerts = unique(alerts); incidents = unique(incidents); signIns = unique(signIns); riskyUsers = unique(riskyUsers); riskDetections = unique(riskDetections);
     const useRiskDetectionFallback = !riskyUsers.length && sourceStatuses.riskyUsers === 'unavailable';
     const impossibleTravel = buildImpossibleTravelFindings(signIns);
     const cloudflareAdditionalFindings = Array.isArray(additionalFindings) ? additionalFindings : [];
@@ -604,7 +606,7 @@ function buildSecurityFindings({
     const cloudflareCorrelationStatus = coverageStatus([sourceStatuses.cloudflare, sourceStatuses.signIns].filter(Boolean));
 
     return {
-        findings,
+        findings: [...new Map(findings.map(finding => [finding.id, finding])).values()],
         scenarioCoverage: {
             anonymousIpAuthentication: {
                 status: anonymousStatus,
@@ -668,7 +670,7 @@ function buildSecurityFindings({
                     ? 'Cloudflare or Microsoft sign-in evidence was unavailable, so cross-provider correlation could not be evaluated.'
                     : cloudflareCorrelationStatus === 'partial'
                         ? 'Cloudflare or Microsoft sign-in collection was incomplete; any correlation uses only returned records.'
-                        : 'Stack CTRL correlates only a matching stable user within 24 hours, using a matching IP only when both sources provide one. It does not establish compromise or successful Cloudflare access.'
+                        : 'Stack CTRL correlates only a matching stable user within 30 minutes, using a matching IP only when both sources provide one. It does not establish compromise or successful Cloudflare access.'
             }
         }
     };

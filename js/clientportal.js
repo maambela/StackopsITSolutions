@@ -5177,6 +5177,7 @@ let sunbirdSecurityDashboardData = null;
 let sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', sort: 'newest' };
 let lockedSunbirdSecurityInsightEvidenceKey = null;
 let sunbirdSecurityTrendWindow = '7d';
+let sunbirdSecurityTablePage = 0;
 let sunbirdSecuritySelectedFindingId = null;
 
 function openSunbirdSecurityDashboard() {
@@ -5200,10 +5201,10 @@ function openSunbirdSecurityDashboard() {
     dashboardView.innerHTML = renderSunbirdSecurityShell();
     setupSunbirdSecurityDashboard();
 
-    const cached = readSunbirdSecuritySnapshot();
-    sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(cached || { success: true, findingLoadState: 'loading' });
+    sunbirdSecurityDashboardData = normalizeSunbirdSecurityData({ success: true, findingLoadState: 'loading' });
     renderSunbirdSecurityDashboard();
     loadSunbirdSecurityDashboardData();
+    connectSunbirdSecurityLiveFeed();
 }
 
 function renderSunbirdSecurityShell() {
@@ -5274,6 +5275,7 @@ function renderSunbirdSecurityShell() {
                                 <th>Status</th>
                                 <th>User / Asset</th>
                                 <th>Source</th>
+                                <th>API Source</th>
                                 <th>Category</th>
                                 <th>MITRE</th>
                                 <th>Evidence</th>
@@ -5428,40 +5430,146 @@ function saveSunbirdSecuritySnapshot(data) {
     localStorage.setItem(SUNBIRD_SECURITY_CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
 }
 
-async function loadSunbirdSecurityDashboardData() {
+let sunbirdSecurityFeedController = null;
+let sunbirdSecurityFeedRetry = null;
+async function connectSunbirdSecurityLiveFeed() {
+    clearTimeout(sunbirdSecurityFeedRetry);
+    sunbirdSecurityFeedController?.abort();
+    const controller = new AbortController();
+    sunbirdSecurityFeedController = controller;
     const token = localStorage.getItem('authToken');
-    if (!token) {
-        sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error' };
-        renderSunbirdSecurityDashboard();
-        return;
-    }
+    if (!token) return;
+    let renderTimer;
     try {
-        const cachedResponse = await fetch('/api/db/security-events', {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        });
-        const cachedData = await cachedResponse.json();
-        if (!cachedResponse.ok || !cachedData.success) throw new Error(cachedData.message || 'Cached security events unavailable');
-        sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(augmentSunbirdSecurityDataWithCloudflare(cachedData));
-        saveSunbirdSecuritySnapshot(sunbirdSecurityDashboardData);
-        renderSunbirdSecurityDashboard();
-    } catch (cachedError) {
+        const response = await fetch('/api/security-events/live', { cache: 'no-store', signal: controller.signal, headers: { Authorization: 'Bearer ' + token } });
+        if (!response.ok) throw new Error('Live provider feed unavailable (' + response.status + ')');
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        let buffer = '', companyId;
         try {
-            const liveResponse = await fetch('/api/security-events', {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-            });
-            const liveData = await liveResponse.json();
-            if (!liveResponse.ok || !liveData.success) throw new Error(liveData.message || 'Security events unavailable');
-            sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(augmentSunbirdSecurityDataWithCloudflare(liveData));
-            saveSunbirdSecuritySnapshot(sunbirdSecurityDashboardData);
-            renderSunbirdSecurityDashboard();
-        } catch (liveError) {
-            console.warn('[Security Dashboard] Detailed SOC evidence unavailable:', liveError.message);
-            sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error' };
-            renderSunbirdSecurityDashboard();
-        }
+            while (true) {
+                const { value, done } = await reader.read();
+                if (!document.getElementById('sunbird-security-dashboard') || localStorage.getItem('authToken') !== token) { controller.abort(); return; }
+                buffer += decoder.decode(value, { stream: !done });
+                let end;
+                while ((end = buffer.indexOf('\n')) >= 0) {
+                    const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+                    if (!line.trim()) continue;
+                    const event = JSON.parse(line);
+                    if (event.type === 'start') companyId = event.companyId;
+                    if (event.type === 'records' && (!sunbirdSecurityLiveCompany || sunbirdSecurityLiveCompany === companyId)) {
+                        sunbirdSecurityDashboardData.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, event.records.filter(row => Number(row.companyId) === Number(companyId)));
+                        if (event.records.length) sunbirdSecurityDashboardData.rawEvidence = { ...sunbirdSecurityDashboardData.rawEvidence, rawEvidenceUpdatedAt: event.records[0].retrievedAt, correlationStatus: 'awaiting_next_evaluation' };
+                    }
+                    if (event.source && (!sunbirdSecurityLiveCompany || sunbirdSecurityLiveCompany === companyId)) {
+                        const sources = new Map((sunbirdSecurityDashboardData.retrieval?.sources || []).map(row => [row.provider + row.endpoint, row]));
+                        sources.set(event.source.provider + event.source.endpoint, event.source);
+                        sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, sources: [...sources.values()] };
+                    }
+                    if (event.type === 'records' || event.type === 'health') { clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderSunbirdSecurityTable(); renderSunbirdSecurityRawEvidenceHeader(); }, 150); }
+                }
+                if (done) break;
+            }
+        } finally { reader.releaseLock(); }
+    } catch (error) {
+        if (error.name !== 'AbortError') console.warn('[Raw evidence feed]', error.message);
+    } finally {
+        clearTimeout(renderTimer);
+        if (!controller.signal.aborted && document.getElementById('sunbird-security-dashboard')) sunbirdSecurityFeedRetry = setTimeout(connectSunbirdSecurityLiveFeed, 15000);
     }
+}
+let sunbirdSecurityRefreshTimer = null;
+let sunbirdSecurityHistoryLoading = false;
+async function refreshSunbirdSecurityHealth() {
+    const company = sunbirdSecurityLiveCompany;
+    try {
+        const response = await fetch('/api/security-events/health', { cache: 'no-store', headers: { Authorization: 'Bearer ' + localStorage.getItem('authToken') } });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Storage health unavailable');
+        if (company !== sunbirdSecurityLiveCompany) return;
+        const sources = new Map((data.sources || []).map(row => [row.provider + row.endpoint, row]));
+        for (const row of sunbirdSecurityDashboardData.retrieval?.sources || []) {
+            const key = row.provider + row.endpoint;
+            if (!sources.has(key) || String(row.lastAttemptAt || '') > String(sources.get(key).lastAttemptAt || '')) sources.set(key, row);
+        }
+        sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, sources: [...sources.values()], stored: data.stored };
+        renderSunbirdSecurityRawEvidenceHeader();
+    } catch (error) {
+        sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, storageWarning: error.message };
+        renderSunbirdSecurityRawEvidenceHeader();
+    }
+}
+let sunbirdSecurityRange = {};
+let sunbirdSecurityLiveCompany = null;
+function mergeSunbirdRawRecords(previous = [], incoming = []) {
+    const rows = new Map(previous.map(row => [row.uid, row]));
+    incoming.forEach(row => { const prior = rows.get(row.uid); if (!prior || (Number(row.providerVersion || 0) >= Number(prior.providerVersion || 0) && String(row.retrievedAt || '') >= String(prior.retrievedAt || ''))) rows.set(row.uid, row); });
+    return [...rows.values()];
+}
+async function loadSunbirdSecurityHistory() {
+    if (sunbirdSecurityHistoryLoading) return;
+    sunbirdSecurityHistoryLoading = true;
+    const company = sunbirdSecurityLiveCompany;
+    let after = '';
+    const range = new URLSearchParams(Object.entries(sunbirdSecurityRange).filter(([, value]) => value));
+    try {
+        do {
+            const response = await fetch('/api/security-events/history?' + range + '&after=' + encodeURIComponent(after), { cache: 'no-store', headers: { Authorization: 'Bearer ' + localStorage.getItem('authToken') } });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.message || 'History unavailable');
+            if (company !== sunbirdSecurityLiveCompany) return;
+            sunbirdSecurityDashboardData.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, data.records);
+            renderSunbirdSecurityTable();
+            after = data.next;
+        } while (after);
+    } catch (error) {
+        sunbirdSecurityDashboardData.warnings = [...(sunbirdSecurityDashboardData.warnings || []), 'Saved history: ' + error.message];
+    } finally { sunbirdSecurityHistoryLoading = false; refreshSunbirdSecurityHealth(); renderSunbirdSecurityRawEvidenceHeader(); }
+}
+function applySunbirdSecurityRange() {
+    if (sunbirdSecurityLiveRequest) { sunbirdSecurityDashboardData.warnings = [...(sunbirdSecurityDashboardData.warnings || []), 'The selected period will start after the current collection finishes.']; }
+    const since = document.getElementById('security-evidence-since')?.value;
+    const until = document.getElementById('security-evidence-until')?.value;
+    sunbirdSecurityRange = { since: since ? new Date(since).toISOString() : undefined, until: until ? new Date(until).toISOString() : undefined };
+    loadSunbirdSecurityDashboardData();
+}
+let sunbirdSecurityLiveRequest = null;
+async function loadSunbirdSecurityDashboardData() {
+    if (sunbirdSecurityLiveRequest) return sunbirdSecurityLiveRequest;
+    clearTimeout(sunbirdSecurityRefreshTimer);
+    sunbirdSecurityLiveRequest = (async () => {
+        let renderTimer;
+        try {
+            const sources = new Map((sunbirdSecurityDashboardData?.retrieval?.sources || []).map(row => [row.provider + row.endpoint, row]));
+            const refresh = () => { clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderSunbirdSecurityTable(); }, 150); };
+            const data = await fetchSunbirdSecurityEventsData({ ...sunbirdSecurityRange, onEvent: event => {
+                if (event.type === 'start') {
+                    if (sunbirdSecurityLiveCompany !== null && sunbirdSecurityLiveCompany !== event.companyId) sunbirdSecurityDashboardData = normalizeSunbirdSecurityData({ rawRecords: [] });
+                    sunbirdSecurityLiveCompany = event.companyId;
+                    loadSunbirdSecurityHistory();
+                }
+                if (event.type === 'records') { sunbirdSecurityDashboardData.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, event.records); if (event.records.length) sunbirdSecurityDashboardData.rawEvidence = { ...sunbirdSecurityDashboardData.rawEvidence, rawEvidenceUpdatedAt: event.records[0].retrievedAt, correlationStatus: 'awaiting_next_evaluation' }; }
+                if (event.source) { sources.set(event.source.provider + event.source.endpoint, event.source); sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, sources: [...sources.values()] }; }
+                if (event.type === 'records' || event.type === 'health') refresh();
+            } });
+            clearTimeout(renderTimer);
+            data.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, data.rawRecords);
+            sunbirdSecurityDashboardData = data;
+            renderSunbirdSecurityDashboard();
+        } catch (error) {
+            sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error',
+                warnings: ['Live refresh failed: ' + error.message + '. Previously displayed evidence may be stale.'] };
+            renderSunbirdSecurityDashboard();
+        } finally {
+            clearTimeout(renderTimer);
+            sunbirdSecurityLiveRequest = null;
+            if (document.getElementById('sunbird-security-dashboard')) {
+                sunbirdSecurityRefreshTimer = setTimeout(() => {
+                    if (document.getElementById('sunbird-security-dashboard')) loadSunbirdSecurityDashboardData();
+                }, 30000);
+            }
+        }
+    })();
+    return sunbirdSecurityLiveRequest;
 }
 
 function normalizeSunbirdSecurityData(data = {}) {
@@ -6263,6 +6371,7 @@ function getSunbirdSecurityApiSource(event = {}) {
 }
 
 function getSunbirdSecurityApiCategory(event = {}) {
+    if (event.rawPayload !== undefined) return event.category ?? 'Not provided';
     if (event.apiCategory) return event.apiCategory;
     if (event.recordType === 'alert') return event.categories?.join?.(', ') || event.category || event.classification || 'Not found';
     if (event.recordType === 'incident') return event.determination || event.classification || 'Not found';
@@ -6277,7 +6386,8 @@ function isSunbirdSecurityIdentifier(value) {
 }
 
 function getSunbirdSecurityDisplayTitle(event = {}) {
-    const title = event.title || event.displayName || event.name || event.message || '';
+    const title = event.title || event.description || event.displayName || event.name || event.message || '';
+    if (event.rawPayload !== undefined) return title || 'Not provided';
     if (!isSunbirdSecurityIdentifier(title)) return title || 'Security event';
     const description = String(event.description || '').trim();
     return description && !/^external threat indicator from microsoft graph$/i.test(description)
@@ -6318,14 +6428,16 @@ function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityMode
             : 'Evaluation time not supplied.';
     target.innerHTML = `
         <div class="sunbird-security-raw-evidence-title">
-            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Individual Microsoft and Cloudflare records retained for review. They are not AI conclusions and are never sent directly to WhatsApp.</p></div>
+            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Live Microsoft Graph and Cloudflare records, with the previous 15 days for context. Provider messages and severity are shown as supplied.</p></div>
             <span class="sunbird-security-raw-count">${sunbirdSecurityEscape(rawCount)} returned record${rawCount === 1 ? '' : 's'}</span>
         </div>
+        <p>${[...(model.warnings || []), ...(model.retrieval?.limitations || [])].map(warning => sunbirdSecurityEscape(warning)).join(' | ')}</p>
         <div class="sunbird-security-raw-statuses">
             <p><b>Cloudflare</b><span class="sunbird-security-status ${sunbirdSecurityStatusClass(cloudflareStatus)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(cloudflareStatus))}</span><small>${sunbirdSecurityEscape(cloudflareMessage)}</small></p>
             <p><b>Raw evidence updated</b><small>${sunbirdSecurityEscape(rawUpdatedAt ? sunbirdSecurityFormatTime(rawUpdatedAt) : 'Time not supplied')}</small></p>
             <p><b>Correlation / AI evaluated</b><small>${sunbirdSecurityEscape(evaluationMessage)}</small></p>
-        </div>`;
+        </div>
+        <details><summary>Retrieval health and coverage</summary><p>${sunbirdSecurityEscape((model.retrieval?.stored || []).map(row => row.provider + ': ' + row.recordsStored + ' stored records').join(' / ') || 'Stored record totals pending')}${model.retrieval?.storageWarning ? ' | ' + sunbirdSecurityEscape(model.retrieval.storageWarning) : ''}</p><div style="overflow:auto"><table><thead><tr><th>Provider / dataset</th><th>State</th><th>Last attempt</th><th>Last complete</th><th>Records / pages</th><th>Failures / rate limits / permissions</th><th>Storage</th></tr></thead><tbody>${(model.retrieval?.sources || []).map(row => `<tr><td>${sunbirdSecurityEscape(row.provider)}<br>${sunbirdSecurityEscape(row.endpoint)}</td><td>${sunbirdSecurityEscape(row.status)}${row.resumable ? ' (will resume)' : ''}<br>${sunbirdSecurityEscape(row.error || row.limitation || '')}</td><td>${sunbirdSecurityEscape(sunbirdSecurityFormatTime(row.lastAttemptAt))}</td><td>${sunbirdSecurityEscape(sunbirdSecurityFormatTime(row.lastSuccessAt))}</td><td>${Number(row.recordsRetrieved || 0)} / ${Number(row.pages || 0)}</td><td>${Number(row.failedRequests || 0)} / ${Number(row.rateLimits || 0)} / ${Number(row.permissionErrors || 0)}</td><td>${sunbirdSecurityEscape(row.storageStatus || 'Not confirmed')} ${sunbirdSecurityEscape(row.storageError || '')}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 
 function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
@@ -6334,26 +6446,37 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     if (!body) return;
     const events = getFilteredSunbirdSecurityEvents(model);
     if (!events.length) {
-        body.innerHTML = '<tr><td colspan="10" class="sunbird-id-empty">No SOC evidence matches the current filters.</td></tr>';
+        const pager = document.getElementById('sunbird-security-raw-pager'); if (pager) pager.textContent = '0 matching records';
+        body.innerHTML = '<tr><td colspan="11" class="sunbird-id-empty">No SOC evidence matches the current filters.</td></tr>';
         return;
     }
-    body.innerHTML = events.map(event => {
-        const severity = String(event.severity || 'low').toLowerCase();
+    const pageSize = 100;
+    const pageIndex = typeof sunbirdSecurityTablePage === 'number' ? Math.min(sunbirdSecurityTablePage, Math.max(0, Math.ceil(events.length / pageSize) - 1)) : 0;
+    const table = body.closest?.('table');
+    if (table) {
+        let pager = document.getElementById('sunbird-security-raw-pager');
+        if (!pager) { pager = document.createElement('div'); pager.id = 'sunbird-security-raw-pager'; table.insertAdjacentElement('afterend', pager); }
+        pager.innerHTML = `<span>Showing ${pageIndex * pageSize + 1} - ${Math.min(events.length, (pageIndex + 1) * pageSize)} of ${events.length} matching records</span> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex - 1};renderSunbirdSecurityTable()" ${pageIndex === 0 ? 'disabled' : ''}>Previous</button> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex + 1};renderSunbirdSecurityTable()" ${(pageIndex + 1) * pageSize >= events.length ? 'disabled' : ''}>Next</button>`;
+    }
+    body.innerHTML = events.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize).map(event => {
+        const severity = event.sourceSeverity ?? event.severity ?? 'Not provided';
+        const severityTone = String(severity).toLowerCase();
         const mitre = getSunbirdSecurityMitre(event);
         const apiSource = getSunbirdSecurityApiSource(event);
         const apiCategory = getSunbirdSecurityApiCategory(event);
         return `
             <tr>
-                <td data-label="Time">${escapeIdentityText(formatSunbirdDeviceDate(event.timestamp))}</td>
-                <td data-label="Severity"><span class="sunbird-id-risk ${severity === 'critical' || severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'safe'}">${escapeIdentityText(severity)}</span></td>
+                <td data-label="Time">${escapeIdentityText(sunbirdSecurityFormatTime(event.timestamp))}</td>
+                <td data-label="Severity"><span class="sunbird-id-risk ${severityTone === 'critical' || severityTone === 'high' ? 'high' : severityTone === 'medium' ? 'medium' : severityTone === 'low' || severityTone === 'informational' ? 'safe' : ''}">${escapeIdentityText(severity)}</span></td>
                 <td data-label="Type"><span class="sunbird-id-role-list"><span>${escapeIdentityText(event.recordType || 'event')}</span></span></td>
                 <td data-label="Incident / Alert">${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</td>
-                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.status || event.riskLevel || 'observed')}</span></td>
+                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.status ?? 'Not provided')}</span></td>
                 <td data-label="User / Asset">${escapeIdentityText(getSunbirdSecurityDisplayAsset(event))}</td>
-                <td data-label="Source">${escapeIdentityText(apiSource)}</td>
+                <td data-label="Source">${escapeIdentityText(event.endpoint || apiSource)}</td>
+                <td data-label="API Source">${escapeIdentityText(event.provider || getSunbirdSecurityReportingSystem(event))}</td>
                 <td data-label="Category">${escapeIdentityText(apiCategory)}</td>
-                <td data-label="MITRE">${escapeIdentityText(`${mitre.tactic} / ${mitre.technique}`)}</td>
-                <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${JSON.stringify(event.uid)})'>Open</button></td>
+                <td data-label="MITRE">${escapeIdentityText(mitre.technique === 'Not provided' ? 'Not provided' : `${mitre.tactic} / ${mitre.technique}`)}</td>
+                <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${escapeIdentityText(JSON.stringify(event.uid))})'>Open</button></td>
             </tr>
         `;
     }).join('');
@@ -6362,7 +6485,7 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
 function getFilteredSunbirdSecurityEvents(model = buildSunbirdSecurityModel()) {
     const search = sunbirdSecurityTableState.search.trim().toLowerCase();
     return model.allEvents.filter(event => {
-        const severity = String(event.severity || 'low').toLowerCase();
+        const severity = String(event.severity ?? 'Not provided').toLowerCase();
         const status = String(event.status || event.riskLevel || '').toLowerCase();
         const type = String(event.recordType || '').toLowerCase();
         const mitre = getSunbirdSecurityMitre(event);
@@ -6386,6 +6509,7 @@ function getFilteredSunbirdSecurityEvents(model = buildSunbirdSecurityModel()) {
 }
 
 function applySunbirdSecurityTableFilter(filter = {}) {
+    sunbirdSecurityTablePage = 0;
     sunbirdSecurityTableState = { ...sunbirdSecurityTableState, ...filter };
     const setValue = (id, value) => {
         const el = document.getElementById(id);
@@ -6475,6 +6599,17 @@ function openSunbirdSecurityEventEvidence(uid) {
     const model = buildSunbirdSecurityModel();
     const event = model.allEvents.find(item => item.uid === uid);
     if (!event) return;
+    if (event.rawPayload !== undefined) {
+        openSunbirdSecurityRowsModal(event.title || event.recordType, [{ title: event.provider, subtitle: event.endpoint, meta: 'Original provider JSON' }]);
+        const list = document.querySelector('#sunbird-security-evidence-modal .sunbird-id-evidence-list');
+        if (list) {
+            const pre = document.createElement('pre');
+            pre.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:65vh;overflow:auto';
+            pre.textContent = JSON.stringify(event.rawPayload, null, 2);
+            list.appendChild(pre);
+        }
+        return;
+    }
     const mitre = getSunbirdSecurityMitre(event);
     openSunbirdSecurityRowsModal(event.title || event.displayName || event.name || 'Security evidence', [{
         title: event.description || event.message || event.name || 'SOC evidence',
@@ -6546,6 +6681,7 @@ function setSunbirdSecurityTrendWindow(value) {
 }
 
 function getSunbirdSecurityEvents(data) {
+    if (Array.isArray(data.rawRecords)) return data.rawRecords;
     return [
         ...(data.alerts || []).map((item, index) => ({ ...item, uid: `alert-${item.id || index}`, recordType: 'alert', timestamp: item.created || item.eventTime || item.createdDateTime, name: item.title })),
         ...(data.incidents || []).map((item, index) => ({ ...item, uid: `incident-${item.id || index}`, recordType: 'incident', timestamp: item.created || item.updated || item.createdDateTime, name: item.displayName, source: item.source || 'Microsoft Incident' })),
@@ -6570,12 +6706,7 @@ function getSunbirdSecuritySeverityRank(value) {
 }
 
 function getSunbirdSecurityMitre(item = {}) {
-    const text = [item.title, item.displayName, item.name, item.description, item.category, item.source, item.message].filter(Boolean).join(' ').toLowerCase();
-    if (/phish|spoof|email|mail|bec/.test(text)) return { tactic: 'Initial Access', technique: 'Phishing' };
-    if (/credential|password|signin|sign-in|login|mfa|account|impossible travel/.test(text)) return { tactic: 'Credential Access', technique: 'Valid Accounts' };
-    if (/malware|ransom|payload|execution|script|virus/.test(text)) return { tactic: 'Execution', technique: 'Malware' };
-    if (/persist|startup|autorun|scheduled task/.test(text)) return { tactic: 'Persistence', technique: 'Account Persistence' };
-    return { tactic: 'Defense Evasion', technique: 'Suspicious Activity' };
+    return { tactic: 'Provider supplied', technique: item.mitreTechniques?.length ? item.mitreTechniques.join(', ') : 'Not provided' };
 }
 
 function countSunbirdSecurityBy(rows, getter) {
@@ -15186,7 +15317,7 @@ function ensureSunbirdBillingCardDimensions() {
     }
 }
 
-async function fetchSunbirdSecurityEventsData() {
+async function fetchSunbirdSecurityEventsData({ onEvent, since, until } = {}) {
     const token = localStorage.getItem('authToken');
     if (!token) throw new Error('Authentication required');
 
@@ -15195,9 +15326,32 @@ async function fetchSunbirdSecurityEventsData() {
         'Content-Type': 'application/json'
     };
     let lastError;
-    for (const endpoint of ['/api/db/security-events', '/api/security-events']) {
+    for (const endpoint of ['/api/security-events' + (onEvent ? '?stream=1' + (since ? '&since=' + encodeURIComponent(since) : '') + (until ? '&until=' + encodeURIComponent(until) : '') : '')]) {
         try {
-            const response = await fetch(endpoint, { headers });
+            const response = await fetch(endpoint, { headers, cache: 'no-store' });
+            if (onEvent && response.ok && response.body?.getReader) {
+                const reader = response.body.getReader(), decoder = new TextDecoder();
+                let buffer = '', completed = null;
+                const consume = line => {
+                    if (!line.trim()) return;
+                    const event = JSON.parse(line);
+                    onEvent(event);
+                    if (event.type === 'error') throw new Error(event.message);
+                    if (event.type === 'complete') completed = event.payload;
+                };
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        buffer += decoder.decode(value, { stream: !done });
+                        let end;
+                        while ((end = buffer.indexOf('\n')) >= 0) { consume(buffer.slice(0, end)); buffer = buffer.slice(end + 1); }
+                        if (done) break;
+                    }
+                    if (buffer.trim()) consume(buffer);
+                } finally { reader.releaseLock(); }
+                if (!completed) throw new Error('Provider collection disconnected before completion. Received records remain available.');
+                return normalizeSunbirdSecurityData(completed);
+            }
             const data = await response.json();
             if (response.ok && data.success) return normalizeSunbirdSecurityData(data);
             lastError = new Error(data.message || `Security events request failed (${response.status})`);
@@ -17052,10 +17206,11 @@ function sunbirdSecurityReadableSourceLabel(value, fallback = 'Source not record
 }
 
 function sunbirdSecurityFormatTime(value) {
-    if (!value) return 'Not recorded';
+    if (!value || typeof value !== 'string' || !/[T ]\d{2}:\d{2}/.test(value)) return 'Not provided';
     const time = new Date(value);
-    if (Number.isNaN(time.getTime())) return 'Not recorded';
-    return time.toLocaleString();
+    if (Number.isNaN(time.getTime())) return 'Not provided';
+    const zone = typeof sunbirdSecurityDashboardData !== 'undefined' ? sunbirdSecurityDashboardData?.displayTimeZone || 'Africa/Johannesburg' : 'Africa/Johannesburg';
+    return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: zone }).format(time) + (zone === 'Africa/Johannesburg' ? ' SAST' : ' ' + zone);
 }
 
 function sunbirdSecurityEntityLabels(entities) {

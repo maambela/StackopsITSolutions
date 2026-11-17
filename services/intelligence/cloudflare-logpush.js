@@ -1,7 +1,10 @@
 const crypto = require('crypto');
+const { providerTimestamp } = require('./raw-security-records');
 
 const SUPPORTED_DATASETS = new Set([
     'firewall_events',
+    'http_requests',
+    'network_analytics_logs',
     'access_requests',
     'audit_logs',
     'gateway_dns',
@@ -22,9 +25,8 @@ function first(record = {}, keys = []) {
 
 function eventTime(record = {}) {
     const value = first(record, ['datetime', 'Datetime', 'timestamp', 'Timestamp', 'CreatedAt', 'created_at', 'EdgeStartTimestamp']);
-    if (typeof value === 'number') return new Date(value > 1e12 ? value : value * 1000).toISOString();
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+    const normalized = providerTimestamp(value);
+    return normalized && Number.isFinite(Date.parse(normalized)) ? new Date(normalized).toISOString() : null;
 }
 
 function normaliseDataset(value) {
@@ -48,24 +50,30 @@ function normaliseCloudflareLogpushRecord(record = {}, { dataset, accountId } = 
         policy: text(first(record, ['PolicyName', 'policy_name', 'RuleID', 'rule_id', 'RuleMessage', 'rule_message'])) || null,
         raw: record
     };
-    const stable = sourceEventId || crypto.createHash('sha256').update(JSON.stringify({
-        dataset: normalised.dataset,
-        account: normalised.cloudflareAccountId,
-        time: normalised.eventTime,
-        action: normalised.action,
-        user: normalised.user,
-        ip: normalised.ipAddress,
-        resource: normalised.resource,
-        policy: normalised.policy
-    })).digest('hex');
+    const compositeId = sourceEventId && (record.RuleID || record.ruleId) ? sourceEventId + ':' + crypto.createHash('sha256').update(JSON.stringify([record.RuleID || record.ruleId, record.Source || record.source, normalised.eventTime, normalised.action])).digest('hex') : sourceEventId;
+    const stable = compositeId || crypto.createHash('sha256').update(JSON.stringify(record)).digest('hex');
     return { ...normalised, eventKey: `${normalised.dataset}:${stable}` };
 }
 
 function normaliseCloudflareLogpushPayload(payload, options = {}) {
+    payload = parseCloudflareLogpushPayload(payload);
     const records = Array.isArray(payload) ? payload : [payload];
     const results = records.map(record => normaliseCloudflareLogpushRecord(record, options)).filter(Boolean);
     const unique = new Map(results.map(record => [record.eventKey, record]));
     return [...unique.values()];
+}
+
+function parseCloudflareLogpushPayload(payload) {
+    if (Buffer.isBuffer(payload)) {
+        // HTTP destinations also send gzip files without Content-Encoding.
+        if (payload[0] === 0x1f && payload[1] === 0x8b) payload = require('node:zlib').gunzipSync(payload, { maxOutputLength: 20 * 1024 * 1024 });
+        payload = payload.toString('utf8');
+    }
+    if (typeof payload !== 'string') return payload;
+    const body = payload.trim();
+    if (!body) return [];
+    try { return JSON.parse(body); }
+    catch { return body.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line)); }
 }
 
 function isBlocked(record = {}) {
@@ -100,9 +108,11 @@ function buildCloudflareLogpushFindings(records = [], { minimumRepeatedBlocks = 
     const blockedGroups = new Map();
     records.filter(isBlocked).forEach(record => {
         if (!['firewall_events', 'gateway_dns', 'gateway_http'].includes(record.dataset)) return;
-        const key = [record.dataset, record.resource || 'unknown-resource', record.ipAddress || record.user || 'unknown-actor'].join('|').toLowerCase();
+        const time = Date.parse(record.eventTime);
+        if (!Number.isFinite(time) || !(record.ipAddress || record.user) || !record.resource) return;
+        const key = [record.dataset, record.resource, record.ipAddress || record.user, Math.floor(time / 1800000)].join('|').toLowerCase();
         const group = blockedGroups.get(key) || [];
-        group.push(record);
+        if (!group.some(item => (item.eventKey || JSON.stringify(item)) === (record.eventKey || JSON.stringify(record)))) group.push(record);
         blockedGroups.set(key, group);
     });
     blockedGroups.forEach(group => {
@@ -113,7 +123,7 @@ function buildCloudflareLogpushFindings(records = [], { minimumRepeatedBlocks = 
             id: findingId('cloudflare_repeated_security_blocks', `${firstRecord.dataset}|${entity}`),
             detectionId: 'cloudflare_repeated_security_blocks',
             title: `Repeated Cloudflare ${firstRecord.dataset.replace(/_/g, ' ')} blocks affecting ${entity}`,
-            description: `${group.length} returned Cloudflare block or deny event(s) for the same available resource or actor in the collected batch. This is an aggregated provider pattern, not proof of a successful attack.`,
+            description: `${group.length} returned Cloudflare block or deny event(s) for the same resource and actor within a 30-minute interval. This is an aggregated provider pattern, not proof of a successful attack.`,
             impact: 'Repeated security blocks may indicate hostile probing, an application issue, or an overly broad policy. The available events show blocking, not successful compromise.',
             severity: 'unassessed',
             confidence: 'medium',
@@ -147,7 +157,9 @@ function buildCloudflareLogpushRawAlerts(events = []) {
             id: `cloudflare-logpush-${text(event.eventKey || event.sourceEventId || index).slice(0, 180)}`,
             title: `Cloudflare ${dataset} ${action} event`,
             description: [event.user, event.resource, event.ipAddress, event.policy].filter(Boolean).join(' | ') || 'Cloudflare Logpush returned a security event.',
-            severity: /block|deny|drop|challenge|reject|quarantine/i.test(action) ? 'medium' : 'low',
+            severity: event.raw?.severity ?? null,
+            sourceSeverity: event.raw?.severity ?? null,
+            rawPayload: event.raw || null,
             status: 'observed',
             created: event.eventTime || null,
             eventTime: event.eventTime || null,
@@ -185,9 +197,11 @@ function buildCloudflareApiFindings(summary = {}, { minimumRepeatedAccessDenials
     const deniedGroups = new Map();
     (Array.isArray(summary.accessLogs) ? summary.accessLogs : []).forEach(log => {
         if (!isBlocked(log)) return;
-        const key = [log.appName || 'unknown-app', log.userEmail || log.ipAddress || 'unknown-actor'].join('|').toLowerCase();
+        const time = Date.parse(log.timestamp);
+        if (!Number.isFinite(time) || !log.appName || !(log.userEmail || log.ipAddress)) return;
+        const key = [log.appName, log.userEmail || log.ipAddress, Math.floor(time / 1800000)].join('|').toLowerCase();
         const group = deniedGroups.get(key) || [];
-        group.push(log);
+        if (!group.some(item => (item.id || JSON.stringify(item)) === (log.id || JSON.stringify(log)))) group.push(log);
         deniedGroups.set(key, group);
     });
     deniedGroups.forEach(group => {
@@ -199,7 +213,7 @@ function buildCloudflareApiFindings(summary = {}, { minimumRepeatedAccessDenials
             id: findingId('cloudflare_repeated_access_denials', `${resource}|${actor}`),
             detectionId: 'cloudflare_repeated_access_denials',
             title: `Repeated Cloudflare Access denials for ${resource}`,
-            description: `${group.length} denied or blocked Access request(s) for ${actor} were returned in the current Cloudflare collection. This does not establish unauthorised access or compromise.`,
+            description: `${group.length} denied or blocked Access request(s) for ${actor} were returned in the same 30-minute interval. This does not establish unauthorised access or compromise.`,
             impact: 'Repeated denials can indicate a user access problem, probing, or a policy issue. The returned records show denied requests rather than successful access.',
             severity: 'unassessed',
             confidence: 'medium',
@@ -244,6 +258,7 @@ function buildCloudflareApiFindings(summary = {}, { minimumRepeatedAccessDenials
 }
 
 module.exports = {
+    parseCloudflareLogpushPayload,
     SUPPORTED_DATASETS,
     normaliseCloudflareLogpushRecord,
     normaliseCloudflareLogpushPayload,

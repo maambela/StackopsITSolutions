@@ -15,7 +15,7 @@ test('normalises supported Cloudflare Logpush records and rejects unsupported da
     assert.equal(records[0].cloudflareAccountId, 'account-1');
     assert.equal(records[0].eventKey, 'firewall_events:ray-1');
     assert.equal(records[0].resource, 'app.example.com');
-    assert.deepEqual(normaliseCloudflareLogpushPayload([{ hello: 'world' }], { dataset: 'http_requests' }), []);
+    assert.deepEqual(normaliseCloudflareLogpushPayload([{ hello: 'world' }], { dataset: 'unsupported_dataset' }), []);
 });
 
 test('aggregates current Cloudflare API Access denials without requiring Logpush', () => {

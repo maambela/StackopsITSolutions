@@ -1,3 +1,7 @@
+const { createRawEvidenceJournal } = require('./services/intelligence/raw-evidence-journal');
+const { createRawEvidencePoller } = require('./services/intelligence/raw-evidence-poller');
+const { parseCloudflareLogpushPayload } = require('./services/intelligence/cloudflare-logpush');
+const { rawSecurityRecord, uniqueRawRecords } = require('./services/intelligence/raw-security-records');
 const bcrypt = require('bcryptjs');
 const express = require('express');
 const mysql = require('mysql2/promise');
@@ -130,6 +134,7 @@ let networkEvidenceService = null;
 let backupEvidenceService = null;
 let applicationsEvidenceService = null;
 let securityEvidenceService = null;
+let rawEvidenceJournal = null;
 let cloudflareLogpushStore = null;
 let governanceEvidenceService = null;
 let complianceEvidenceService = null;
@@ -657,6 +662,9 @@ async function fetchAppRoleAssignments(token, servicePrincipalId) {
 }
 
 const app = express();
+// Before the JSON parser: Cloudflare sends NDJSON and gzipped files, including
+// destination-validation probes. express.raw inflates Content-Encoding: gzip.
+app.use('/api/webhooks/cloudflare-logpush', express.raw({ type: () => true, limit: '20mb' }));
 // Middleware for parsing bodies with raw support (critical for payment signatures)
 app.use(express.json({
     verify: (req, res, buf) => {
@@ -3448,7 +3456,7 @@ function buildCloudflareReportSignals(inputData = null) {
         });
 
     Object.entries(data.sections || {}).forEach(([key, section]) => {
-        if (!section || !['error', 'permission_unavailable'].includes(section.status)) return;
+        if (!section || !['error', 'permission_unavailable', 'unavailable'].includes(section.status)) return;
         addSignal({
             title: `Cloudflare ${section.label || key} evidence unavailable`,
             detail: section.message || 'Cloudflare returned an incomplete section for this control.',
@@ -11423,7 +11431,7 @@ async function fetchBackupRecoveryPayloadFromApi(tokenOverride = null, { signal 
     const exchangeStorageGB = parseFloat((exchangeStorageBytes / (1024 ** 3)).toFixed(1));
 
     const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15));
     const allUsers = [...oneDriveUsers, ...exchangeUsers];
     const userActivity = new Map();
     allUsers.forEach(u => {
@@ -14269,10 +14277,6 @@ const SECURITY_SIGNINS_FETCH_TIMEOUT_MS = Math.max(
     Number(process.env.SECURITY_SIGNINS_FETCH_TIMEOUT_MS) || 60000
 );
 
-const SECURITY_SIGNINS_MAX_PAGES = Math.max(
-    1,
-    Math.min(25, Number(process.env.SECURITY_SIGNINS_MAX_PAGES) || 3)
-);
 
 const SECURITY_SIGNINS_PAGE_DELAY_MS = Math.max(
     0,
@@ -14298,11 +14302,12 @@ async function fetchGraphJsonWithTimeout({
     stage,
     label,
     optional = false,
-    expectedUnavailableStatuses = []
+    expectedUnavailableStatuses = [],
+    collection
 }) {
     try {
         console.log(`[security_alerts:${stage}:start] ${label}...`);
-        const result = await fetchGraphCollectionWithRetry({
+        const result = await (collection?.graph || fetchGraphCollectionPagesWithRetry)({
             url,
             token,
             timeoutMs,
@@ -14340,46 +14345,20 @@ async function fetchGraphJsonWithTimeout({
     }
 }
 
-async function fetchSecurityAlertRows(token) {
+async function fetchSecurityAlertRows(token, options = {}) {
     const result = await fetchGraphJsonWithTimeout({
-        url: 'https://graph.microsoft.com/v1.0/security/alerts?$top=50&$orderby=createdDateTime desc',
-        token,
-        timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
-        stage: 'microsoft_graph_alerts_fetch',
-        label: 'Legacy alerts fetch',
-        optional: true,
-        expectedUnavailableStatuses: [400, 403, 404, 410]
+        collection: options.collection,
+        url: 'https://graph.microsoft.com/v1.0/security/alerts_v2?$top=100',
+        token, timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS,
+        stage: 'microsoft_graph_alerts_fetch', label: 'Security alerts v2'
     });
-
-    return {
-        alerts: (result.value || []).map(alert => ({ ...alert, stackctrlAlertSchema: 'legacy_alerts' })),
-        warnings: [
-            ...(result.warnings || []),
-            ...(Number(result.status) === 206
-                ? ['Legacy alerts returned HTTP 206 with no records; alert coverage is partial and cannot be treated as a clean result.']
-                : [])
-        ],
-        recordsFetched: result.recordsFetched,
-        ok: result.ok,
-        status: result.status,
-        aborted: result.aborted || false,
-        attempts: result.attempts || 0,
-        graphRequestId: result.graphRequestId || null,
-        clientRequestId: result.clientRequestId || null,
-        retryAfterMs: result.retryAfterMs ?? null,
-        pageCount: Number(result.pageCount) || 1,
-        pageLimitReached: Boolean(result.pageLimitReached),
-        hasMore: Boolean(result.hasMore),
-        errorCode: result.errorCode || null,
-        errorDetail: result.errorDetail || null,
-        sourceSchema: 'legacy_alerts',
-        legacyAlertsAudit: securityCollectionSourceAudit('/v1.0/security/alerts', result)
-    };
+    return { ...result, alerts: result.value || [], sourceSchema: 'alerts_v2' };
 }
 
-async function fetchSecurityIncidentRows(token) {
+async function fetchSecurityIncidentRows(token, options = {}) {
     const result = await fetchGraphJsonWithTimeout({
-        url: 'https://graph.microsoft.com/v1.0/security/incidents?$top=50&$orderby=createdDateTime desc',
+        collection: options.collection,
+        url: 'https://graph.microsoft.com/v1.0/security/incidents?$top=50',
         token,
         timeoutMs: SECURITY_INCIDENTS_FETCH_TIMEOUT_MS,
         stage: 'microsoft_graph_incidents_fetch',
@@ -14387,6 +14366,7 @@ async function fetchSecurityIncidentRows(token) {
     });
 
     return {
+        ...result,
         incidents: result.value,
         warnings: result.warnings,
         recordsFetched: result.recordsFetched,
@@ -14402,8 +14382,9 @@ async function fetchSecurityIncidentRows(token) {
     };
 }
 
-async function fetchSecurityThreatIndicatorRows(token) {
+async function fetchSecurityThreatIndicatorRows(token, options = {}) {
     const result = await fetchGraphJsonWithTimeout({
+        collection: options.collection,
         url: 'https://graph.microsoft.com/v1.0/security/tiIndicators?$top=50&$orderby=createdDateTime desc',
         token,
         timeoutMs: THREAT_INDICATORS_FETCH_TIMEOUT_MS,
@@ -14414,6 +14395,7 @@ async function fetchSecurityThreatIndicatorRows(token) {
     });
 
     return {
+        ...result,
         threats: result.value,
         warnings: result.warnings,
         recordsFetched: result.recordsFetched,
@@ -14430,35 +14412,17 @@ async function fetchSecurityThreatIndicatorRows(token) {
     };
 }
 
-async function fetchSecuritySignInRows(token) {
+async function fetchSecuritySignInRows(token, options = {}) {
     const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15));
 
-    const filter = `createdDateTime ge ${thirtyDaysAgo.toISOString().split('T')[0]}`;
-    const select = [
-        'id',
-        'createdDateTime',
-        'userPrincipalName',
-        'userId',
-        'appDisplayName',
-        'clientAppUsed',
-        'ipAddress',
-        'location',
-        'deviceDetail',
-        'status',
-        'conditionalAccessStatus',
-        'riskDetail',
-        'riskLevelAggregated',
-        'riskLevelDuringSignIn',
-        'riskState',
-        'resourceDisplayName'
-    ].join(',');
+    const filter = `createdDateTime ge ${options.range?.since || thirtyDaysAgo.toISOString()}${options.range?.until ? ` and createdDateTime le ${options.range.until}` : ''}`;
 
-    const result = await fetchGraphCollectionPagesWithRetry({
-        url: `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=${encodeURIComponent(filter)}&$top=1000&$orderby=createdDateTime desc&$select=${encodeURIComponent(select)}`,
+
+    const result = await (options.collection?.graph || fetchGraphCollectionPagesWithRetry)({
+        url: `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=${encodeURIComponent(filter)}&$top=1000&$orderby=createdDateTime desc`,
         token,
         timeoutMs: SECURITY_SIGNINS_FETCH_TIMEOUT_MS,
-        maxPages: SECURITY_SIGNINS_MAX_PAGES,
         betweenPagesDelayMs: SECURITY_SIGNINS_PAGE_DELAY_MS,
         label: 'Sign-ins fetch'
     });
@@ -14492,7 +14456,7 @@ async function fetchSecuritySignInRows(token) {
 }
 
 function normalizeSecuritySeverity(value) {
-    return String(value || 'medium').toLowerCase();
+    return String(value || 'unassessed').toLowerCase();
 }
 
 function normalizeSecurityStatus(value) {
@@ -14508,25 +14472,7 @@ function getSecuritySeverityRank(value) {
 }
 
 function getSecurityMitreMapping(item = {}) {
-    const text = `${item.title || ''} ${item.displayName || ''} ${item.description || ''} ${item.category || ''} ${item.failureReason || ''} ${item.riskLevel || ''}`.toLowerCase();
-
-    if (/phish|credential|password|spray|brute/.test(text)) {
-        return { tactic: 'Credential Access', technique: 'Phishing / Password Attack' };
-    }
-
-    if (/anonymous|tor|proxy|vpn|impossible|risky sign/.test(text)) {
-        return { tactic: 'Initial Access', technique: 'Suspicious Sign-in Infrastructure' };
-    }
-
-    if (/malware|trojan|ransomware|virus/.test(text)) {
-        return { tactic: 'Execution', technique: 'Malware Execution' };
-    }
-
-    if (/inbox rule|forwarding|mailbox/.test(text)) {
-        return { tactic: 'Collection', technique: 'Email Collection' };
-    }
-
-    return { tactic: 'Security Monitoring', technique: 'Alert / Incident Review' };
+    return { tactic: 'Provider supplied', technique: Array.isArray(item.mitreTechniques) && item.mitreTechniques.length ? item.mitreTechniques.join(', ') : 'Not provided' };
 }
 
 function countSecurityGroups(rows, getter) {
@@ -14601,41 +14547,8 @@ function extractInternalSecurityThreatIndicators({ alerts = [], incidents = [], 
         .slice(0, 25);
 }
 
-function cleanSecurityCollectionWarnings(warnings = [], { alerts = [], incidents = [], signIns = [], threats = [] } = {}) {
-    const hasAlerts = alerts.length > 0;
-    const hasIncidents = incidents.length > 0;
-    const hasSignIns = signIns.length > 0;
-    const hasThreats = threats.length > 0;
-    const hasPrimaryEvidence = hasAlerts || hasIncidents || hasSignIns;
-
-    return [...new Set((Array.isArray(warnings) ? warnings : [])
-        .map(warning => String(warning || '').trim())
-        .filter(Boolean))]
-        .filter(warning => {
-            const lower = warning.toLowerCase();
-
-            if (lower.includes('threat indicators')) {
-                return !hasThreats;
-            }
-
-            if (lower.includes('alerts fetch failed') || lower.includes('alerts_unavailable')) {
-                return !hasAlerts;
-            }
-
-            if (lower.includes('incidents fetch failed') || lower.includes('incidents_unavailable')) {
-                return !hasIncidents;
-            }
-
-            if (lower.includes('sign-ins fetch failed') || lower.includes('signins_unavailable')) {
-                return !hasSignIns;
-            }
-
-            if (lower.includes('partial_source_collection')) {
-                return !hasPrimaryEvidence;
-            }
-
-            return true;
-        });
+function cleanSecurityCollectionWarnings(warnings = []) {
+    return [...new Set((Array.isArray(warnings) ? warnings : []).map(warning => String(warning || '').trim()).filter(Boolean))];
 }
 
 function securityCollectionSourceAudit(endpoint, result = {}) {
@@ -14649,7 +14562,8 @@ function securityCollectionSourceAudit(endpoint, result = {}) {
         retryAfterMs: result.retryAfterMs ?? null,
         errorCode: result.errorCode || null,
         errorDetail: result.errorDetail || null,
-        completed: Boolean(result.ok),
+        pageCount: result.pageCount || 0,
+        completed: Boolean(result.ok && !result.hasMore && !result.warnings?.length),
         unavailable: Boolean(result.unavailable),
         partial: Boolean(result.hasMore || result.warnings?.length || Number(result.status) === 206)
     };
@@ -15112,7 +15026,15 @@ async function getSecurityWebhookConfig() {
     };
 }
 
-async function getCompanyScopedCloudflareSecuritySummary(companyId) {
+const activeCloudflareSecurityCollections = new Map();
+function getCompanyScopedCloudflareSecuritySummary(companyId, options = {}) {
+    const key = companyId + ':' + (options.range?.explicit ? JSON.stringify(options.range) : 'live');
+    if (activeCloudflareSecurityCollections.has(key)) return activeCloudflareSecurityCollections.get(key);
+    const pending = collectCompanyScopedCloudflareSecuritySummary(companyId, options).finally(() => activeCloudflareSecurityCollections.delete(key));
+    activeCloudflareSecurityCollections.set(key, pending);
+    return pending;
+}
+async function collectCompanyScopedCloudflareSecuritySummary(companyId, options = {}) {
     const configuredCompanyId = Number(
         await readWhatsAppConfigValue('SECURITY_ALERTS_CLOUDFLARE_COMPANY_ID')
         || await readWhatsAppConfigValue('SECURITY_ALERTS_WEBHOOK_COMPANY_ID')
@@ -15122,11 +15044,14 @@ async function getCompanyScopedCloudflareSecuritySummary(companyId) {
         error.code = 'CLOUDFLARE_SECURITY_TENANT_CONTEXT_UNAVAILABLE';
         throw error;
     }
-    return getCloudflareNetworkSecuritySummary({ getSecret });
+    return getCloudflareNetworkSecuritySummary({ getSecret, securityOnly: true, ...options });
 }
 
 async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
     if (!companyId) throw new Error('SECURITY_ALERTS_WEBHOOK_COMPANY_ID is required to store real-time alerts.');
+    rawEvidenceJournal?.collection(Number(companyId)).publish(provider,
+        provider === 'Microsoft Graph' ? '/v1.0/security/alerts_v2' : '/webhooks/cloudflare-security-alerts',
+        'alert', [alert.rawPayload || alert], { complete: false, status: 'receiving', recordsRetrieved: 1 });
     await persistRealtimeSecurityAlert(companyId, alert);
     if (isResolvedRealtimeSecurityAlert(alert)) {
         console.info(`[Security Webhook] Stored resolved ${provider} alert without WhatsApp notification.`, { id: alert.id });
@@ -15146,82 +15071,16 @@ async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
 }
 
 function buildCloudflarePollingSecurityAlerts(summary = {}) {
-    const alerts = [];
-    const seen = new Set();
-    const addAlert = ({ id, title, description, severity = 'medium', category, eventTime, user, ipAddress, domain }) => {
-        const key = `${id || ''}|${title}|${category || ''}|${user || ipAddress || domain || ''}|${eventTime || ''}`.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        alerts.push({
-            id: `cloudflare-poll-${String(id || alerts.length + 1).slice(0, 180)}`,
-            title,
-            description,
-            severity: normalizeSecuritySeverity(severity),
-            status: 'active',
-            created: eventTime || summary.fetchedAt || new Date().toISOString(),
-            eventTime: eventTime || summary.fetchedAt || new Date().toISOString(),
-            category: category || 'Cloudflare Security',
-            source: 'Cloudflare',
-            reportingSecuritySystem: 'Cloudflare',
-            vendor: 'Cloudflare',
-            user: user || null,
-            ipAddress: ipAddress || null,
-            domain: domain || null,
-            cloudflareApiSignal: true
-        });
-    };
-
-    // These are real observations/finding feeds. Configuration gaps and every
-    // routine log line are intentionally excluded to avoid client alert noise.
-    (Array.isArray(summary.accessLogs) ? summary.accessLogs : [])
-        .filter(log => /block|deny|fail/i.test(String(log.action || log.status || '')))
-        .forEach((log, index) => addAlert({
-            id: log.id || `access-${index}`,
-            title: `Cloudflare Access ${log.action || 'blocked'} event`,
-            description: [log.userEmail, log.appName, log.country, log.ipAddress].filter(Boolean).join(' | ') || 'Cloudflare Access recorded a denied or blocked request.',
-            severity: 'high',
-            category: 'Access',
-            eventTime: log.timestamp,
-            user: log.userEmail,
-            ipAddress: log.ipAddress,
-            domain: log.appName
-        }));
-
-    // Audit rows are raw provider evidence in their own right.  Keep only
-    // security-control changes here; a general account-audit stream would be
-    // misleadingly broad for the Security Alerts ledger.
-    (Array.isArray(summary.auditLogs) ? summary.auditLogs : []).forEach((record, index) => {
-        const action = String(record.action || record.action_type || record.type || record.operation || '').trim();
-        const resource = String(record.resource || record.resource_type || record.zone_name || record.zone || record.name || '').trim();
-        if (!/create|update|delete|modify|change/i.test(action) || !/security|firewall|waf|gateway|access|policy|dns|rule/i.test(`${action} ${resource}`)) return;
-        addAlert({
-            id: record.id || record.uuid || `audit-${index}`,
-            title: 'Cloudflare security configuration change observed',
-            description: `Cloudflare audit record: ${action || 'change'}${resource ? ` affecting ${resource}` : ''}.`,
-            severity: 'medium',
-            category: 'Cloudflare Audit',
-            eventTime: record.created_at || record.timestamp || record.createdAt || record.updatedAt,
-            user: record.actor?.email || record.user_email || record.email || null,
-            domain: resource || null
-        });
-    });
-
-    const addFindingRows = (rows, category, fallbackTitle) => {
-        (Array.isArray(rows) ? rows : []).forEach((finding, index) => addAlert({
-            id: finding.id || finding.uuid || `${category}-${index}`,
-            title: finding.title || finding.name || fallbackTitle,
-            description: finding.description || finding.status || `${category} reported a security finding.`,
-            severity: /critical/i.test(String(finding.severity || finding.priority || '')) ? 'critical' : /high/i.test(String(finding.severity || finding.priority || '')) ? 'high' : 'medium',
-            category,
-            eventTime: finding.createdAt || finding.created_on || finding.timestamp || finding.updatedAt,
-            domain: finding.domain || finding.zoneName || finding.zone
-        }));
-    };
-
-    addFindingRows(summary.casbFindings, 'CASB Dashboard', 'Cloudflare CASB finding');
-    addFindingRows(summary.securityInsights, 'Security Dashboard', 'Cloudflare security insight');
-    addFindingRows(summary.applicationSecurityReports, 'Application Security', 'Cloudflare application security finding');
-    return alerts;
+    // Only provider findings belong in the alert input to correlation. Access/audit events stay raw.
+    return (summary.rawSecurityRecords || []).filter(row => ['securityInsights', 'casbFindings'].includes(row.recordType)).map(({ payload, endpoint, recordType }) => ({
+        id: payload.id || payload.uuid || crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex'),
+        title: payload.title || payload.name || payload.description || 'Not provided',
+        description: payload.description || null,
+        severity: payload.severity ?? null, sourceSeverity: payload.severity ?? null,
+        status: payload.status ?? null, created: payload.timestamp || payload.created_at || payload.created_on || null,
+        category: payload.category || null, source: 'Cloudflare', reportingSecuritySystem: 'Cloudflare', vendor: 'Cloudflare',
+        cloudflareApiSignal: true, endpoint, recordType, rawPayload: payload
+    }));
 }
 
 async function buildSecurityEventsPayloadFromApi(options = {}) {
@@ -15236,6 +15095,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         throw error;
     }
 
+    options = { ...options, range: options.range || securityEvidenceRange() };
+    const collection = options.collection || rawEvidenceJournal?.collection(companyId, { onEvent: options.onEvent, range: options.range });
+    const collectionOptions = { collection, range: options.range };
     const allMetrics = {
         recordsFetched: 0,
         recordsStored: 0,
@@ -15248,6 +15110,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     const stages = [{ stage: 'security_alerts:start', status: 'complete', at: new Date().toISOString() }];
 
+    const cloudflarePending = getCompanyScopedCloudflareSecuritySummary(companyId, collectionOptions);
+    // Attach a handler immediately while Graph authentication is still pending.
+    cloudflarePending.catch(() => {});
     let token;
 
     try {
@@ -15267,27 +15132,24 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
         console.error('[security_alerts:complete_or_completed_with_warnings_or_failed] failed_terminal:', error.message);
 
-        error.securityAlertsStatus = 'failed_terminal';
-        error.securityAlertsStage = 'graph_credentials';
-        error.securityAlertsStages = stages;
-        throw error;
+        token = null; // Cloudflare remains independently available when Graph credentials fail.
     }
 
     console.log('[security_alerts:prepare_fetch:start] Preparing Microsoft Graph and Cloudflare API security sources');
 
     const sourceSettled = await Promise.allSettled([
-        fetchSecurityAlertRows(token),
-        fetchSecurityIncidentRows(token),
-        fetchSecurityThreatIndicatorRows(token),
-        fetchSecuritySignInRows(token),
-        getCompanyScopedCloudflareSecuritySummary(companyId).then(summary => ({
+        fetchSecurityAlertRows(token, collectionOptions),
+        fetchSecurityIncidentRows(token, collectionOptions),
+        fetchSecurityThreatIndicatorRows(token, collectionOptions),
+        fetchSecuritySignInRows(token, collectionOptions),
+        cloudflarePending.then(summary => ({
             label: 'Cloudflare security polling',
             summary,
-            warnings: [],
-            recordsFetched: 0,
+            warnings: (summary.retrieval || []).filter(item => item.error).map(item => `${item.endpoint}: ${item.error}`),
+            recordsFetched: summary.rawSecurityRecords?.length || 0,
             ok: true
         })),
-        fetchMicrosoftIdentityRiskEvidence(token)
+        fetchMicrosoftIdentityRiskEvidence(token, { graph: collection?.graph })
     ]);
 
     function resolvedSource(index, fallback) {
@@ -15369,6 +15231,22 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ? buildCloudflarePollingSecurityAlerts(cloudflareResult.summary)
         : [];
 
+    const retrievedAt = new Date().toISOString();
+    const rawRecords = uniqueRawRecords([
+        ...[
+            [alerts, '/v1.0/security/alerts_v2', 'alert'],
+            [incidents, '/v1.0/security/incidents', 'incident'],
+            [externalThreatIndicators, '/v1.0/security/tiIndicators', 'indicator'],
+            [signIns, '/v1.0/auditLogs/signIns', 'signin'],
+            [riskDetections, '/v1.0/identityProtection/riskDetections', 'riskDetection'],
+            [riskyUsers, '/v1.0/identityProtection/riskyUsers', 'riskyUser']
+        ].flatMap(([rows, endpoint, recordType]) => rows.map(row => rawSecurityRecord(row, {
+            provider: 'Microsoft Graph', endpoint, recordType, companyId, retrievedAt
+        }))),
+        ...(cloudflareResult.summary?.rawSecurityRecords || []).map(({ payload, endpoint, recordType }) =>
+            rawSecurityRecord(payload, { provider: 'Cloudflare', endpoint, recordType, companyId, retrievedAt }))
+    ]);
+
     allMetrics.recordsFetched =
         (alertsResult.recordsFetched || 0) +
         (incidentsResult.recordsFetched || 0) +
@@ -15390,20 +15268,21 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         const entities = extractMicrosoftAlertEntities(alert);
         return {
             id: alert.id,
+            mitreTechniques: alert.mitreTechniques || [],
             title: alert.title || alert.alertName || alert.displayName || 'Unknown Alert',
             description: alert.description || '',
             severity: normalizeSecuritySeverity(alert.severity),
             sourceSeverity: alert.severity || null,
             status: normalizeSecurityStatus(alert.status),
-            created: alert.createdDateTime || new Date().toISOString(),
-            eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
+            created: alert.createdDateTime || null,
+            eventTime: alert.eventDateTime || alert.createdDateTime || null,
             category: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
             apiCategory: (Array.isArray(alert.categories) ? alert.categories : []).join(', ') || alert.category || alert.classification || null,
             apiSource: alert.serviceSource || alert.productName || alert.vendorInformation?.provider || null,
             vendor: alert.vendorInformation?.provider || alert.serviceSource || 'Microsoft',
             reportingSecuritySystem: getSecurityReportingSystem(alert),
             source: getSecurityReportingSystem(alert),
-            sourceSchema: alert.stackctrlAlertSchema || 'legacy_alerts',
+            sourceSchema: alertsResult.sourceSchema || 'alerts_v2',
             user: (alert.userStates || [])[0]?.accountName ||
                 alert.userPrincipalName ||
                 entities.userPrincipalName ||
@@ -15435,8 +15314,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         severity: normalizeSecuritySeverity(incident.severity),
         sourceSeverity: incident.severity || null,
         status: normalizeSecurityStatus(incident.status || 'active'),
-        created: incident.createdDateTime || new Date().toISOString(),
-        updated: incident.lastUpdateDateTime || incident.lastUpdatedDateTime || new Date().toISOString(),
+        created: incident.createdDateTime || null,
+        updated: incident.lastUpdateDateTime || incident.lastUpdatedDateTime || null,
         assignedTo: incident.assignedTo || 'Unassigned',
         redirectUrl: incident.incidentUrl || incident.webUrl || '#',
         apiCategory: incident.determination || incident.classification || null,
@@ -15465,7 +15344,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             userId: signIn.userId || null,
             user: signIn.userPrincipalName || 'Unknown',
             userPrincipalName: signIn.userPrincipalName || 'Unknown',
-            timestamp: signIn.createdDateTime || new Date().toISOString(),
+            timestamp: signIn.createdDateTime || null,
             eventTime: signIn.createdDateTime || null,
             ipAddress: signIn.ipAddress || 'Unknown',
             location: signIn.location?.city
@@ -15540,7 +15419,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             riskDetections: identityRiskResult.sources?.riskDetections?.status || 'unavailable',
             cloudflare: !cloudflareResult.ok
                 ? 'unavailable'
-                : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable'].includes(section?.status))
+                : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable', 'unavailable'].includes(section?.status))
                     ? 'partial'
                     : 'complete'
         }
@@ -15618,11 +15497,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         }
     });
 
-    const usersUnderAttack = Object.entries(userFailureMap)
-        .filter(([, count]) => count >= 3)
-        .map(([user, failedAttempts]) => ({ user, failedAttempts }))
-        .sort((a, b) => b.failedAttempts - a.failedAttempts)
-        .slice(0, 10);
+    // Failed sign-ins alone never establish an attack.
+    const usersUnderAttack = [];
 
     const severityScores = { critical: 25, high: 15, medium: 5, low: 2 };
     let securityScore = 100;
@@ -15650,7 +15526,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             type: 'signin',
             message: `${signIn.status} sign-in: ${signIn.user} from ${signIn.location}`,
             timestamp: signIn.timestamp,
-            severity: signIn.status === 'Failed' ? 'medium' : 'low'
+            severity: 'unassessed'
         }))
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -15671,7 +15547,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             ...signIn,
             recordType: 'signin',
             name: `${signIn.status} sign-in`,
-            severity: signIn.status === 'Failed' ? 'medium' : 'low',
+            severity: 'unassessed',
             timestamp: signIn.timestamp
         })),
         ...processedThreats.map(threat => ({
@@ -15752,7 +15628,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             title: signIn.failureReason || 'Suspicious sign-in',
             subtitle: `${signIn.ipAddress} | ${signIn.location}`,
             timestamp: signIn.timestamp,
-            severity: signIn.status === 'Failed' ? 'medium' : 'low'
+            severity: 'unassessed'
         });
     });
 
@@ -15868,7 +15744,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
 
     const cloudflareSourceStatus = !cloudflareResult.ok
         ? 'unavailable'
-        : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable'].includes(section?.status))
+        : cloudflareResult.warnings?.length || Object.values(cloudflareResult.summary?.sections || {}).some(section => ['error', 'permission_unavailable', 'unavailable'].includes(section?.status))
             ? 'partial'
             : 'available';
     const cloudflareSourceReason = !cloudflareResult.ok
@@ -15877,27 +15753,27 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             ? [
                 ...(cloudflareResult.warnings || []),
                 ...Object.values(cloudflareResult.summary?.sections || {})
-                    .filter(section => ['error', 'permission_unavailable'].includes(section?.status))
+                    .filter(section => ['error', 'permission_unavailable', 'unavailable'].includes(section?.status))
                     .map(section => section?.message || `${section?.label || 'Cloudflare section'} is unavailable.`)
             ].filter(Boolean).slice(0, 3).join(' ')
             : cloudflareAlerts.length
                 ? 'Cloudflare returned raw security evidence for this collection.'
                 : 'Cloudflare collection completed but did not return a raw security alert in this collection.';
     const rawEvidence = {
-        rawRecordCount: processedAlerts.length + processedIncidents.length + suspiciousSignIns.length + processedThreats.length,
+        rawRecordCount: rawRecords.length,
         rawEvidenceUpdatedAt: new Date().toISOString(),
         correlationEvaluatedAt: new Date().toISOString(),
         correlationStatus: 'evaluated',
         cloudflare: {
             status: cloudflareSourceStatus,
             reason: cloudflareSourceReason,
-            recordsReturned: cloudflareAlerts.length,
+            recordsReturned: rawRecords.filter(row => row.provider === 'Cloudflare').length,
             logpushRecordsReturned: 0
         }
     };
 
     const payload = {
-        success: hasPrimaryEvidence,
+        success: hasPrimaryEvidence || rawRecords.length > 0 || [alertsResult, incidentsResult, signInsResult, cloudflareResult].some(result => result.ok),
         fetchedAt: new Date().toISOString(),
         collectionStatus: allWarnings.length ? 'completed_with_warnings' : 'complete',
         warnings: allWarnings,
@@ -15910,7 +15786,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
                     status: alertsResult.warnings?.length ? 'warning' : 'complete',
-                    audit: securityCollectionSourceAudit('/v1.0/security/alerts', alertsResult),
+                    audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', alertsResult),
                     sourceSchema: alertsResult.sourceSchema || 'legacy_alerts',
                     legacyAlertsAudit: alertsResult.legacyAlertsAudit || null,
                     entityDiagnostics: anonymousAlertEntityDiagnostics
@@ -15971,6 +15847,9 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         threatIndicators: processedThreats,
         findings,
         rawEvidence,
+        rawRecords,
+        displayTimeZone: process.env.APP_TIME_ZONE || 'Africa/Johannesburg',
+        retrieval: { sources: collection?.health() || [], cloudflare: cloudflareResult.summary?.retrieval || [], limitations: ['Cloudflare adaptive firewall analytics may be sampled by the provider. Unsampled events require Logpush; API permissions, plan retention and reported failed windows determine coverage.'] },
         scenarioCoverage,
         identityRisk: {
             riskDetections: processedRiskDetections,
@@ -16004,7 +15883,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         processedRiskyUsers.length +
         findings.length;
 
-    allMetrics.recordsStored = allMetrics.recordsPrepared;
+    allMetrics.recordsStored = 0; // Storage is asynchronous; collection does not confirm persistence.
     allMetrics.recordsOmitted = Math.max(0, allMetrics.recordsFetched - allMetrics.recordsPrepared);
 
     if (allMetrics.recordsOmitted > 0) {
@@ -16062,7 +15941,15 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     return payload;
 }
 
+const activeRawSecurityCollections = new Map();
 async function fetchSecurityEventsPayloadFromApi(options = {}) {
+    if (options.skipFindingAiAssessment && options.skipWhatsAppAuto) {
+        const scope = String(options.companyId) + ':' + (options.range?.explicit ? JSON.stringify(options.range) : 'live');
+        if (activeRawSecurityCollections.has(scope)) return activeRawSecurityCollections.get(scope);
+        const pending = buildSecurityEventsPayloadFromApi(options).finally(() => activeRawSecurityCollections.delete(scope));
+        activeRawSecurityCollections.set(scope, pending);
+        return pending;
+    }
     try {
         return await promiseWithTimeout(
             buildSecurityEventsPayloadFromApi(options),
@@ -16106,9 +15993,9 @@ app.post('/api/webhooks/microsoft-security-alerts', async (req, res) => {
         setImmediate(async () => {
             for (const { id } of notifications) {
                 try {
-                    const token = await getMicrosoftGraphToken({ securityAlerts: true });
+                    const token = await getSecurityAlertsGraphTokenForCompany(config.companyId);
                     const graphAlert = await fetchMicrosoftGraphJson(
-                        `https://graph.microsoft.com/v1.0/security/alerts/${encodeURIComponent(id)}`,
+                        `https://graph.microsoft.com/v1.0/security/alerts_v2/${encodeURIComponent(id)}`,
                         token,
                         `Microsoft Graph webhook alert ${id}`,
                         { shared: false, retries: 1 }
@@ -16165,11 +16052,13 @@ app.post('/api/webhooks/cloudflare-logpush/:accountId/:dataset', async (req, res
             console.warn('[Cloudflare Logpush] Rejected delivery for an unknown account mapping.');
             return res.sendStatus(403);
         }
+        const payload = parseCloudflareLogpushPayload(req.body);
+        if (payload?.content === 'tests' && Object.keys(payload).length === 1) return res.status(200).json({ success: true, validation: true });
         const result = await cloudflareLogpushStore.ingest({
             companyId: mapping.companyId,
             accountId: mapping.accountId,
             dataset: req.params.dataset,
-            payload: req.body
+            payload
         });
         if (!result.received) {
             return res.status(400).json({ success: false, message: 'No supported Cloudflare Logpush records were supplied.' });
@@ -16227,7 +16116,39 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
  * Route: GET /api/security-events
  * Comprehensive SOC dashboard aggregating alerts, incidents, threat indicators, and sign-ins
  */
+function securityEvidenceRange(query = {}) {
+    const until = query.until ? new Date(query.until) : new Date();
+    const since = query.since ? new Date(query.since) : new Date(until.getTime() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15) * 86400000);
+    if (!Number.isFinite(since.getTime()) || !Number.isFinite(until.getTime()) || since >= until) throw new Error('Invalid evidence date range');
+    return { since: since.toISOString(), until: until.toISOString(), explicit: Boolean(query.since || query.until) };
+}
+app.get('/api/security-events/live', authenticateToken, (req, res) => {
+    const tenant = getTenantByEmail(req.user.email);
+    if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
+    rawEvidencePoller.register(tenant.companyId);
+    res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+    const send = event => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(event) + '\n'); };
+    send({ type: 'start', companyId: tenant.companyId });
+    const unsubscribe = rawEvidenceJournal.subscribe(tenant.companyId, send);
+    const heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15000);
+    res.on('close', () => { unsubscribe(); clearInterval(heartbeat); });
+});
+for (const kind of ['history', 'health']) app.get('/api/security-events/' + kind, authenticateToken, async (req, res) => {
+    const tenant = getTenantByEmail(req.user.email);
+    if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
+    res.set('Cache-Control', 'no-store');
+    try {
+        const range = securityEvidenceRange(req.query);
+        const data = kind === 'health' ? await rawEvidenceJournal.health(tenant.companyId)
+            : await rawEvidenceJournal.history(tenant.companyId, { after: String(req.query.after || ''), since: range.since, until: range.until });
+        res.json({ success: true, ...data });
+    } catch (error) { res.status(503).json({ success: false, message: error.message }); }
+});
 app.get('/api/security-events', authenticateToken, async (req, res) => {
+    let heartbeat, unsubscribe;
+    const streaming = req.query.stream === '1';
+    const send = event => { if (streaming && !res.destroyed && !res.writableEnded) res.write(JSON.stringify(event) + '\n'); };
     try {
         const userEmail = req.user.email;
         console.log(`[Security Events] Fetching dashboard data for: ${userEmail}`);
@@ -16241,11 +16162,24 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
             });
         }
 
+        const range = securityEvidenceRange(req.query);
+        rawEvidencePoller.register(tenant.companyId);
+        if (streaming) {
+            res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+            res.flushHeaders();
+            unsubscribe = rawEvidenceJournal.subscribe(tenant.companyId, send);
+            send({ type: 'start', companyId: tenant.companyId, requestedRange: range });
+            heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15000);
+        }
         const payload = await fetchSecurityEventsPayloadFromApi({
             companyId: tenant.companyId,
-            tenantKey: tenant.tenantId || tenant.clientId
+            tenantKey: tenant.tenantId || tenant.clientId,
+            range, onEvent: send,
+            skipFindingAiAssessment: true,
+            skipWhatsAppAuto: true
         });
-        const payloadWithRealtimeAlerts = await mergeStoredRealtimeSecurityAlerts(tenant.companyId, payload);
+        const payloadWithRealtimeAlerts = payload;
+        if (!res.headersSent) res.set('Cache-Control', 'no-store');
         console.log(`[Security Events] Compiled cached/live SOC payload for ${userEmail}:`, {
             alerts: payloadWithRealtimeAlerts.alerts.length,
             incidents: payloadWithRealtimeAlerts.incidents.length,
@@ -16264,6 +16198,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
             }).catch(error => console.warn('[Security Evidence] Dashboard response could not be stored:', error.message));
         }
 
+        if (streaming) { send({ type: 'complete', payload: { ...dashboardPayload, source: 'api' } }); res.end(); return; }
         res.json({
             ...dashboardPayload,
             tenant: tenant.clientId,
@@ -16273,11 +16208,12 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('[Security Events] ❌ Error:', error.message);
         
+        if (streaming && res.headersSent) { send({ type: 'error', message: error.message }); res.end(); return; }
         res.status(500).json({ 
             error: 'Failed to fetch security events data',
             message: error.message
         });
-    }
+    } finally { clearInterval(heartbeat); unsubscribe?.(); }
 });
 
 /**
@@ -17816,12 +17752,39 @@ const applicationsEvidenceAutomation = createApplicationsEvidenceAutomation({
     intervalMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_INTERVAL_MS || (60 * 60 * 1000),
     startupDelayMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_STARTUP_DELAY_MS || (15 * 60 * 1000)
 });
+rawEvidenceJournal = createRawEvidenceJournal({ pool });
+rawEvidenceJournal.ensureSchema().catch(error => console.error('[Raw evidence] Schema unavailable:', error.message));
+const rawEvidencePoller = createRawEvidencePoller({
+    enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_RAW_POLL_ENABLED || 'true').toLowerCase()),
+    intervalMs: process.env.SECURITY_RAW_POLL_INTERVAL_MS || 30000,
+    discover: async () => {
+        const [rows] = await pool.query(`SELECT DISTINCT company.ID AS CompanyID FROM Companies company LEFT JOIN StackCTRLClientCapabilities capability ON capability.CompanyID = company.ID AND capability.SourceKey = 'security_alerts' WHERE LOWER(company.CompanyName) LIKE '%sunbird%' OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1)`);
+        return rows.map(row => Number(row.CompanyID));
+    },
+    sources: {
+        ...Object.fromEntries(Object.entries({ alerts: fetchSecurityAlertRows, incidents: fetchSecurityIncidentRows, signIns: fetchSecuritySignInRows,
+            indicators: fetchSecurityThreatIndicatorRows, identityRisk: (token, options) => fetchMicrosoftIdentityRiskEvidence(token, { graph: options.collection.graph }) })
+            .map(([name, collect]) => [name, async companyId => {
+                const range = securityEvidenceRange();
+                const collection = rawEvidenceJournal.collection(companyId, { range });
+                const token = await getSecurityAlertsGraphTokenForCompany(companyId);
+                return collect(token, { collection, range });
+            }])),
+        cloudflare: companyId => {
+            const range = securityEvidenceRange();
+            return getCompanyScopedCloudflareSecuritySummary(companyId, { range, collection: rawEvidenceJournal.collection(companyId, { range }) });
+        }
+    }
+});
 securityEvidenceService = createSecurityEvidenceStore({ pool });
 const securityEvidenceSchemaReady = securityEvidenceService.ensureSchema().catch(error => {
     console.error('[Security Evidence] Schema initialization failed:', error.message);
     return { error };
 });
-cloudflareLogpushStore = createCloudflareLogpushStore({ pool });
+cloudflareLogpushStore = createCloudflareLogpushStore({ pool, onRecords: ({ companyId, accountId, dataset, records }) => {
+    rawEvidenceJournal.collection(Number(companyId)).publish('Cloudflare', '/logpush/' + accountId + '/' + dataset, dataset, records.map(row => row.raw),
+        { complete: false, status: 'receiving', limitation: 'Logpush delivery is unsampled when configured without filters or sampling. Only delivered batches are confirmed.', recordsRetrieved: records.length });
+} });
 const cloudflareLogpushSchemaReady = cloudflareLogpushStore.ensureSchema().catch(error => {
     console.error('[Cloudflare Logpush] Schema initialization failed:', error.message);
     return { error };
@@ -19132,6 +19095,7 @@ if (require.main === module) {
     backupEvidenceAutomation.start();
     applicationsEvidenceAutomation.start();
     securityEvidenceAutomation.start();
+    rawEvidencePoller.start();
     governanceEvidenceAutomation.start();
     complianceEvidenceAutomation.start();
     operationsEvidenceAutomation.start();
@@ -19163,6 +19127,7 @@ if (require.main === module) {
     backupEvidenceAutomation.stop();
     applicationsEvidenceAutomation.stop();
     securityEvidenceAutomation.stop();
+    rawEvidencePoller.stop();
     governanceEvidenceAutomation.stop();
     complianceEvidenceAutomation.stop();
     operationsEvidenceAutomation.stop();

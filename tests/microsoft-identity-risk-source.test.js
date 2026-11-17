@@ -47,7 +47,7 @@ test('identity risk collection surfaces permission or licensing failures without
     assert.match(result.warnings.join(' '), /Risky users unavailable.*403/);
 });
 
-test('identity risk collection marks truncated Graph result pages as partial', async () => {
+test('identity risk collection marks repeated Graph next links as partial', async () => {
     const result = await fetchGraphCollection({
         token: 'graph-token',
         path: IDENTITY_RISK_ENDPOINTS.riskyUsers,
@@ -57,5 +57,5 @@ test('identity risk collection marks truncated Graph result pages as partial', a
 
     assert.equal(result.status, 'partial');
     assert.equal(result.recordsFetched, 1);
-    assert.match(result.warnings.join(' '), /first 1 records/);
+    assert.match(result.warnings.join(' '), /repeated or invalid next link/);
 });

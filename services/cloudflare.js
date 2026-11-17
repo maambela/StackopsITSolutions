@@ -1,3 +1,5 @@
+const { fetchFirewallEvents } = require('./intelligence/cloudflare-firewall-events');
+const { fetchCloudflarePages } = require('./intelligence/cloudflare-collection');
 const axios = require('axios');
 
 const CLOUDFLARE_BASE_URL = 'https://api.cloudflare.com/client/v4';
@@ -34,6 +36,7 @@ const CLOUDFLARE_PERMISSION_FAMILIES = [
 const FAMILY_BY_KEY = Object.freeze(Object.fromEntries(CLOUDFLARE_PERMISSION_FAMILIES.map(family => [family.key, family])));
 
 const CLOUDFLARE_ENDPOINTS = [
+  { key: 'notificationHistory', familyKey: 'securityInsights', label: 'Notification history', path: accountId => `/accounts/${accountId}/alerting/v3/history`, query: () => ({ per_page: 100 }) },
   { key: 'account', familyKey: 'zeroTrust', label: 'Account Information', path: accountId => `/accounts/${accountId}` },
   { key: 'accountLogs', familyKey: 'accountLogs', label: 'Account Logs', emptyOnStatuses: [400, 404], path: accountId => `/accounts/${accountId}/logs/audit` },
   { key: 'auditLogs', familyKey: 'auditLogs', label: 'Audit Logs', path: accountId => `/accounts/${accountId}/audit_logs`, query: () => buildRecentCloudflareQuery({ per_page: 100 }) },
@@ -74,7 +77,7 @@ const CLOUDFLARE_ENDPOINTS = [
   { key: 'dlpProfiles', familyKey: 'zeroTrust', label: 'DLP Profiles', path: accountId => `/accounts/${accountId}/dlp/profiles` },
   { key: 'zones', familyKey: 'accountAnalytics', label: 'Zones', path: () => '/zones' }
 ];
-function buildRecentCloudflareQuery({ days = 30, limit = null, per_page = null } = {}) {
+function buildRecentCloudflareQuery({ days = Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15, limit = null, per_page = null } = {}) {
   const until = new Date().toISOString();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const query = { since, until, direction: 'desc' };
@@ -334,21 +337,42 @@ function summarizeSectionError(error, endpoint = {}) {
   const featureUnavailable = emptyStatus || status === 404 || /not found|resource\.not_found|invalid HTTP method or path/i.test(message);
 
   return {
-    status: permissionUnavailable ? 'permission_unavailable' : featureUnavailable ? 'empty' : 'error',
+    status: permissionUnavailable ? 'permission_unavailable' : featureUnavailable ? 'unavailable' : 'error',
     httpStatus: status,
     code,
-    message: permissionUnavailable ? 'Permission not available' : featureUnavailable ? 'No data configured' : message
+    message: permissionUnavailable ? 'Permission not available' : featureUnavailable ? 'Endpoint unavailable for this account'  : message
   };
 }
 
-async function fetchCloudflareEndpoint(client, endpoint, accountId) {
+async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}) {
   const method = String(endpoint.method || 'get').toLowerCase();
   const url = endpoint.path(accountId);
-  const query = typeof endpoint.query === 'function' ? endpoint.query(accountId) : endpoint.query;
-  const response = method === 'post'
-    ? await client.post(url, endpoint.body || {})
-    : await client.get(url, query ? { params: query } : undefined);
-  return response.data;
+  let query = typeof endpoint.query === 'function' ? endpoint.query(accountId) : endpoint.query;
+  if (endpoint.key === 'zones') query = { ...query, 'account.id': accountId };
+  if (['accessLogs', 'auditLogs', 'accountLogs', 'notificationHistory'].includes(endpoint.key)) {
+    const range = options.range || { since: new Date(Date.now() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15) * 86400000).toISOString(), until: new Date().toISOString() };
+    query = { ...query, since: range.since, ...(['notificationHistory', 'accountLogs'].includes(endpoint.key) ? { before: range.until } : { until: range.until }) };
+    if (['accessLogs', 'auditLogs', 'accountLogs'].includes(endpoint.key)) query.direction = 'desc';
+  }
+  if (method === 'post') return (await client.post(url, endpoint.body || {})).data;
+  const collector = endpoint.key === 'zones' ? null : options.collection;
+  const previous = collector?.getState('Cloudflare', url);
+  let latest = [];
+  let resumeQuery = previous?.continuation || null, head;
+  const recordKey = row => row.id || row.uuid || JSON.stringify(row);
+  if (previous?.continuation) {
+    head = await fetchCloudflarePages(client, url, query, { preview: true, requireCollection: options.securityOnly, onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', headIds: page.value.map(recordKey), continuation: previous.continuation }) });
+    latest = getList(head);
+    if (!latest.some(row => previous.headIds?.includes(recordKey(row)))) resumeQuery = head.collection?.nextQuery || null;
+  }
+  const result = head && !resumeQuery ? head : await fetchCloudflarePages(client, url, query, {
+    requireCollection: options.securityOnly,
+    resumeQuery,
+    onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', ...(!head && page.pages === 1 ? { headIds: page.value.map(recordKey) } : {}), continuation: page.nextQuery, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.recordsRetrieved })
+  });
+  if (latest.length) result.result = [...new Map([...getList(result), ...latest].map(row => [recordKey(row), row])).values()];
+  collector?.publish('Cloudflare', url, endpoint.key, [], { ...result.collection, status: result.collection?.complete ? 'complete' : 'partial', continuation: result.collection?.nextQuery || null });
+  return result;
 }
 
 async function fetchCloudflareZoneEndpoint(client, endpoint, zones = []) {
@@ -637,7 +661,7 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
     throw error;
   }
 
-  const client = axios.create({
+  const client = options.client || axios.create({
     baseURL: CLOUDFLARE_BASE_URL,
     timeout: 15000,
     headers: {
@@ -646,10 +670,11 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
     }
   });
 
-  const accountEndpoints = CLOUDFLARE_ENDPOINTS.filter(endpoint => endpoint.scope !== 'zone');
-  const zoneEndpoints = CLOUDFLARE_ENDPOINTS.filter(endpoint => endpoint.scope === 'zone');
+  const liveSecurityKeys = new Set(['accountLogs', 'auditLogs', 'securityInsights', 'casbFindings', 'accessLogs', 'notificationHistory', 'zones']);
+  const accountEndpoints = CLOUDFLARE_ENDPOINTS.filter(endpoint => endpoint.scope !== 'zone' && (!options.securityOnly || liveSecurityKeys.has(endpoint.key)));
+  const zoneEndpoints = options.securityOnly ? [] : CLOUDFLARE_ENDPOINTS.filter(endpoint => endpoint.scope === 'zone');
   const settled = await Promise.allSettled(
-    accountEndpoints.map(endpoint => fetchCloudflareEndpoint(client, endpoint, accountId))
+    accountEndpoints.map(endpoint => fetchCloudflareEndpoint(client, endpoint, accountId, options))
   );
 
   const raw = accountEndpoints.map((endpoint, index) => {
@@ -703,7 +728,34 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
     });
   });
 
-  return normalizeCloudflarePayload(raw);
+  const summary = normalizeCloudflarePayload(raw);
+  const securityKeys = new Set(['accountLogs', 'auditLogs', 'securityInsights', 'casbFindings', 'accessLogs', 'notificationHistory']);
+  summary.rawSecurityRecords = raw.filter(item => securityKeys.has(item.key)).flatMap(item =>
+    getList(item.data).map(payload => ({ payload, endpoint: endpointDefinition(item.key).path(accountId), recordType: item.key })));
+  summary.retrieval = raw.filter(item => securityKeys.has(item.key) || item.key === 'zones').map(item => ({
+    endpoint: endpointDefinition(item.key).path(accountId), status: item.status,
+    ...item.data?.collection, recordsRetrieved: getList(item.data).length, error: item.data?.collection?.error || (['error', 'unavailable', 'permission_unavailable'].includes(item.status) ? item.message : null)
+  }));
+  for (const item of raw) {
+    if (securityKeys.has(item.key) && !item.data) options.collection?.publish('Cloudflare', endpointDefinition(item.key).path(accountId), item.key, [], { complete: false, status: item.status, error: item.message, failedRequests: 1, permissionErrors: item.status === 'permission_unavailable' ? 1 : 0 });
+    if (item.data?.collection?.complete === false) summary.sections[item.key] = { ...summary.sections[item.key], status: 'error', message: item.data.collection.error };
+  }
+  if (options.securityOnly) {
+    const since = options.range?.since || new Date(Date.now() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15) * 86400000).toISOString();
+    const until = options.range?.until || new Date().toISOString();
+    await Promise.all(zones.map(async zone => {
+      const endpoint = '/graphql/firewallEventsAdaptive/' + zone.id;
+      const previous = options.collection?.getState('Cloudflare', endpoint);
+      const result = await fetchFirewallEvents(client, { zoneId: zone.id, since, until, pending: previous?.continuation,
+        onPage: page => options.collection?.publish('Cloudflare', endpoint, 'firewall_event', page.value, { complete: false, status: 'collecting', continuation: page.pending, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.value.length }) });
+      summary.rawSecurityRecords.push(...result.value.map(payload => ({ payload, endpoint, recordType: 'firewall_event' })));
+      const state = { ...result, value: undefined, pending: undefined, endpoint, status: result.complete ? 'complete' : 'partial', error: result.warnings.join('; ') || null, recordsRetrieved: result.value.length };
+      summary.retrieval.push(state);
+      options.collection?.publish('Cloudflare', endpoint, 'firewall_event', [], { ...state, continuation: result.pending });
+    }));
+    if (!zones.length) summary.retrieval.push({ endpoint: '/graphql/firewallEventsAdaptive', status: 'unavailable', complete: false, error: 'No accessible zones returned for this account. Zone Read and Zone Analytics Read are required for firewall/WAF/DDoS analytics.' });
+  }
+  return summary;
 }
 
 module.exports = {

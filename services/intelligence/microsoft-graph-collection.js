@@ -69,6 +69,7 @@ async function fetchGraphCollectionWithRetry({
     const attemptsAllowed = numberInRange(maxAttempts, 1, 5, 3);
     let lastMetadata = { httpStatus: null, graphRequestId: null, clientRequestId: null, retryAfterMs: null };
     let lastErrorDetail = null;
+    let failedRequests = 0, rateLimits = 0;
 
     for (let attempt = 1; attempt <= attemptsAllowed; attempt += 1) {
         const remainingMs = deadline - now();
@@ -86,10 +87,13 @@ async function fetchGraphCollectionWithRetry({
                 signal: controller.signal
             });
             lastMetadata = graphResponseMetadata(response);
+            if (!response.ok) failedRequests++;
+            if (response.status === 429) rateLimits++;
 
             if (response.ok) {
                 const data = await response.json();
-                const value = Array.isArray(data?.value) ? data.value : [];
+                if (!Array.isArray(data?.value) || data.value.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Microsoft Graph returned no value collection');
+                const value = data.value;
                 const hasMore = Boolean(data?.['@odata.nextLink']);
                 return {
                     ok: true,
@@ -97,10 +101,10 @@ async function fetchGraphCollectionWithRetry({
                     value,
                     hasMore,
                     nextLink: data?.['@odata.nextLink'] || null,
-                    warnings: hasMore ? [`${label} returned the first ${value.length} records; Microsoft Graph has additional pages.`] : [],
+                    warnings: response.status === 206 ? [`${label} returned HTTP 206: provider coverage is partial.`] : hasMore ? [`${label} returned the first ${value.length} records; Microsoft Graph has additional pages.`] : [],
                     recordsFetched: value.length,
                     attempts: attempt,
-                    ...lastMetadata,
+                    ...lastMetadata, failedRequests, rateLimits,
                     errorCode: null,
                     errorDetail: null
                 };
@@ -134,7 +138,7 @@ async function fetchGraphCollectionWithRetry({
                 warnings: [`${label} ${availability}: Microsoft Graph returned ${response.status}${detail}`],
                 recordsFetched: 0,
                 attempts: attempt,
-                ...lastMetadata,
+                ...lastMetadata, failedRequests, rateLimits,
                 errorCode: `GRAPH_HTTP_${response.status}`,
                 errorDetail: lastErrorDetail
             };
@@ -155,7 +159,7 @@ async function fetchGraphCollectionWithRetry({
                 warnings: [`${label} failed: ${lastErrorDetail}`],
                 recordsFetched: 0,
                 attempts: attempt,
-                ...lastMetadata,
+                ...lastMetadata, failedRequests, rateLimits,
                 errorCode: aborted ? 'GRAPH_REQUEST_TIMEOUT' : 'GRAPH_REQUEST_FAILED',
                 errorDetail: lastErrorDetail
             };
@@ -172,7 +176,7 @@ async function fetchGraphCollectionWithRetry({
         warnings: [`${label} timed out after ${timeoutMs}ms`],
         recordsFetched: 0,
         attempts: attemptsAllowed,
-        ...lastMetadata,
+        ...lastMetadata, failedRequests, rateLimits,
         errorCode: 'GRAPH_REQUEST_TIMEOUT',
         errorDetail: lastErrorDetail || `${label} exceeded its collection deadline`
     };
@@ -184,22 +188,31 @@ async function fetchGraphCollectionWithRetry({
  * must never treat the partial collection as a clean result.
  */
 async function fetchGraphCollectionPagesWithRetry({
-    maxPages = 1,
+    maxPages = Infinity,
     timeoutMs = 60000,
     betweenPagesDelayMs = 0,
     now = () => Date.now(),
     ...options
 } = {}) {
-    const pageLimit = numberInRange(maxPages, 1, 25, 1);
+    const pageLimit = maxPages === Infinity ? Infinity : numberInRange(maxPages, 1, Number.MAX_SAFE_INTEGER, Infinity);
     const deadline = now() + numberInRange(timeoutMs, 1000, 300000, 60000);
     const rows = [];
     const requestIds = [];
     let attempts = 0;
+    let failedRequests = 0, rateLimits = 0;
     let pageCount = 0;
     let nextUrl = options.url;
     let lastResult = null;
+    const visited = new Set();
+    const identifiers = new Set();
+    const providerWarnings = [];
 
     while (nextUrl && pageCount < pageLimit) {
+        if (visited.has(nextUrl) || new URL(nextUrl).origin !== new URL(options.url).origin) {
+            return { ...lastResult, ok: false, partial: true, value: rows, recordsFetched: rows.length, pageCount, hasMore: true,
+                warnings: ['Graph pagination returned a repeated or invalid next link.'], errorCode: 'GRAPH_INVALID_NEXT_LINK' };
+        }
+        visited.add(nextUrl);
         const remainingMs = deadline - now();
         if (remainingMs <= 0) {
             return {
@@ -207,7 +220,7 @@ async function fetchGraphCollectionPagesWithRetry({
                 optional: Boolean(options.optional),
                 value: rows,
                 recordsFetched: rows.length,
-                attempts,
+                attempts, failedRequests, rateLimits,
                 pageCount,
                 pageLimitReached: true,
                 hasMore: true,
@@ -226,8 +239,10 @@ async function fetchGraphCollectionPagesWithRetry({
             now
         });
         lastResult = page;
+        providerWarnings.push(...(page.warnings || []).filter(warning => /HTTP 206/.test(warning)));
         pageCount += 1;
         attempts += page.attempts || 0;
+        failedRequests += page.failedRequests || 0; rateLimits += page.rateLimits || 0;
         if (page.graphRequestId) requestIds.push(page.graphRequestId);
 
         if (!page.ok) {
@@ -235,7 +250,7 @@ async function fetchGraphCollectionPagesWithRetry({
                 ...page,
                 value: rows,
                 recordsFetched: rows.length,
-                attempts,
+                attempts, failedRequests, rateLimits,
                 pageCount,
                 hasMore: Boolean(nextUrl),
                 nextLink: nextUrl,
@@ -248,20 +263,25 @@ async function fetchGraphCollectionPagesWithRetry({
             };
         }
 
-        rows.push(...page.value);
+        for (const row of page.value) {
+            if (row?.id && identifiers.has(row.id)) continue;
+            if (row?.id) identifiers.add(row.id);
+            rows.push(row);
+        }
         nextUrl = page.nextLink;
+        options.onPage?.({ ...page, value: page.value, pageCount, recordsFetched: rows.length, failedRequests, rateLimits });
         if (!nextUrl) {
             return {
                 ...page,
                 value: rows,
                 recordsFetched: rows.length,
-                attempts,
+                attempts, failedRequests, rateLimits,
                 pageCount,
                 pageLimitReached: false,
                 hasMore: false,
                 nextLink: null,
                 graphRequestIds: requestIds,
-                warnings: []
+                warnings: providerWarnings
             };
         }
 
@@ -274,7 +294,7 @@ async function fetchGraphCollectionPagesWithRetry({
                     ok: false,
                     value: rows,
                     recordsFetched: rows.length,
-                    attempts,
+                    attempts, failedRequests, rateLimits,
                     pageCount,
                     pageLimitReached: false,
                     hasMore: true,

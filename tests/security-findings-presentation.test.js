@@ -150,7 +150,7 @@ test('raw evidence header keeps Cloudflare counts and the last evaluation time w
     assert.match(target.innerHTML, /awaiting the next correlation and AI evaluation/);
 });
 
-test('a failed cached request falls back to live data and errors if both fail', async () => {
+test('security data requests the live API directly and surfaces a live failure', async () => {
     const start = source.indexOf('async function fetchSunbirdSecurityEventsData(');
     const end = source.indexOf('\nasync function ', start + 1);
     const calls = [];
@@ -166,7 +166,7 @@ test('a failed cached request falls back to live data and errors if both fail', 
     vm.runInContext(source.slice(start, end), fetchContext);
     const result = await fetchContext.fetchSunbirdSecurityEventsData();
     assert.equal(result.findings[0].title, 'Live finding');
-    assert.deepEqual(calls, ['/api/db/security-events', '/api/security-events']);
+    assert.deepEqual(calls, ['/api/security-events']);
     fetchContext.fetch = async () => { throw new Error('network unavailable'); };
     await assert.rejects(fetchContext.fetchSunbirdSecurityEventsData(), /Security events data unavailable: network unavailable/);
 });

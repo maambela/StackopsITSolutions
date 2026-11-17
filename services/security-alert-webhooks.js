@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { providerTimestamp } = require('./intelligence/raw-security-records');
 const { extractMicrosoftAlertEntities } = require('./intelligence/microsoft-alert-entities');
 
 function normalizeWebhookSeverity(value) {
@@ -38,16 +39,16 @@ function normalizeCloudflareWebhookAlert(payload = {}) {
   const description = shortText(data.description || data.message || payload.text, title);
   const domain = data.zone_name || data.zone || data.hostname || data.host || data.domain || null;
   const ipAddress = data.client_ip || data.ip || data.source_ip || null;
-  const timestamp = payload.ts ? new Date(Number(payload.ts) * 1000) : new Date();
-  const eventTime = Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : new Date().toISOString();
+  const eventTime = payload.ts ? providerTimestamp(payload.ts) : null;
 
   return {
     id: `cloudflare-webhook-${safeWebhookId(correlationId, payload)}`,
     correlationId: correlationId || null,
+    rawPayload: payload,
     title,
     description,
     sourceSeverity: data.severity || payload.severity || data.level || null,
-    severity: normalizeWebhookSeverity(data.severity || payload.severity || data.level || payload.alert_type),
+    severity: data.severity ?? payload.severity ?? null,
     status: normalizeWebhookStatus(alertEvent),
     created: eventTime,
     eventTime,
@@ -76,12 +77,14 @@ function normalizeMicrosoftGraphWebhookAlert(alert = {}) {
   const entities = extractMicrosoftAlertEntities(alert);
   return {
     id: alert.id,
+    rawPayload: alert,
+    sourceSeverity: alert.severity ?? null,
     title: shortText(alert.title || alert.alertName || alert.displayName, 'Microsoft Graph security alert'),
     description: shortText(alert.description || alert.message),
-    severity: normalizeWebhookSeverity(alert.severity),
+    severity: alert.severity ?? null,
     status: normalizeWebhookStatus(alert.status),
-    created: alert.createdDateTime || new Date().toISOString(),
-    eventTime: alert.eventDateTime || alert.createdDateTime || new Date().toISOString(),
+    created: alert.createdDateTime || null,
+    eventTime: alert.eventDateTime || alert.createdDateTime || null,
     category: shortText(alert.category || alert.serviceSource || alert.classification, 'Microsoft Graph alert'),
     source: 'Microsoft Graph',
     reportingSecuritySystem: 'Microsoft Graph',

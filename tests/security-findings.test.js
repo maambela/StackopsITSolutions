@@ -94,9 +94,9 @@ test('Microsoft alert evidence exposes explicit nested IP and user entities with
 
 test('anonymous IP alert correlates exact IP sign-ins without asserting compromise', () => {
     const result = buildSecurityFindings({
-        alerts: [{ id: 'alert-1', title: 'Anonymous IP sign-in detected', severity: 'medium', ipAddress: '203.0.113.8' }],
+        alerts: [{ id: 'alert-1', eventTime: '2026-11-17T10:00:00Z', title: 'Anonymous IP sign-in detected', severity: 'medium', ipAddress: '203.0.113.8' }],
         signIns: [
-            { id: 'signin-1', userId: 'user-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' },
+            { id: 'signin-1', eventTime: '2026-11-17T10:02:00Z', userId: 'user-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' },
             { id: 'signin-2', userPrincipalName: 'other@example.com', ipAddress: '198.51.100.1', outcome: 'success' }
         ]
     });
@@ -115,11 +115,11 @@ test('anonymous IP alert correlates exact IP sign-ins without asserting compromi
 test('anonymous IP finding correlates against all explicit IP evidence on an alert', () => {
     const result = buildSecurityFindings({
         alerts: [{
-            id: 'alert-1',
+            id: 'alert-1', eventTime: '2026-11-17T10:00:00Z',
             title: 'Anonymous IP sign-in detected',
             ipAddresses: ['198.51.100.1', '203.0.113.8']
         }],
-        signIns: [{ id: 'signin-1', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' }]
+        signIns: [{ id: 'signin-1', eventTime: '2026-11-17T10:02:00Z', userPrincipalName: 'user@example.com', ipAddress: '203.0.113.8', outcome: 'success' }]
     });
 
     const [finding] = result.findings;

@@ -46,7 +46,7 @@ function mysqlDate(value) {
     return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 23).replace('T', ' ');
 }
 
-function createCloudflareLogpushStore({ pool, now = () => new Date() } = {}) {
+function createCloudflareLogpushStore({ pool, now = () => new Date(), onRecords = () => {} } = {}) {
     if (!pool?.query) throw new Error('Cloudflare Logpush storage requires a database pool');
     return {
         async ensureSchema() {
@@ -69,6 +69,7 @@ function createCloudflareLogpushStore({ pool, now = () => new Date() } = {}) {
         },
         async ingest({ companyId, accountId, dataset, payload }) {
             const records = normaliseCloudflareLogpushPayload(payload, { dataset, accountId });
+            onRecords({ companyId, accountId, dataset, records });
             let inserted = 0;
             for (const record of records) {
                 const [result] = await pool.query(
@@ -81,17 +82,18 @@ function createCloudflareLogpushStore({ pool, now = () => new Date() } = {}) {
             }
             return { received: records.length, inserted, duplicates: records.length - inserted };
         },
-        async recentEvents(companyId, { limit = 500 } = {}) {
-            const boundedLimit = Math.max(1, Math.min(Number(limit) || 500, 1000));
-            const [rows] = await pool.query(
-                `SELECT ProcessedEventJson FROM StackCTRLCloudflareLogpushEvents
-                 WHERE CompanyID = ? AND ReceivedAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                 ORDER BY ReceivedAt DESC LIMIT ?`,
-                [companyId, boundedLimit]
-            );
-            return (rows || []).flatMap(row => {
-                try { return [JSON.parse(row.ProcessedEventJson)]; } catch (_) { return []; }
-            });
+        async recentEvents(companyId, { days = Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15 } = {}) {
+            const records = []; let after = 0;
+            while (true) {
+                const [rows] = await pool.query(
+                    `SELECT ID, ProcessedEventJson FROM StackCTRLCloudflareLogpushEvents
+                     WHERE CompanyID = ? AND ID > ? AND ReceivedAt >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                     ORDER BY ID LIMIT 500`, [companyId, after, days]);
+                if (!rows.length) break;
+                for (const row of rows) records.push(typeof row.ProcessedEventJson === 'string' ? JSON.parse(row.ProcessedEventJson) : row.ProcessedEventJson);
+                after = rows[rows.length - 1].ID;
+            }
+            return records;
         }
     };
 }

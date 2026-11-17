@@ -165,6 +165,14 @@ function deriveSecurityEvidence(payload = {}) {
         }))
     ];
 
+    if (Array.isArray(payload.rawRecords)) {
+        for (const record of new Map(payload.rawRecords.map(row => [row.uid, row])).values()) {
+            evidenceRows.push({ kind: 'raw_provider', sourceId: crypto.createHash('sha256').update(record.uid).digest('hex'),
+                title: String(record.title || record.recordType || 'Not provided').slice(0, 500),
+                severity: record.severity == null ? null : String(record.severity).slice(0, 50),
+                status: record.status == null ? null : String(record.status).slice(0, 50), processed: record });
+        }
+    }
     const hasPrimaryEvidence = Boolean(
         dashboardSource.alerts.length ||
         dashboardSource.incidents.length ||
@@ -234,6 +242,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
     async function persistProcessedEvidence({ companyId, tenantKey = 'sunbird', payload, collectionTrigger = 'scheduled_hourly', sourceEndpoint = 'Microsoft Graph processed by StackCTRL Security Alerts' } = {}) {
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
+        if ((payload.rawRecords || []).some(row => Number(row.companyId) !== numericCompanyId)) throw new Error('Raw evidence tenant mismatch');
         const evidence = deriveSecurityEvidence(payload);
         const collectedAt = now();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
