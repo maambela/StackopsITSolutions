@@ -27,7 +27,7 @@ function fakePool() {
                 async beginTransaction() {}, async rollback() {}, release() {},
                 async query(sql, values) {
                     if (waitForWrite) await waitForWrite;
-                    if (sql.includes('INSERT INTO StackCTRLRawSecurityRecords')) pendingRecords.push([values[0] + ':' + values[1], values[9]]);
+                    if (sql.includes('INSERT INTO StackCTRLRawSecurityRecords')) for (let index = 0; index < values.length; index += 10) pendingRecords.push([values[index] + ':' + values[index + 1], values[index + 9]]);
                     if (sql.includes('INSERT INTO StackCTRLRawSecuritySync')) pendingStates.push([values[0] + ':' + values[1], values[2]]);
                 },
                 async commit() { pendingRecords.forEach(([k,v]) => records.set(k,v)); pendingStates.forEach(([k,v]) => states.set(k,v)); }
@@ -240,4 +240,52 @@ test('live Graph collection bounds history by modification time, retaining newly
         return graphResponse([{ id: 'old-updated', createdDateTime: '2020-01-01T00:00:00Z', lastUpdateDateTime: range.until }]);
     } });
     await journal.flush(11);
+});
+
+test('successful live sync advances with overlap, reconciles hourly, and preserves the watermark after failure', async () => {
+    const pool = fakePool(); let at = new Date('2026-11-17T10:00:00Z');
+    const journal = createRawEvidenceJournal({ pool, now: () => at });
+    const filters = [], since = '2026-11-02T10:00:00.000Z';
+    async function collect(fail = false) {
+        const result = await journal.collection(11, { range: { since, until: at.toISOString(), explicit: false } }).graph({
+            token: 'fixture', url: 'https://graph.microsoft.com/v1.0/security/alerts_v2', fetchImpl: async url => {
+                filters.push(new URL(url).searchParams.get('$filter'));
+                return fail ? { ok: false, status: 403, text: async () => 'Forbidden' } : graphResponse([{ id: 'same', title: 'Unchanged' }]);
+            }
+        }); await journal.flush(11); return result;
+    }
+    await collect();
+    at = new Date('2026-11-17T10:01:00Z'); await collect();
+    assert.match(filters[1], /lastUpdateDateTime ge 2026-11-17T09:55:00.000Z/);
+    at = new Date('2026-11-17T10:02:00Z'); await collect(true);
+    assert.equal((await journal.health(11)).sources[0].completeThrough, '2026-11-17T10:01:00.000Z');
+    at = new Date('2026-11-17T11:02:00Z'); await collect();
+    assert.match(filters.at(-1), /lastUpdateDateTime ge 2026-11-02T10:00:00.000Z/);
+});
+
+test('unchanged stored payloads skip repeated writes while record batches retain every original', async () => {
+    const pool = fakePool(); let writes = 0;
+    const getConnection = pool.getConnection;
+    pool.getConnection = async () => {
+        const connection = await getConnection(), query = connection.query;
+        connection.query = async (sql, params) => { if (sql.includes('INSERT INTO StackCTRLRawSecurityRecords')) writes++; return query(sql, params); };
+        return connection;
+    };
+    const journal = createRawEvidenceJournal({ pool });
+    const rows = Array.from({ length: 205 }, (_, index) => rowFor(index));
+    function rowFor(index) { return rawSecurityRecord({ id: String(index), title: 'Original ' + index }, { companyId: 11, provider: 'Microsoft Graph', endpoint: '/alerts', recordType: 'alert', retrievedAt: '2026-11-17T10:00:00Z' }); }
+    await journal.queue(11, rows); assert.equal(writes, 3); assert.equal(pool.records.size, 205);
+    await journal.queue(11, rows.map(row => ({ ...row, retrievedAt: '2026-11-17T10:00:30Z' })));
+    assert.equal(writes, 3); assert.equal(pool.records.size, 205);
+});
+
+test('Cloudflare timed sources use an overlapping checkpoint and explicit history bypasses it', async () => {
+    const calls = [], at = new Date(), since = new Date(at.getTime() - 15 * 86400000).toISOString(), priorEnd = new Date(at.getTime() - 600000).toISOString();
+    const client = { get: async (url, config) => { calls.push({ url, params: config.params }); return { data: { result: [] } }; } };
+    const collection = { getState: () => ({ storageStatus: 'stored', completeThrough: priorEnd, lastReconciledAt: at.toISOString() }), publish() {} };
+    await getCloudflareNetworkSecuritySummary({ client, accountId: 'account', apiToken: 'fixture', securityOnly: true, collection, range: { since, until: at.toISOString(), explicit: false } });
+    assert.equal(calls.find(call => call.url.endsWith('/logs/audit')).params.since, new Date(at.getTime() - 900000).toISOString());
+    calls.length = 0;
+    await getCloudflareNetworkSecuritySummary({ client, accountId: 'account', apiToken: 'fixture', securityOnly: true, collection, range: { since, until: at.toISOString(), explicit: true } });
+    assert.equal(calls.find(call => call.url.endsWith('/logs/audit')).params.since, since);
 });

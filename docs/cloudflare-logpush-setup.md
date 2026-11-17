@@ -3,12 +3,14 @@
 Stack CTRL accepts only the following Cloudflare Logpush datasets:
 
 - `firewall_events`
+- `http_requests`
+- `network_analytics_logs`
 - `access_requests`
 - `audit_logs`
 - `gateway_dns`
 - `gateway_http`
 
-It does not ingest general HTTP request traffic through this endpoint.
+HTTP and network analytics records retain available DDoS and traffic evidence. Availability depends on the account's products and plan.
 
 ## Current no-administrator mode
 
@@ -41,8 +43,12 @@ The delivery must include either `cf-logpush-auth: <LONG_RANDOM_DELIVERY_SECRET>
 
 Successful responses are `202`. Replays are safe: records are idempotent on company, account, dataset and event key. Unknown mappings, invalid secrets, or unsupported datasets are rejected and no evidence is stored.
 
+JSON, NDJSON and gzip are supported, including gzip files without Content-Encoding. Configure batches below the 20 MiB decompressed receiver limit. Authenticated `{"content":"tests"}` validation probes return `200` without creating evidence. Use unsampled, unfiltered jobs for complete delivery of an entitled dataset. See [Cloudflare HTTP destinations](https://developers.cloudflare.com/logs/logpush/logpush-job/enable-destinations/http/).
+
+New batches reach the live raw feed before storage completes. Original JSON remains available under Technical evidence; deterministic provider-specific interpretation runs locally without an AI call. Client view can filter verified platform audit reads using `SECURITY_CLOUDFLARE_PLATFORM_TOKEN_IDS`; the original records and counts remain accessible through All raw activity.
+
 ## Processing and alerting
 
-The current dashboard query considers the most recent 30 days of tenant-scoped Logpush evidence. A scheduled database retention cleanup is still required before production rollout. Stack CTRL currently creates a finding only when it sees at least five returned blocked/denied events for the same available resource or actor in one of the firewall/Gateway datasets. The finding is unassessed, explicitly does not claim a successful attack, and is passed through the existing Azure OpenAI assessment package with at most eight evidence rows.
+The default raw historical context is 15 days. This is a retrieval window, not a deletion policy; evidence needed for investigations remains stored. Existing correlated findings and AI assessment are separate from deterministic raw presentation and remain unchanged by this presentation upgrade.
 
 The delivery endpoint does not send WhatsApp messages. Existing Stack CTRL eligibility and human-review safeguards remain in force.

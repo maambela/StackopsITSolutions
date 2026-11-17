@@ -5174,7 +5174,7 @@ window.handleSunbirdEmailInsightEvidenceKey = handleSunbirdEmailInsightEvidenceK
 
 const SUNBIRD_SECURITY_CACHE_KEY = 'sunbirdSecurityEventsDashboardSnapshot';
 let sunbirdSecurityDashboardData = null;
-let sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', sort: 'newest' };
+let sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', activity: 'client', sort: 'newest' };
 let lockedSunbirdSecurityInsightEvidenceKey = null;
 let sunbirdSecurityTrendWindow = '7d';
 let sunbirdSecurityTablePage = 0;
@@ -5241,6 +5241,7 @@ function renderSunbirdSecurityShell() {
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
+                        <option value="not provided">Not provided</option>
                     </select>
                     <select id="sunbird-security-status-filter" class="sunbird-id-select">
                         <option value="all">All status</option>
@@ -5248,6 +5249,9 @@ function renderSunbirdSecurityShell() {
                         <option value="newalert">New</option>
                         <option value="inprogress">In progress</option>
                         <option value="resolved">Resolved</option>
+                        <option value="successful">Successful</option><option value="failed">Failed</option>
+                        <option value="blocked">Blocked</option><option value="denied">Denied</option>
+                        <option value="interrupted">Interrupted</option><option value="allowed">Allowed</option>
                     </select>
                     <select id="sunbird-security-source-filter" class="sunbird-id-select">
                         <option value="all">All sources</option>
@@ -5261,6 +5265,11 @@ function renderSunbirdSecurityShell() {
                         <option value="newest">Sort newest</option>
                         <option value="severity">Sort severity</option>
                         <option value="status">Sort status</option>
+                    </select>
+                    <select id="sunbird-security-activity-filter" class="sunbird-id-select" aria-label="Activity visibility">
+                        <option value="client">Client view</option><option value="all">All raw activity</option>
+                        <option value="security">Security activity</option><option value="administrative">Administrative activity</option>
+                        <option value="platform">Platform activity</option><option value="informational">Informational activity</option><option value="unclassified">Unclassified activity</option>
                     </select>
                     <button id="sunbird-security-clear" class="sunbird-id-clear-btn" type="button">Clear</button>
                 </div>
@@ -5331,13 +5340,17 @@ function setupSunbirdSecurityDashboard() {
         sunbirdSecurityTableState.sort = event.target.value;
         renderSunbirdSecurityTable();
     });
+    document.getElementById('sunbird-security-activity-filter')?.addEventListener('change', event => {
+        applySunbirdSecurityTableFilter({ activity: event.target.value });
+    });
     document.getElementById('sunbird-security-clear')?.addEventListener('click', () => {
-        sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', sort: 'newest' };
+        sunbirdSecurityTableState = { search: '', severity: 'all', status: 'all', source: 'all', activity: 'client', sort: 'newest' };
         ['sunbird-security-search', 'sunbird-security-severity-filter', 'sunbird-security-status-filter', 'sunbird-security-source-filter', 'sunbird-security-sort'].forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
             el.value = id === 'sunbird-security-sort' ? 'newest' : id === 'sunbird-security-search' ? '' : 'all';
         });
+        const activity = document.getElementById('sunbird-security-activity-filter'); if (activity) activity.value = 'client';
         renderSunbirdSecurityTable();
     });
 }
@@ -6371,6 +6384,7 @@ function getSunbirdSecurityApiSource(event = {}) {
 }
 
 function getSunbirdSecurityApiCategory(event = {}) {
+    if (event.presentation) return event.presentation.category;
     if (event.rawPayload !== undefined) return event.category ?? 'Not provided';
     if (event.apiCategory) return event.apiCategory;
     if (event.recordType === 'alert') return event.categories?.join?.(', ') || event.category || event.classification || 'Not found';
@@ -6386,6 +6400,7 @@ function isSunbirdSecurityIdentifier(value) {
 }
 
 function getSunbirdSecurityDisplayTitle(event = {}) {
+    if (event.presentation) return event.presentation.title;
     const title = event.title || event.description || event.displayName || event.name || event.message || '';
     if (event.rawPayload !== undefined) return title || 'Not provided';
     if (!isSunbirdSecurityIdentifier(title)) return title || 'Security event';
@@ -6396,6 +6411,7 @@ function getSunbirdSecurityDisplayTitle(event = {}) {
 }
 
 function getSunbirdSecurityDisplayAsset(event = {}) {
+    if (event.presentation) return event.presentation.actor || event.presentation.asset || 'Not provided';
     const asset = event.user || event.assignedTo || event.indicator || '';
     return asset && !isSunbirdSecurityIdentifier(asset) ? asset : 'Not found';
 }
@@ -6404,7 +6420,8 @@ function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityMode
     const target = document.getElementById('sunbird-security-raw-evidence-header');
     if (!target) return;
     const rawEvidence = model.rawEvidence || {};
-    const rawCount = Number(rawEvidence.displayedRecordCount ?? model.allEvents?.length ?? 0);
+    const rawCount = Number(model.allEvents?.length ?? rawEvidence.displayedRecordCount ?? 0);
+    const routineCount = (model.allEvents || []).filter(event => event.presentation?.routine).length;
     const cloudflare = rawEvidence.cloudflare || {};
     const cloudflareStatus = String(cloudflare.status || 'not_reported').toLowerCase();
     const cloudflareCount = Number(cloudflare.rawRecordsReturned ?? cloudflare.recordsReturned ?? 0);
@@ -6428,9 +6445,10 @@ function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityMode
             : 'Evaluation time not supplied.';
     target.innerHTML = `
         <div class="sunbird-security-raw-evidence-title">
-            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Live Microsoft Graph and Cloudflare records, with the previous 15 days for context. Provider messages and severity are shown as supplied.</p></div>
+            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Live Microsoft Graph and Cloudflare records, with the previous 15 days for context. Descriptions explain provider fields; original severity and complete evidence are preserved.</p></div>
             <span class="sunbird-security-raw-count">${sunbirdSecurityEscape(rawCount)} returned record${rawCount === 1 ? '' : 's'}</span>
         </div>
+        <p>${routineCount} verified routine platform record${routineCount === 1 ? '' : 's'} retained. Client view filters these reads only. <button type="button" class="sunbird-id-evidence-btn" onclick="applySunbirdSecurityTableFilter({activity:'all'})">Show all raw activity</button></p>
         <p>${[...(model.warnings || []), ...(model.retrieval?.limitations || [])].map(warning => sunbirdSecurityEscape(warning)).join(' | ')}</p>
         <div class="sunbird-security-raw-statuses">
             <p><b>Cloudflare</b><span class="sunbird-security-status ${sunbirdSecurityStatusClass(cloudflareStatus)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(cloudflareStatus))}</span><small>${sunbirdSecurityEscape(cloudflareMessage)}</small></p>
@@ -6469,13 +6487,13 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
                 <td data-label="Time">${escapeIdentityText(sunbirdSecurityFormatTime(event.timestamp))}</td>
                 <td data-label="Severity"><span class="sunbird-id-risk ${severityTone === 'critical' || severityTone === 'high' ? 'high' : severityTone === 'medium' ? 'medium' : severityTone === 'low' || severityTone === 'informational' ? 'safe' : ''}">${escapeIdentityText(severity)}</span></td>
                 <td data-label="Type"><span class="sunbird-id-role-list"><span>${escapeIdentityText(event.recordType || 'event')}</span></span></td>
-                <td data-label="Incident / Alert">${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</td>
-                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.status ?? 'Not provided')}</span></td>
+                <td data-label="Incident / Alert"><strong>${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</strong>${event.presentation?.description ? `<p class="sunbird-raw-description">${escapeIdentityText(event.presentation.description)}</p>` : ''}</td>
+                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.presentation?.outcome || event.status || 'Not provided')}</span></td>
                 <td data-label="User / Asset">${escapeIdentityText(getSunbirdSecurityDisplayAsset(event))}</td>
-                <td data-label="Source">${escapeIdentityText(event.endpoint || apiSource)}</td>
+                <td data-label="Source">${escapeIdentityText(event.presentation?.sourceLabel || event.provider || apiSource)}${event.presentation?.dataset ? `<small class="sunbird-raw-dataset">${escapeIdentityText(event.presentation.dataset)}</small>` : ''}</td>
                 <td data-label="API Source">${escapeIdentityText(event.provider || getSunbirdSecurityReportingSystem(event))}</td>
                 <td data-label="Category">${escapeIdentityText(apiCategory)}</td>
-                <td data-label="MITRE">${escapeIdentityText(mitre.technique === 'Not provided' ? 'Not provided' : `${mitre.tactic} / ${mitre.technique}`)}</td>
+                <td data-label="MITRE">${escapeIdentityText(event.presentation ? event.presentation.mitreTechniques.join(', ') || 'Not mapped' : mitre.technique === 'Not provided' ? 'Not mapped' : `${mitre.tactic} / ${mitre.technique}`)}</td>
                 <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${escapeIdentityText(JSON.stringify(event.uid))})'>Open</button></td>
             </tr>
         `;
@@ -6485,8 +6503,11 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
 function getFilteredSunbirdSecurityEvents(model = buildSunbirdSecurityModel()) {
     const search = sunbirdSecurityTableState.search.trim().toLowerCase();
     return model.allEvents.filter(event => {
+        const activity = sunbirdSecurityTableState.activity || 'client';
+        if (activity === 'client' && event.presentation?.routine) return false;
+        if (!['client', 'all'].includes(activity) && (event.presentation?.activityClass || 'unclassified') !== activity) return false;
         const severity = String(event.severity ?? 'Not provided').toLowerCase();
-        const status = String(event.status || event.riskLevel || '').toLowerCase();
+        const status = String(event.presentation?.outcome || event.status || event.riskLevel || '').toLowerCase();
         const type = String(event.recordType || '').toLowerCase();
         const mitre = getSunbirdSecurityMitre(event);
         const haystack = [
@@ -6494,6 +6515,7 @@ function getFilteredSunbirdSecurityEvents(model = buildSunbirdSecurityModel()) {
             event.user, event.assignedTo, event.indicator, event.source, event.vendor,
             event.category, event.location, event.ipAddress, mitre.tactic, mitre.technique,
             severity, status, type
+            , event.presentation?.title, event.presentation?.description, event.presentation?.actor, event.presentation?.asset, event.presentation?.sourceLabel, event.presentation?.category, event.presentation?.outcome
         ].join(' ').toLowerCase();
         if (search && !haystack.includes(search)) return false;
         if (sunbirdSecurityTableState.severity !== 'all' && severity !== sunbirdSecurityTableState.severity) return false;
@@ -6519,6 +6541,7 @@ function applySunbirdSecurityTableFilter(filter = {}) {
     setValue('sunbird-security-status-filter', sunbirdSecurityTableState.status);
     setValue('sunbird-security-source-filter', sunbirdSecurityTableState.source);
     setValue('sunbird-security-sort', sunbirdSecurityTableState.sort);
+    setValue('sunbird-security-activity-filter', sunbirdSecurityTableState.activity || 'client');
     renderSunbirdSecurityTable();
     document.querySelector('.sunbird-security-dashboard .sunbird-id-table-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -6599,15 +6622,11 @@ function openSunbirdSecurityEventEvidence(uid) {
     const model = buildSunbirdSecurityModel();
     const event = model.allEvents.find(item => item.uid === uid);
     if (!event) return;
-    if (event.rawPayload !== undefined) {
-        openSunbirdSecurityRowsModal(event.title || event.recordType, [{ title: event.provider, subtitle: event.endpoint, meta: 'Original provider JSON' }]);
-        const list = document.querySelector('#sunbird-security-evidence-modal .sunbird-id-evidence-list');
-        if (list) {
-            const pre = document.createElement('pre');
-            pre.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:65vh;overflow:auto';
-            pre.textContent = JSON.stringify(event.rawPayload, null, 2);
-            list.appendChild(pre);
-        }
+    if (event.presentation || event.rawPayload !== undefined || event.technicalAvailable) {
+        const modal = document.getElementById('sunbird-security-evidence-modal');
+        if (!modal) return;
+        modal.innerHTML = renderSunbirdRawEvidenceDetails(event);
+        modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false');
         return;
     }
     const mitre = getSunbirdSecurityMitre(event);
@@ -6616,6 +6635,42 @@ function openSunbirdSecurityEventEvidence(uid) {
         subtitle: `${event.user || event.source || event.location || 'Microsoft Security'} | ${event.status || event.riskLevel || 'observed'}`,
         meta: `${formatSunbirdDateTime(event.timestamp)} | ${event.severity || 'low'} | ${mitre.tactic} / ${mitre.technique}`
     }]);
+}
+
+function renderSunbirdRawEvidenceDetails(event) {
+    const p = event.presentation || {}, esc = escapeIdentityText;
+    return `<div class="sunbird-id-modal-backdrop" onclick="closeSunbirdSecurityEvidence()"></div>
+        <div class="sunbird-id-modal-panel sunbird-raw-detail" role="dialog" aria-modal="true" aria-labelledby="sunbird-raw-detail-title">
+            <div class="sunbird-id-modal-header"><div><h3 id="sunbird-raw-detail-title">${esc(p.title || event.title || event.recordType)}</h3><p>${esc(p.sourceLabel || event.provider)}${p.dataset ? ' · ' + esc(p.dataset) : ''}</p></div><button type="button" class="sunbird-id-modal-close" aria-label="Close evidence" onclick="closeSunbirdSecurityEvidence()">&times;</button></div>
+            <section><h4>What happened?</h4><p>${esc(p.description || event.description || 'No supported explanation is available for this record.')}</p>
+                <dl><dt>When</dt><dd>${esc(sunbirdSecurityFormatTime(event.timestamp))}</dd><dt>Provider severity</dt><dd>${esc(event.sourceSeverity ?? event.severity ?? 'Not provided')}</dd><dt>Category</dt><dd>${esc(p.category || 'Unclassified')}</dd></dl></section>
+            ${(p.sections || []).map(section => `<section><h4>${esc(section.title)}</h4><dl>${section.fields.map(field => `<dt>${esc(field.label)}</dt><dd>${esc(field.value)}</dd>`).join('')}</dl></section>`).join('')}
+            ${p.securitySignificance ? `<section><h4>Security context</h4><p>${esc(p.securitySignificance)}</p></section>` : ''}
+            <section><h4>MITRE ATT&amp;CK</h4><p>${esc(p.mitreTechniques?.join(', ') || 'Not mapped')}</p><small>${esc(p.mitreBasis || 'No validated mapping for this record')}</small></section>
+            <details class="sunbird-raw-technical" data-evidence-uid="${esc(event.uid)}" ontoggle="if(this.open) loadSunbirdRawTechnicalEvidence(this)"><summary>Technical evidence and original provider JSON</summary>
+                <p>API source: ${esc(event.provider)}. ${esc(p.categoryBasis || '')}. Interpretation rule: ${esc(p.ruleId || 'unclassified')}.</p><pre>Expand to load original evidence.</pre></details>
+        </div>`;
+}
+
+async function loadSunbirdRawTechnicalEvidence(details) {
+    if (details.dataset.loaded || details.dataset.loading) return;
+    const uid = details.dataset.evidenceUid, target = details.querySelector('pre');
+    const token = localStorage.getItem('authToken');
+    details.dataset.loading = 'true'; target.textContent = 'Loading original provider evidence…';
+    try {
+        let record = buildSunbirdSecurityModel().allEvents.find(event => event.uid === uid);
+        if (record?.rawPayload === undefined) {
+            const response = await fetch('/api/security-events/record?uid=' + encodeURIComponent(uid), { cache: 'no-store', headers: { Authorization: 'Bearer ' + token } });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.message || 'Original evidence unavailable');
+            record = data.record;
+        }
+        if (!record || record.uid !== uid || token !== localStorage.getItem('authToken') || !details.isConnected) return;
+        target.textContent = JSON.stringify({ provider: record.provider, endpoint: record.endpoint, providerRecordId: record.id,
+            retrievedAt: record.retrievedAt, originalTimestamp: record.timestamp, rawPayload: record.rawPayload }, null, 2);
+        details.dataset.loaded = 'true';
+    } catch (error) { target.textContent = error.message + ' Close and reopen this section to retry.'; }
+    finally { delete details.dataset.loading; }
 }
 
 function openSunbirdSecurityRowsModal(title, rows) {

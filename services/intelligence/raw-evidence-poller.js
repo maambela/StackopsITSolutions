@@ -1,7 +1,7 @@
 // Each provider source runs independently: a slow history page or database never
 // gates another source's next live poll. Provider collectors enforce deadlines.
-function createRawEvidencePoller({ discover, sources, intervalMs = 30000, enabled = true, logger = console }) {
-    const companies = new Set(), active = new Map();
+function createRawEvidencePoller({ discover, sources, intervalMs = 30000, sourceIntervals = {}, enabled = true, logger = console, now = Date.now }) {
+    const companies = new Set(), active = new Map(), nextAt = new Map();
     let timer, discovering, lastDiscovery = 0;
     function register(companyId) {
         if (Number.isInteger(Number(companyId)) && Number(companyId) > 0) companies.add(Number(companyId));
@@ -18,6 +18,8 @@ function createRawEvidencePoller({ discover, sources, intervalMs = 30000, enable
         for (const companyId of companies) for (const [name, collect] of Object.entries(sources)) {
             const key = companyId + ':' + name;
             if (active.has(key)) { pending.push(active.get(key)); continue; }
+            if (now() < (nextAt.get(key) || 0)) continue;
+            nextAt.set(key, now() + (Number(sourceIntervals[name]) || 0));
             const task = Promise.resolve().then(() => collect(companyId))
                 .catch(error => logger.warn('[Raw evidence] ' + name + ':', error.message))
                 .finally(() => active.delete(key));

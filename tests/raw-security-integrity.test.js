@@ -100,5 +100,6 @@ test('raw table renders the provider column, missing severity and verbatim descr
     assert.match(body.innerHTML, /data-label="API Source">Microsoft Graph/);
     assert.match(body.innerHTML, /data-label="Severity">.*Not provided/);
     assert.match(body.innerHTML, /User must register MFA\./);
-    assert.match(body.innerHTML, /data-label="MITRE">Not provided/);
+    assert.match(body.innerHTML, /data-label="MITRE">Not mapped/);
+    assert.match(body.innerHTML, /data-label="Source">Microsoft Entra ID/);
 });

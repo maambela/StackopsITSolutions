@@ -347,16 +347,18 @@ function summarizeSectionError(error, endpoint = {}) {
 async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}) {
   const method = String(endpoint.method || 'get').toLowerCase();
   const url = endpoint.path(accountId);
+  const collector = endpoint.key === 'zones' ? null : options.collection;
+  const previous = collector?.getState('Cloudflare', url);
+  const incremental = !options.range?.explicit && previous?.storageStatus === 'stored' && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
   let query = typeof endpoint.query === 'function' ? endpoint.query(accountId) : endpoint.query;
   if (endpoint.key === 'zones') query = { ...query, 'account.id': accountId };
   if (['accessLogs', 'auditLogs', 'accountLogs', 'notificationHistory'].includes(endpoint.key)) {
     const range = options.range || { since: new Date(Date.now() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15) * 86400000).toISOString(), until: new Date().toISOString() };
-    query = { ...query, since: range.since, ...(['notificationHistory', 'accountLogs'].includes(endpoint.key) ? { before: range.until } : { until: range.until }) };
+    const since = incremental ? new Date(Math.max(Date.parse(range.since), Date.parse(previous.completeThrough) - 300000)).toISOString() : range.since;
+    query = { ...query, since, ...(['notificationHistory', 'accountLogs'].includes(endpoint.key) ? { before: range.until } : { until: range.until }) };
     if (['accessLogs', 'auditLogs', 'accountLogs'].includes(endpoint.key)) query.direction = 'desc';
   }
   if (method === 'post') return (await client.post(url, endpoint.body || {})).data;
-  const collector = endpoint.key === 'zones' ? null : options.collection;
-  const previous = collector?.getState('Cloudflare', url);
   let latest = [];
   let resumeQuery = previous?.continuation || null, head;
   const recordKey = row => row.id || row.uuid || JSON.stringify(row);
@@ -371,7 +373,8 @@ async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}
     onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', ...(!head && page.pages === 1 ? { headIds: page.value.map(recordKey) } : {}), continuation: page.nextQuery, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.recordsRetrieved })
   });
   if (latest.length) result.result = [...new Map([...getList(result), ...latest].map(row => [recordKey(row), row])).values()];
-  collector?.publish('Cloudflare', url, endpoint.key, [], { ...result.collection, status: result.collection?.complete ? 'complete' : 'partial', continuation: result.collection?.nextQuery || null });
+  collector?.publish('Cloudflare', url, endpoint.key, [], { ...result.collection, status: result.collection?.complete ? 'complete' : 'partial', continuation: result.collection?.nextQuery || null,
+    ...(result.collection?.complete && options.range?.until && !options.range.explicit ? { completeThrough: options.range.until, ...(!incremental ? { lastReconciledAt: new Date().toISOString() } : {}) } : {}) });
   return result;
 }
 
@@ -746,12 +749,15 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
     await Promise.all(zones.map(async zone => {
       const endpoint = '/graphql/firewallEventsAdaptive/' + zone.id;
       const previous = options.collection?.getState('Cloudflare', endpoint);
-      const result = await fetchFirewallEvents(client, { zoneId: zone.id, since, until, pending: previous?.continuation,
+      const incremental = !options.range?.explicit && previous?.storageStatus === 'stored' && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
+      const firewallSince = incremental ? new Date(Math.max(Date.parse(since), Date.parse(previous.completeThrough) - 300000)).toISOString() : since;
+      const result = await fetchFirewallEvents(client, { zoneId: zone.id, since: firewallSince, until, pending: previous?.continuation,
         onPage: page => options.collection?.publish('Cloudflare', endpoint, 'firewall_event', page.value, { complete: false, status: 'collecting', continuation: page.pending, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.value.length }) });
       summary.rawSecurityRecords.push(...result.value.map(payload => ({ payload, endpoint, recordType: 'firewall_event' })));
       const state = { ...result, value: undefined, pending: undefined, endpoint, status: result.complete ? 'complete' : 'partial', error: result.warnings.join('; ') || null, recordsRetrieved: result.value.length };
       summary.retrieval.push(state);
-      options.collection?.publish('Cloudflare', endpoint, 'firewall_event', [], { ...state, continuation: result.pending });
+      options.collection?.publish('Cloudflare', endpoint, 'firewall_event', [], { ...state, continuation: result.pending.length ? result.pending : null,
+        ...(result.complete && !options.range?.explicit ? { completeThrough: until, ...(!incremental ? { lastReconciledAt: new Date().toISOString() } : {}) } : {}) });
     }));
     if (!zones.length) summary.retrieval.push({ endpoint: '/graphql/firewallEventsAdaptive', status: 'unavailable', complete: false, error: 'No accessible zones returned for this account. Zone Read and Zone Analytics Read are required for firewall/WAF/DDoS analytics.' });
   }

@@ -8,7 +8,8 @@ const SCHEMA = [
         CompanyID BIGINT NOT NULL, RecordKey CHAR(64) NOT NULL, Provider VARCHAR(32) NOT NULL,
         Endpoint TEXT NOT NULL, ProviderRecordID TEXT NULL, EventTime VARCHAR(100) NULL,
         FirstRetrievedAt VARCHAR(40) NOT NULL, LastRetrievedAt VARCHAR(40) NOT NULL,
-        ProviderVersion BIGINT NOT NULL DEFAULT 0, RecordJson JSON NOT NULL, PRIMARY KEY (CompanyID, RecordKey)
+        ProviderVersion BIGINT NOT NULL DEFAULT 0, RecordJson JSON NOT NULL, PRIMARY KEY (CompanyID, RecordKey),
+        KEY ix_raw_company_time (CompanyID, EventTime, RecordKey)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     `CREATE TABLE IF NOT EXISTS StackCTRLRawSecuritySync (
         CompanyID BIGINT NOT NULL, SourceKey CHAR(64) NOT NULL, StateJson JSON NOT NULL,
@@ -20,11 +21,32 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
     const listeners = new Map();
     const storageFailures = new Set();
     const restored = new Map();
+    const recent = new Map();
+    const persisted = new Map();
+    let recentBytes = 0;
+    function remember(record) {
+        const prior = recent.get(record.uid);
+        if (prior && Number(prior.record.providerVersion) > Number(record.providerVersion)) return;
+        const bytes = Buffer.byteLength(JSON.stringify(record));
+        if (prior) { recentBytes -= prior.bytes; recent.delete(record.uid); }
+        recent.set(record.uid, { record, bytes }); recentBytes += bytes;
+        while (recentBytes > 32 * 1024 * 1024 || recent.size > 2000) {
+            const oldest = recent.keys().next().value;
+            recentBytes -= recent.get(oldest).bytes; recent.delete(oldest);
+        }
+    }
     const states = new Map(), queues = new Map(), hydration = new Map(), activeGraph = new Map();
     const key = (companyId, provider, endpoint) => `${companyId}:${hash(`${provider}:${endpoint}`)}`;
     let ready;
     function ensureSchema() {
-        if (!ready) ready = (async () => { for (const sql of SCHEMA) await pool.query(sql); })().catch(error => { ready = null; throw error; });
+        if (!ready) ready = (async () => {
+            for (const sql of SCHEMA) await pool.query(sql);
+            const [indexes] = await pool.query("SELECT INDEX_NAME FROM information_schema.statistics WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'StackCTRLRawSecurityRecords' AND INDEX_NAME = 'ix_raw_company_time'");
+            if (!indexes.length) {
+                try { await pool.query('ALTER TABLE StackCTRLRawSecurityRecords ADD INDEX ix_raw_company_time (CompanyID, EventTime, RecordKey)'); }
+                catch (error) { if (error.code !== 'ER_DUP_KEYNAME') throw error; }
+            }
+        })().catch(error => { ready = null; throw error; });
         return ready;
     }
     function hydrate(companyId) {
@@ -42,21 +64,29 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
     }
     function queue(companyId, records, state) {
         if (!Number.isInteger(companyId) || companyId <= 0 || records.some(row => Number(row.companyId) !== companyId)) throw new Error('Raw evidence tenant mismatch');
+        records.forEach(remember);
         const task = (queues.get(companyId) || Promise.resolve()).then(async () => {
             await ensureSchema();
             const connection = await pool.getConnection();
             try {
                 await connection.beginTransaction();
-                for (const record of records) await connection.query(
+                const changed = records.map(record => ({ record, digest: hash(JSON.stringify(record.rawPayload)), prior: persisted.get(record.uid) }))
+                    .filter(item => item.digest !== item.prior?.digest || now().getTime() - item.prior.at >= 300000);
+                for (let offset = 0; offset < changed.length; offset += 100) {
+                    const batch = changed.slice(offset, offset + 100);
+                    await connection.query(
                     `INSERT INTO StackCTRLRawSecurityRecords (CompanyID, RecordKey, Provider, Endpoint, ProviderRecordID, EventTime, FirstRetrievedAt, LastRetrievedAt, ProviderVersion, RecordJson)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE
+                     VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')} ON DUPLICATE KEY UPDATE
                      EventTime = IF(VALUES(ProviderVersion) >= ProviderVersion, VALUES(EventTime), EventTime), LastRetrievedAt = VALUES(LastRetrievedAt), RecordJson = IF(VALUES(ProviderVersion) >= ProviderVersion, VALUES(RecordJson), RecordJson), ProviderVersion = GREATEST(ProviderVersion, VALUES(ProviderVersion))`,
-                    [companyId, hash(record.uid), record.provider, record.endpoint, String(record.id), Number.isFinite(Date.parse(record.timestamp)) ? new Date(record.timestamp).toISOString() : null, record.retrievedAt, record.retrievedAt, record.providerVersion || 0, JSON.stringify(record)]);
+                    batch.flatMap(({ record }) => [companyId, hash(record.uid), record.provider, record.endpoint, String(record.id), Number.isFinite(Date.parse(record.timestamp)) ? new Date(record.timestamp).toISOString() : null, record.retrievedAt, record.retrievedAt, record.providerVersion || 0, JSON.stringify(record)]));
+                }
                 if (state && storageFailures.has(key(companyId, state.provider, state.endpoint))) { state.complete = false; state.status = 'partial'; state.continuation = null; state.storageError = 'An earlier page failed to store; a full replay is required.'; }
                 if (state) await connection.query(
                     `INSERT INTO StackCTRLRawSecuritySync (CompanyID, SourceKey, StateJson) VALUES (?, ?, ?)
                      ON DUPLICATE KEY UPDATE StateJson = VALUES(StateJson)`, [companyId, hash(`${state.provider}:${state.endpoint}`), JSON.stringify({ ...state, storageStatus: 'stored' })]);
                 await connection.commit();
+                for (const { record, digest } of changed) { persisted.delete(record.uid); persisted.set(record.uid, { digest, at: now().getTime() }); }
+                while (persisted.size > 10000) persisted.delete(persisted.keys().next().value);
             } catch (error) { await connection.rollback(); throw error; }
             finally { connection.release(); }
         });
@@ -102,12 +132,21 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         async function collectGraph(options) {
             const requestedUrl = new URL(options.url);
             const endpoint = requestedUrl.pathname;
+            const previousState = states.get(key(companyId, 'Microsoft Graph', endpoint));
+            const reconcile = !previousState?.lastReconciledAt || now().getTime() - Date.parse(previousState.lastReconciledAt) >= 3600000;
+            const incremental = !range.explicit && !previousState?.requestedRange?.explicit && !reconcile && previousState?.completeThrough && previousState.storageStatus === 'stored';
+            const filterSince = incremental ? new Date(Math.max(Date.parse(range.since), Date.parse(previousState.completeThrough) - 300000)).toISOString() : range.since;
             if (range.since && ['/v1.0/security/alerts_v2', '/v1.0/security/incidents'].includes(endpoint)) {
                 const field = range.explicit ? 'createdDateTime' : 'lastUpdateDateTime';
-                requestedUrl.searchParams.set('$filter', field + ' ge ' + range.since + ' and ' + field + ' le ' + range.until);
+                requestedUrl.searchParams.set('$filter', field + ' ge ' + filterSince + ' and ' + field + ' le ' + range.until);
                 options = { ...options, url: requestedUrl.toString() };
             }
-            const recordType = ({ alerts_v2: 'alert', incidents: 'incident', tiIndicators: 'indicator', signIns: 'signin', riskDetections: 'riskDetection', riskyUsers: 'riskyUser' })[endpoint.split('/').pop()] || 'event';
+            if (range.since && ['/v1.0/auditLogs/directoryAudits', '/v1.0/auditLogs/signIns'].includes(endpoint)) {
+                const field = endpoint.endsWith('/signIns') ? 'createdDateTime' : 'activityDateTime';
+                requestedUrl.searchParams.set('$filter', field + ' ge ' + filterSince + ' and ' + field + ' le ' + range.until);
+                options = { ...options, url: requestedUrl.toString() };
+            }
+            const recordType = ({ alerts_v2: 'alert', incidents: 'incident', tiIndicators: 'indicator', signIns: 'signin', directoryAudits: 'directoryAudit', riskDetections: 'riskDetection', riskyUsers: 'riskyUser' })[endpoint.split('/').pop()] || 'event';
             const sourceKey = key(companyId, 'Microsoft Graph', endpoint);
             if (storageFailures.has(sourceKey)) { storageFailures.delete(sourceKey); const failed = states.get(sourceKey); if (failed) { failed.continuation = null; delete failed.storageError; } }
             const priorAtStart = states.get(sourceKey);
@@ -126,7 +165,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             // Resume an older backlog only after the newest page overlaps the last
             // observed head. Otherwise a burst larger than one page could be skipped.
             const headOverlaps = head.value?.some(row => prior?.headIds?.includes(row.id));
-            const next = (resume && (!head.ok || headOverlaps || resume === head.nextLink)) ? resume : head.nextLink;
+            const next = (resume && (!head.ok || (head.nextLink && (headOverlaps || resume === head.nextLink)))) ? resume : head.nextLink;
             let result = head;
             if (next && (head.ok || resume)) {
                 result = await fetchGraphCollectionPagesWithRetry({ ...options, url: next, onPage: page => {
@@ -142,6 +181,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             result.recordsFetched = combined.length;
             const complete = result.ok && !result.hasMore && !result.warnings?.length;
             publish('Microsoft Graph', endpoint, recordType, [], { complete, status: complete ? 'complete' : 'partial',
+                ...(complete && range.until && !range.explicit ? { completeThrough: range.until, ...(reconcile ? { lastReconciledAt: now().toISOString() } : {}) } : {}),
                 pages: result.pageCount || 0, recordsRetrieved: result.recordsFetched || 0,
                 continuation: result.nextLink || null, permissionErrors: [401, 403].includes(result.httpStatus) ? 1 : 0,
                 failedRequests: result.failedRequests || (result.ok ? 0 : 1), rateLimits: result.rateLimits || 0,
@@ -168,12 +208,20 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             [companyId, after, since, since, until, until, Math.min(1000, Math.max(1, Number(pageSize) || 500))]);
         return { records: rows.map(row => parse(row.RecordJson)), next: rows.length ? rows[rows.length - 1].RecordKey : null };
     }
+    async function record(companyId, uid) {
+        if (!Number.isInteger(companyId) || companyId <= 0 || typeof uid !== 'string' || !uid.startsWith(companyId + ':')) return null;
+        const cached = recent.get(uid)?.record;
+        if (cached) return cached;
+        const [rows] = await pool.query('SELECT RecordJson FROM StackCTRLRawSecurityRecords WHERE CompanyID = ? AND RecordKey = ? LIMIT 1', [companyId, hash(uid)]);
+        const result = rows[0] ? parse(rows[0].RecordJson) : null;
+        return result && Number(result.companyId) === companyId && result.uid === uid ? result : null;
+    }
     function subscribe(companyId, callback) {
         if (!listeners.has(companyId)) listeners.set(companyId, new Set());
         listeners.get(companyId).add(callback);
         return () => { listeners.get(companyId)?.delete(callback); if (!listeners.get(companyId)?.size) listeners.delete(companyId); };
     }
-    return { ensureSchema, collection, queue, hydrate, health, history, subscribe, flush: companyId => queues.get(companyId) || Promise.resolve() };
+    return { ensureSchema, collection, queue, hydrate, health, history, record, subscribe, flush: companyId => queues.get(companyId) || Promise.resolve() };
 }
 function publicState(state = {}) {
     const { continuation, ...safe } = state;

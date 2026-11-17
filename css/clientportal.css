@@ -20907,3 +20907,16 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
     transform: translate(-50%, 0) !important;
   }
 }
+/* Provider-specific raw evidence: concise table context, structured investigation. */
+.sunbird-raw-description { margin: .35rem 0 0; max-width: 38rem; color: #c5cbd5; font-size: .82rem; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sunbird-raw-dataset { display: block; margin-top: .25rem; color: #aab3c1; }
+.sunbird-raw-detail section { padding: 1rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,.12); }
+.sunbird-raw-detail h4 { margin: 0 0 .6rem; }
+.sunbird-raw-detail p { line-height: 1.65; overflow-wrap: anywhere; }
+.sunbird-raw-detail dl { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: .6rem 1rem; }
+.sunbird-raw-detail dt { color: #aab3c1; }
+.sunbird-raw-detail dd { margin: 0; overflow-wrap: anywhere; }
+.sunbird-raw-technical { margin: 1.25rem; }
+.sunbird-raw-technical summary { cursor: pointer; padding: .6rem 0; }
+.sunbird-raw-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55vh; overflow: auto; padding: 1rem; background: rgba(0,0,0,.3); font-size: .8rem; }
+@media (max-width: 600px) { .sunbird-raw-detail dl { grid-template-columns: 1fr; gap: .2rem; } .sunbird-raw-detail dd { margin-bottom: .75rem; } }

@@ -1,5 +1,6 @@
 const { createRawEvidenceJournal } = require('./services/intelligence/raw-evidence-journal');
 const { createRawEvidencePoller } = require('./services/intelligence/raw-evidence-poller');
+const { presentRawEvidence } = require('./services/intelligence/raw-evidence-interpretation');
 const { parseCloudflareLogpushPayload } = require('./services/intelligence/cloudflare-logpush');
 const { rawSecurityRecord, uniqueRawRecords } = require('./services/intelligence/raw-security-records');
 const bcrypt = require('bcryptjs');
@@ -14355,6 +14356,12 @@ async function fetchSecurityAlertRows(token, options = {}) {
     return { ...result, alerts: result.value || [], sourceSchema: 'alerts_v2' };
 }
 
+async function fetchSecurityDirectoryAuditRows(token, options = {}) {
+    return fetchGraphJsonWithTimeout({ collection: options.collection,
+        url: 'https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?$top=100&$orderby=activityDateTime%20desc',
+        token, timeoutMs: SECURITY_ALERTS_FETCH_TIMEOUT_MS, stage: 'microsoft_directory_audit_fetch', label: 'Directory audit' });
+}
+
 async function fetchSecurityIncidentRows(token, options = {}) {
     const result = await fetchGraphJsonWithTimeout({
         collection: options.collection,
@@ -15149,7 +15156,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             recordsFetched: summary.rawSecurityRecords?.length || 0,
             ok: true
         })),
-        fetchMicrosoftIdentityRiskEvidence(token, { graph: collection?.graph })
+        fetchMicrosoftIdentityRiskEvidence(token, { graph: collection?.graph }),
+        fetchSecurityDirectoryAuditRows(token, collectionOptions)
     ]);
 
     function resolvedSource(index, fallback) {
@@ -15232,12 +15240,14 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         : [];
 
     const retrievedAt = new Date().toISOString();
+    const directoryAuditResult = resolvedSource(6, { label: 'Directory audit', value: [] });
     const rawRecords = uniqueRawRecords([
         ...[
             [alerts, '/v1.0/security/alerts_v2', 'alert'],
             [incidents, '/v1.0/security/incidents', 'incident'],
             [externalThreatIndicators, '/v1.0/security/tiIndicators', 'indicator'],
             [signIns, '/v1.0/auditLogs/signIns', 'signin'],
+            [directoryAuditResult.value || [], '/v1.0/auditLogs/directoryAudits', 'directoryAudit'],
             [riskDetections, '/v1.0/identityProtection/riskDetections', 'riskDetection'],
             [riskyUsers, '/v1.0/identityProtection/riskyUsers', 'riskyUser']
         ].flatMap(([rows, endpoint, recordType]) => rows.map(row => rawSecurityRecord(row, {
@@ -15464,7 +15474,8 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         ...(threatIndicatorsResult.warnings || []),
         ...(signInsResult.warnings || []),
         ...(cloudflareResult.warnings || []),
-        ...(identityRiskResult.warnings || [])
+        ...(identityRiskResult.warnings || []),
+        ...(directoryAuditResult.warnings || [])
     ];
 
     rawWarnings = cleanSecurityCollectionWarnings(rawWarnings, {
@@ -15849,7 +15860,10 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         rawEvidence,
         rawRecords,
         displayTimeZone: process.env.APP_TIME_ZONE || 'Africa/Johannesburg',
-        retrieval: { sources: collection?.health() || [], cloudflare: cloudflareResult.summary?.retrieval || [], limitations: ['Cloudflare adaptive firewall analytics may be sampled by the provider. Unsampled events require Logpush; API permissions, plan retention and reported failed windows determine coverage.'] },
+        retrieval: { sources: collection?.health() || [], cloudflare: cloudflareResult.summary?.retrieval || [], limitations: [
+            'Cloudflare adaptive firewall analytics may be sampled by the provider. Unsampled events require Logpush; API permissions, plan retention and reported failed windows determine coverage.',
+            'File access, downloads and sharing audit feeds are not collected by this raw path. Available security alerts may contain file evidence; missing workload audit coverage must not be interpreted as absence of data exposure.'
+        ] },
         scenarioCoverage,
         identityRisk: {
             riskDetections: processedRiskDetections,
@@ -16122,13 +16136,31 @@ function securityEvidenceRange(query = {}) {
     if (!Number.isFinite(since.getTime()) || !Number.isFinite(until.getTime()) || since >= until) throw new Error('Invalid evidence date range');
     return { since: since.toISOString(), until: until.toISOString(), explicit: Boolean(query.since || query.until) };
 }
+function rawEvidenceClientPayload(payload) {
+    return { ...payload, rawRecords: (payload.rawRecords || []).map(presentRawEvidence) };
+}
+function rawEvidenceClientEvent(event) {
+    if (event.type === 'records') return { ...event, records: event.records.map(presentRawEvidence) };
+    if (event.type === 'complete') return { ...event, payload: rawEvidenceClientPayload(event.payload) };
+    return event;
+}
+app.get('/api/security-events/record', authenticateToken, async (req, res) => {
+    const tenant = getTenantByEmail(req.user.email);
+    if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
+    res.set('Cache-Control', 'no-store');
+    try {
+        const record = await rawEvidenceJournal.record(Number(tenant.companyId), String(req.query.uid || ''));
+        if (!record) return res.status(404).json({ success: false, message: 'Original evidence is not available yet. Retry after persistence completes.' });
+        return res.json({ success: true, record });
+    } catch (error) { return res.status(503).json({ success: false, message: 'Original evidence storage is temporarily unavailable.' }); }
+});
 app.get('/api/security-events/live', authenticateToken, (req, res) => {
     const tenant = getTenantByEmail(req.user.email);
     if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
     rawEvidencePoller.register(tenant.companyId);
     res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
-    const send = event => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(event) + '\n'); };
+    const send = event => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event)) + '\n'); };
     send({ type: 'start', companyId: tenant.companyId });
     const unsubscribe = rawEvidenceJournal.subscribe(tenant.companyId, send);
     const heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15000);
@@ -16142,13 +16174,13 @@ for (const kind of ['history', 'health']) app.get('/api/security-events/' + kind
         const range = securityEvidenceRange(req.query);
         const data = kind === 'health' ? await rawEvidenceJournal.health(tenant.companyId)
             : await rawEvidenceJournal.history(tenant.companyId, { after: String(req.query.after || ''), since: range.since, until: range.until });
-        res.json({ success: true, ...data });
+        res.json({ success: true, ...data, ...(data.records ? { records: data.records.map(presentRawEvidence) } : {}) });
     } catch (error) { res.status(503).json({ success: false, message: error.message }); }
 });
 app.get('/api/security-events', authenticateToken, async (req, res) => {
     let heartbeat, unsubscribe;
     const streaming = req.query.stream === '1';
-    const send = event => { if (streaming && !res.destroyed && !res.writableEnded) res.write(JSON.stringify(event) + '\n'); };
+    const send = event => { if (streaming && !res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event)) + '\n'); };
     try {
         const userEmail = req.user.email;
         console.log(`[Security Events] Fetching dashboard data for: ${userEmail}`);
@@ -16200,7 +16232,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
 
         if (streaming) { send({ type: 'complete', payload: { ...dashboardPayload, source: 'api' } }); res.end(); return; }
         res.json({
-            ...dashboardPayload,
+            ...rawEvidenceClientPayload(dashboardPayload),
             tenant: tenant.clientId,
             source: 'api'
         });
@@ -17757,13 +17789,14 @@ rawEvidenceJournal.ensureSchema().catch(error => console.error('[Raw evidence] S
 const rawEvidencePoller = createRawEvidencePoller({
     enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_RAW_POLL_ENABLED || 'true').toLowerCase()),
     intervalMs: process.env.SECURITY_RAW_POLL_INTERVAL_MS || 30000,
+    sourceIntervals: { alerts: 30000, incidents: 30000, signIns: 60000, identityRisk: 60000, directoryAudit: 120000, indicators: 300000, cloudflare: 30000 },
     discover: async () => {
         const [rows] = await pool.query(`SELECT DISTINCT company.ID AS CompanyID FROM Companies company LEFT JOIN StackCTRLClientCapabilities capability ON capability.CompanyID = company.ID AND capability.SourceKey = 'security_alerts' WHERE LOWER(company.CompanyName) LIKE '%sunbird%' OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1)`);
         return rows.map(row => Number(row.CompanyID));
     },
     sources: {
         ...Object.fromEntries(Object.entries({ alerts: fetchSecurityAlertRows, incidents: fetchSecurityIncidentRows, signIns: fetchSecuritySignInRows,
-            indicators: fetchSecurityThreatIndicatorRows, identityRisk: (token, options) => fetchMicrosoftIdentityRiskEvidence(token, { graph: options.collection.graph }) })
+            indicators: fetchSecurityThreatIndicatorRows, directoryAudit: fetchSecurityDirectoryAuditRows, identityRisk: (token, options) => fetchMicrosoftIdentityRiskEvidence(token, { graph: options.collection.graph }) })
             .map(([name, collect]) => [name, async companyId => {
                 const range = securityEvidenceRange();
                 const collection = rawEvidenceJournal.collection(companyId, { range });
