@@ -5234,7 +5234,7 @@ function renderSunbirdSecurityShell() {
             <section id="sunbird-security-evidence-table-section" class="sunbird-id-table-section">
                 <header class="sunbird-security-raw-evidence-header" id="sunbird-security-raw-evidence-header" aria-live="polite"></header>
                 <div class="sunbird-id-table-toolbar sunbird-security-table-toolbar">
-                    <input id="sunbird-security-search" class="sunbird-id-search" type="search" placeholder="Search incident, alert, user, source, MITRE, region">
+                    <input id="sunbird-security-search" class="sunbird-id-search" type="search" placeholder="Search activity, user, resource or source">
                     <select id="sunbird-security-severity-filter" class="sunbird-id-select">
                         <option value="all">All severity</option>
                         <option value="critical">Critical</option>
@@ -5277,17 +5277,12 @@ function renderSunbirdSecurityShell() {
                     <table class="sunbird-id-table sunbird-security-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Severity</th>
-                                <th>Type</th>
-                                <th>Incident / Alert</th>
+                                <th>Activity</th>
                                 <th>Status</th>
-                                <th>User / Asset</th>
+                                <th>Severity</th>
+                                <th>Affected entity</th>
                                 <th>Source</th>
-                                <th>API Source</th>
-                                <th>Category</th>
-                                <th>MITRE</th>
-                                <th>Evidence</th>
+                                <th>Date and time</th>
                             </tr>
                         </thead>
                         <tbody id="sunbird-security-body"></tbody>
@@ -5295,6 +5290,7 @@ function renderSunbirdSecurityShell() {
                 </div>
             </section>
 
+            <section id="sunbird-security-diagnostics" class="sunbird-id-table-section" hidden></section>
             <div class="sunbird-security-whatsapp-test">
                 <div class="sunbird-security-whatsapp-test-action">
                     <button id="sunbird-security-whatsapp-test-btn" class="sunbird-security-whatsapp-btn" type="button">
@@ -5468,7 +5464,8 @@ async function connectSunbirdSecurityLiveFeed() {
                     const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
                     if (!line.trim()) continue;
                     const event = JSON.parse(line);
-                    if (event.type === 'start') companyId = event.companyId;
+                    if (event.type === 'start') { companyId = event.companyId; sunbirdSecurityDashboardData.canViewDiagnostics = event.canViewDiagnostics === true; }
+                    if (event.coverage) sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, coverage: event.coverage };
                     if (event.type === 'records' && (!sunbirdSecurityLiveCompany || sunbirdSecurityLiveCompany === companyId)) {
                         sunbirdSecurityDashboardData.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, event.records.filter(row => Number(row.companyId) === Number(companyId)));
                         if (event.records.length) sunbirdSecurityDashboardData.rawEvidence = { ...sunbirdSecurityDashboardData.rawEvidence, rawEvidenceUpdatedAt: event.records[0].retrievedAt, correlationStatus: 'awaiting_next_evaluation' };
@@ -5504,11 +5501,14 @@ async function refreshSunbirdSecurityHealth() {
             const key = row.provider + row.endpoint;
             if (!sources.has(key) || String(row.lastAttemptAt || '') > String(sources.get(key).lastAttemptAt || '')) sources.set(key, row);
         }
-        sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, sources: [...sources.values()], stored: data.stored };
+        sunbirdSecurityDashboardData.canViewDiagnostics = data.canViewDiagnostics === true;
+        sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, ...data, sources: [...sources.values()] };
         renderSunbirdSecurityRawEvidenceHeader();
+        renderSunbirdSecurityDiagnostics();
     } catch (error) {
         sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, storageWarning: error.message };
         renderSunbirdSecurityRawEvidenceHeader();
+        renderSunbirdSecurityDiagnostics();
     }
 }
 let sunbirdSecurityRange = {};
@@ -5558,8 +5558,10 @@ async function loadSunbirdSecurityDashboardData() {
                 if (event.type === 'start') {
                     if (sunbirdSecurityLiveCompany !== null && sunbirdSecurityLiveCompany !== event.companyId) sunbirdSecurityDashboardData = normalizeSunbirdSecurityData({ rawRecords: [] });
                     sunbirdSecurityLiveCompany = event.companyId;
+                    sunbirdSecurityDashboardData.canViewDiagnostics = event.canViewDiagnostics === true;
                     loadSunbirdSecurityHistory();
                 }
+                if (event.coverage) sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, coverage: event.coverage };
                 if (event.type === 'records') { sunbirdSecurityDashboardData.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, event.records); if (event.records.length) sunbirdSecurityDashboardData.rawEvidence = { ...sunbirdSecurityDashboardData.rawEvidence, rawEvidenceUpdatedAt: event.records[0].retrievedAt, correlationStatus: 'awaiting_next_evaluation' }; }
                 if (event.source) { sources.set(event.source.provider + event.source.endpoint, event.source); sunbirdSecurityDashboardData.retrieval = { ...sunbirdSecurityDashboardData.retrieval, sources: [...sources.values()] }; }
                 if (event.type === 'records' || event.type === 'health') refresh();
@@ -5923,7 +5925,7 @@ function renderSunbirdSecurityAlertsOverview(findings = [], data = {}) {
     if (!records.length) {
         return `<div class="sunbird-security-findings-empty">
             <i class="fas fa-circle-info" aria-hidden="true"></i>
-            <div><strong>No correlated finding generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage before treating this as a clean result.' : 'Raw provider activity does not automatically create a correlation or AI summary.'}</p>${rawRecordCount ? `<p>${sunbirdSecurityEscape(rawRecordCount)} raw provider record${rawRecordCount === 1 ? '' : 's'} ${rawRecordCount === 1 ? 'is' : 'are'} available in the ledger.</p><button type="button" class="sunbird-security-alert-detail-btn" onclick="focusSunbirdSecurityInvestigation('sunbird-security-evidence-table-section')">View raw provider evidence</button>` : ''}</div>
+            <div><strong>No correlated finding generated from returned evidence</strong><p>${coverageIsLimited ? 'At least one detection scenario is partial, unavailable, or not assessed. Review detection coverage before treating this as a clean result.' : 'Raw provider activity does not automatically create a correlation or AI summary.'}</p>${rawRecordCount ? `<p>${sunbirdSecurityEscape(rawRecordCount)} raw provider record${rawRecordCount === 1 ? '' : 's'} ${rawRecordCount === 1 ? 'is' : 'are'} available in Security Activity.</p><button type="button" class="sunbird-security-alert-detail-btn" onclick="focusSunbirdSecurityInvestigation('sunbird-security-evidence-table-section')">View security activity</button>` : ''}</div>
         </div>`;
     }
 
@@ -6416,56 +6418,54 @@ function getSunbirdSecurityDisplayAsset(event = {}) {
     return asset && !isSunbirdSecurityIdentifier(asset) ? asset : 'Not found';
 }
 
+function getSunbirdSecurityCoverageWarnings(model = {}) {
+    const refreshWarning = model.findingLoadState === 'error' ? ['Security monitoring could not refresh. Recent activity may be missing.'] : [];
+    if (Array.isArray(model.retrieval?.coverage)) return [...refreshWarning, ...model.retrieval.coverage.map(row => row.message).filter(Boolean)];
+    const warnings = [...refreshWarning];
+    const status = String(model.rawEvidence?.cloudflare?.status || '').toLowerCase();
+    if (status === 'partial') warnings.push('Cloudflare security monitoring has partial coverage. Some security data is currently unavailable.');
+    if (status === 'unavailable') warnings.push('Cloudflare security monitoring is unavailable. Recent activity may be missing.');
+    if (!status || status === 'not_reported') warnings.push('Security monitoring coverage is being checked.');
+    return warnings;
+}
+
 function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityModel()) {
     const target = document.getElementById('sunbird-security-raw-evidence-header');
     if (!target) return;
-    const rawEvidence = model.rawEvidence || {};
-    const rawCount = Number(model.allEvents?.length ?? rawEvidence.displayedRecordCount ?? 0);
-    const routineCount = (model.allEvents || []).filter(event => event.presentation?.routine).length;
-    const cloudflare = rawEvidence.cloudflare || {};
-    const cloudflareStatus = String(cloudflare.status || 'not_reported').toLowerCase();
-    const cloudflareCount = Number(cloudflare.rawRecordsReturned ?? cloudflare.recordsReturned ?? 0);
-    const rawUpdatedAt = rawEvidence.rawEvidenceUpdatedAt;
-    const evaluatedAt = rawEvidence.correlationEvaluatedAt;
-    const awaitingEvaluation = rawEvidence.correlationStatus === 'awaiting_next_evaluation';
-    const cloudflareCountText = cloudflareCount
-        ? `${cloudflareCount} retained raw Cloudflare record${cloudflareCount === 1 ? '' : 's'}. `
-        : '';
-    const cloudflareMessage = cloudflareStatus === 'available' || cloudflareStatus === 'complete'
-        ? (cloudflareCount ? `${cloudflareCountText}Cloudflare collection returned this evidence.` : 'Cloudflare collection completed; no raw Cloudflare alert was returned.')
-        : cloudflareStatus === 'partial'
-            ? `${cloudflareCountText}Cloudflare collection is partial. ${cloudflare.reason || 'Some Cloudflare evidence could not be collected.'}`
-            : cloudflareStatus === 'unavailable'
-                ? `${cloudflareCountText}Cloudflare collection is unavailable. ${cloudflare.reason || 'No Cloudflare result is being represented as a clean result.'}`
-                : 'Cloudflare collection state was not reported by this snapshot.';
-    const evaluationMessage = evaluatedAt
-        ? `Last evaluated ${sunbirdSecurityFormatTime(evaluatedAt)}.${awaitingEvaluation ? ' New raw records are awaiting the next correlation and AI evaluation.' : ''}`
-        : awaitingEvaluation
-            ? 'Evaluation time not supplied. New raw records are awaiting the next correlation and AI evaluation.'
-            : 'Evaluation time not supplied.';
-    target.innerHTML = `
-        <div class="sunbird-security-raw-evidence-title">
-            <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Raw provider evidence</h3><p>Live Microsoft Graph and Cloudflare records, with the previous 15 days for context. Descriptions explain provider fields; original severity and complete evidence are preserved.</p></div>
-            <span class="sunbird-security-raw-count">${sunbirdSecurityEscape(rawCount)} returned record${rawCount === 1 ? '' : 's'}</span>
-        </div>
-        <p>${routineCount} verified routine platform record${routineCount === 1 ? '' : 's'} retained. Client view filters these reads only. <button type="button" class="sunbird-id-evidence-btn" onclick="applySunbirdSecurityTableFilter({activity:'all'})">Show all raw activity</button></p>
-        <p>${[...(model.warnings || []), ...(model.retrieval?.limitations || [])].map(warning => sunbirdSecurityEscape(warning)).join(' | ')}</p>
-        <div class="sunbird-security-raw-statuses">
-            <p><b>Cloudflare</b><span class="sunbird-security-status ${sunbirdSecurityStatusClass(cloudflareStatus)}">${sunbirdSecurityEscape(sunbirdSecurityStatusLabel(cloudflareStatus))}</span><small>${sunbirdSecurityEscape(cloudflareMessage)}</small></p>
-            <p><b>Raw evidence updated</b><small>${sunbirdSecurityEscape(rawUpdatedAt ? sunbirdSecurityFormatTime(rawUpdatedAt) : 'Time not supplied')}</small></p>
-            <p><b>Correlation / AI evaluated</b><small>${sunbirdSecurityEscape(evaluationMessage)}</small></p>
-        </div>
-        <details><summary>Retrieval health and coverage</summary><p>${sunbirdSecurityEscape((model.retrieval?.stored || []).map(row => row.provider + ': ' + row.recordsStored + ' stored records').join(' / ') || 'Stored record totals pending')}${model.retrieval?.storageWarning ? ' | ' + sunbirdSecurityEscape(model.retrieval.storageWarning) : ''}</p><div style="overflow:auto"><table><thead><tr><th>Provider / dataset</th><th>State</th><th>Last attempt</th><th>Last complete</th><th>Records / pages</th><th>Failures / rate limits / permissions</th><th>Storage</th></tr></thead><tbody>${(model.retrieval?.sources || []).map(row => `<tr><td>${sunbirdSecurityEscape(row.provider)}<br>${sunbirdSecurityEscape(row.endpoint)}</td><td>${sunbirdSecurityEscape(row.status)}${row.resumable ? ' (will resume)' : ''}<br>${sunbirdSecurityEscape(row.error || row.limitation || '')}</td><td>${sunbirdSecurityEscape(sunbirdSecurityFormatTime(row.lastAttemptAt))}</td><td>${sunbirdSecurityEscape(sunbirdSecurityFormatTime(row.lastSuccessAt))}</td><td>${Number(row.recordsRetrieved || 0)} / ${Number(row.pages || 0)}</td><td>${Number(row.failedRequests || 0)} / ${Number(row.rateLimits || 0)} / ${Number(row.permissionErrors || 0)}</td><td>${sunbirdSecurityEscape(row.storageStatus || 'Not confirmed')} ${sunbirdSecurityEscape(row.storageError || '')}</td></tr>`).join('')}</tbody></table></div></details>`;
+    const warnings = getSunbirdSecurityCoverageWarnings(model);
+    const routine = (model.allEvents || []).some(event => event.presentation?.routine);
+    target.innerHTML = `<div class="sunbird-security-raw-evidence-title"><div><h3>Security Activity</h3><p>Understand what happened across your organisation and exactly when it happened.</p></div></div>
+        ${warnings.map(message => `<p class="sunbird-security-coverage-warning" role="status">${sunbirdSecurityEscape(message)}</p>`).join('')}
+        ${routine ? '<p>Routine platform reads are filtered in Client view. <button type="button" class="sunbird-id-evidence-btn" onclick="applySunbirdSecurityTableFilter({activity:\'all\'})">Show all activity</button></p>' : ''}`;
+}
+
+function renderSunbirdSecurityDiagnostics(model = buildSunbirdSecurityModel()) {
+    const target = document.getElementById('sunbird-security-diagnostics');
+    if (!target) return;
+    target.hidden = model.canViewDiagnostics !== true;
+    if (target.hidden) { target.innerHTML = ''; return; }
+    const expanded = target.querySelector?.('details')?.open;
+    const technicalExpanded = target.querySelector?.('.sunbird-raw-technical')?.open;
+    const esc = sunbirdSecurityEscape;
+    const count = value => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : 'Not provided';
+    target.innerHTML = `<details${expanded ? ' open' : ''}><summary>Data Source Health &amp; Diagnostics</summary>
+        <p>${esc(model.retrieval?.storageMessage || (model.retrieval?.storageMode === 'memory_only' ? 'Security alert database storage is disabled. Evidence is held temporarily in memory.' : 'Storage status not confirmed'))}</p>
+        <p>${esc([...(model.warnings || []), ...(model.retrieval?.limitations || [])].join(' | '))}</p>
+        <p>Loaded activity records: ${(model.allEvents || []).length}. Routine records: ${(model.allEvents || []).filter(row => row.presentation?.routine).length}.</p>
+        <div class="sunbird-id-table-wrap"><table class="sunbird-id-table"><thead><tr><th>Provider / endpoint</th><th>State</th><th>Last attempt</th><th>Last complete</th><th>Records / pages</th><th>Failures / rate limits / permissions</th><th>Storage</th></tr></thead>
+        <tbody>${(model.retrieval?.sources || []).map(row => `<tr><td>${esc(row.provider)}<br>${esc(row.endpoint)}</td><td>${esc(row.status)}${row.resumable ? ' (will resume)' : ''}<br>${esc(row.error || row.limitation || '')}</td><td>${esc(sunbirdSecurityFormatTime(row.lastAttemptAt))}</td><td>${esc(sunbirdSecurityFormatTime(row.lastSuccessAt))}</td><td>${count(row.recordsRetrieved)} / ${count(row.pages)}</td><td>${count(row.failedRequests)} / ${count(row.rateLimits)} / ${count(row.permissionErrors)}</td><td>${esc(row.storageStatus || 'Not confirmed')} ${esc(row.storageError || '')}</td></tr>`).join('')}</tbody></table></div>
+        <p>${esc(model.retrieval?.storageWarning || '')}</p><details class="sunbird-raw-technical"${technicalExpanded ? ' open' : ''}><summary>Full retrieval diagnostics</summary><pre>${esc(JSON.stringify({ retrieval: model.retrieval, collection: model.collection, providerCoverage: model.rawEvidence }, null, 2))}</pre></details></details>`;
 }
 
 function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     renderSunbirdSecurityRawEvidenceHeader(model);
+    renderSunbirdSecurityDiagnostics(model);
     const body = document.getElementById('sunbird-security-body');
     if (!body) return;
     const events = getFilteredSunbirdSecurityEvents(model);
     if (!events.length) {
-        const pager = document.getElementById('sunbird-security-raw-pager'); if (pager) pager.textContent = '0 matching records';
-        body.innerHTML = '<tr><td colspan="11" class="sunbird-id-empty">No SOC evidence matches the current filters.</td></tr>';
+        const pager = document.getElementById('sunbird-security-raw-pager'); if (pager) pager.textContent = '';
+        body.innerHTML = `<tr><td colspan="6" class="sunbird-id-empty">${getSunbirdSecurityCoverageWarnings(model).length ? 'No activity is available for this view. Monitoring coverage may be incomplete.' : 'No activity matches these filters.'}</td></tr>`;
         return;
     }
     const pageSize = 100;
@@ -6474,27 +6474,20 @@ function renderSunbirdSecurityTable(model = buildSunbirdSecurityModel()) {
     if (table) {
         let pager = document.getElementById('sunbird-security-raw-pager');
         if (!pager) { pager = document.createElement('div'); pager.id = 'sunbird-security-raw-pager'; table.insertAdjacentElement('afterend', pager); }
-        pager.innerHTML = `<span>Showing ${pageIndex * pageSize + 1} - ${Math.min(events.length, (pageIndex + 1) * pageSize)} of ${events.length} matching records</span> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex - 1};renderSunbirdSecurityTable()" ${pageIndex === 0 ? 'disabled' : ''}>Previous</button> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex + 1};renderSunbirdSecurityTable()" ${(pageIndex + 1) * pageSize >= events.length ? 'disabled' : ''}>Next</button>`;
+        pager.innerHTML = `<span>Browse activity</span> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex - 1};renderSunbirdSecurityTable()" ${pageIndex === 0 ? 'disabled' : ''}>Previous</button> <button type="button" onclick="sunbirdSecurityTablePage=${pageIndex + 1};renderSunbirdSecurityTable()" ${(pageIndex + 1) * pageSize >= events.length ? 'disabled' : ''}>Next</button>`;
     }
     body.innerHTML = events.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize).map(event => {
         const severity = event.sourceSeverity ?? event.severity ?? 'Not provided';
         const severityTone = String(severity).toLowerCase();
-        const mitre = getSunbirdSecurityMitre(event);
         const apiSource = getSunbirdSecurityApiSource(event);
-        const apiCategory = getSunbirdSecurityApiCategory(event);
         return `
             <tr>
-                <td data-label="Time">${escapeIdentityText(sunbirdSecurityFormatTime(event.timestamp))}</td>
+                <td data-label="Activity" class="sunbird-security-activity-cell"><button type="button" class="sunbird-security-activity-link" onclick='openSunbirdSecurityEventEvidence(${escapeIdentityText(JSON.stringify(event.uid))})'>${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</button>${event.presentation?.description ? `<p class="sunbird-raw-description">${escapeIdentityText(event.presentation.description)}</p>` : ''}</td>
+                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.presentation?.outcome || (event.presentation?.activityClass === 'informational' ? 'Informational' : '') || event.status || 'Not provided')}</span></td>
                 <td data-label="Severity"><span class="sunbird-id-risk ${severityTone === 'critical' || severityTone === 'high' ? 'high' : severityTone === 'medium' ? 'medium' : severityTone === 'low' || severityTone === 'informational' ? 'safe' : ''}">${escapeIdentityText(severity)}</span></td>
-                <td data-label="Type"><span class="sunbird-id-role-list"><span>${escapeIdentityText(event.recordType || 'event')}</span></span></td>
-                <td data-label="Incident / Alert"><strong>${escapeIdentityText(getSunbirdSecurityDisplayTitle(event))}</strong>${event.presentation?.description ? `<p class="sunbird-raw-description">${escapeIdentityText(event.presentation.description)}</p>` : ''}</td>
-                <td data-label="Status"><span class="sunbird-id-pill">${escapeIdentityText(event.presentation?.outcome || event.status || 'Not provided')}</span></td>
-                <td data-label="User / Asset">${escapeIdentityText(getSunbirdSecurityDisplayAsset(event))}</td>
-                <td data-label="Source">${escapeIdentityText(event.presentation?.sourceLabel || event.provider || apiSource)}${event.presentation?.dataset ? `<small class="sunbird-raw-dataset">${escapeIdentityText(event.presentation.dataset)}</small>` : ''}</td>
-                <td data-label="API Source">${escapeIdentityText(event.provider || getSunbirdSecurityReportingSystem(event))}</td>
-                <td data-label="Category">${escapeIdentityText(apiCategory)}</td>
-                <td data-label="MITRE">${escapeIdentityText(event.presentation ? event.presentation.mitreTechniques.join(', ') || 'Not mapped' : mitre.technique === 'Not provided' ? 'Not mapped' : `${mitre.tactic} / ${mitre.technique}`)}</td>
-                <td data-label="Evidence"><button type="button" class="sunbird-id-evidence-btn" onclick='openSunbirdSecurityEventEvidence(${escapeIdentityText(JSON.stringify(event.uid))})'>Open</button></td>
+                <td data-label="Affected entity">${escapeIdentityText(getSunbirdSecurityDisplayAsset(event))}</td>
+                <td data-label="Source">${escapeIdentityText(event.presentation?.sourceLabel || getSunbirdSecurityReportingSystem(event) || event.provider || apiSource)}</td>
+                <td data-label="Date and time" class="sunbird-security-activity-time">${escapeIdentityText(sunbirdSecurityFormatTime(event.timestamp))}</td>
             </tr>
         `;
     }).join('');

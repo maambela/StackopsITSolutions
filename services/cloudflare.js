@@ -340,7 +340,7 @@ function summarizeSectionError(error, endpoint = {}) {
     status: permissionUnavailable ? 'permission_unavailable' : featureUnavailable ? 'unavailable' : 'error',
     httpStatus: status,
     code,
-    message: permissionUnavailable ? 'Permission not available' : featureUnavailable ? 'Endpoint unavailable for this account'  : message
+    message
   };
 }
 
@@ -349,7 +349,7 @@ async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}
   const url = endpoint.path(accountId);
   const collector = endpoint.key === 'zones' ? null : options.collection;
   const previous = collector?.getState('Cloudflare', url);
-  const incremental = !options.range?.explicit && previous?.storageStatus === 'stored' && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
+  const incremental = !options.range?.explicit && ['stored', 'memory_only'].includes(previous?.storageStatus) && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
   let query = typeof endpoint.query === 'function' ? endpoint.query(accountId) : endpoint.query;
   if (endpoint.key === 'zones') query = { ...query, 'account.id': accountId };
   if (['accessLogs', 'auditLogs', 'accountLogs', 'notificationHistory'].includes(endpoint.key)) {
@@ -689,14 +689,21 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
         label: endpoint.label,
         status: count === 0 && endpoint.key !== 'account' && endpoint.key !== 'gatewayConfig' ? 'empty' : 'ok',
         message: count === 0 && endpoint.key !== 'account' && endpoint.key !== 'gatewayConfig' ? 'No data configured' : null,
+        httpStatus: endpoint.key === 'zones' ? (result.value?.collection?.httpStatus || 200) : null,
+        code: null,
+        zoneCount: endpoint.key === 'zones' ? count : null,
+        graphQLAttempted: false,
         data: result.value
       };
     }
 
+    const sectionError = summarizeSectionError(result.reason, endpoint);
     return {
       key: endpoint.key,
       label: endpoint.label,
-      ...summarizeSectionError(result.reason, endpoint),
+      ...sectionError,
+      zoneCount: endpoint.key === 'zones' ? 0 : null,
+      graphQLAttempted: false,
       data: null
     };
   });
@@ -737,7 +744,10 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
     getList(item.data).map(payload => ({ payload, endpoint: endpointDefinition(item.key).path(accountId), recordType: item.key })));
   summary.retrieval = raw.filter(item => securityKeys.has(item.key) || item.key === 'zones').map(item => ({
     endpoint: endpointDefinition(item.key).path(accountId), status: item.status,
-    ...item.data?.collection, recordsRetrieved: getList(item.data).length, error: item.data?.collection?.error || (['error', 'unavailable', 'permission_unavailable'].includes(item.status) ? item.message : null)
+    ...item.data?.collection, httpStatus: item.httpStatus || item.data?.collection?.httpStatus || null,
+    errorCode: item.code || null, zoneCount: item.zoneCount ?? (item.key === 'zones' ? getList(item.data).length : null),
+    graphQLAttempted: item.graphQLAttempted || false,
+    recordsRetrieved: getList(item.data).length, error: item.data?.collection?.error || (['error', 'unavailable', 'permission_unavailable'].includes(item.status) ? item.message : null)
   }));
   for (const item of raw) {
     if (securityKeys.has(item.key) && !item.data) options.collection?.publish('Cloudflare', endpointDefinition(item.key).path(accountId), item.key, [], { complete: false, status: item.status, error: item.message, failedRequests: 1, permissionErrors: item.status === 'permission_unavailable' ? 1 : 0 });
@@ -746,20 +756,35 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
   if (options.securityOnly) {
     const since = options.range?.since || new Date(Date.now() - (Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15) * 86400000).toISOString();
     const until = options.range?.until || new Date().toISOString();
+    const zoneDiscovery = raw.find(item => item.key === 'zones');
     await Promise.all(zones.map(async zone => {
       const endpoint = '/graphql/firewallEventsAdaptive/' + zone.id;
+      const zoneRetrieval = summary.retrieval.find(item => item.endpoint === '/zones');
+      if (zoneRetrieval) zoneRetrieval.graphQLAttempted = true;
       const previous = options.collection?.getState('Cloudflare', endpoint);
-      const incremental = !options.range?.explicit && previous?.storageStatus === 'stored' && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
+      const incremental = !options.range?.explicit && ['stored', 'memory_only'].includes(previous?.storageStatus) && previous.completeThrough && Date.now() - Date.parse(previous.lastReconciledAt || '') < 3600000;
       const firewallSince = incremental ? new Date(Math.max(Date.parse(since), Date.parse(previous.completeThrough) - 300000)).toISOString() : since;
       const result = await fetchFirewallEvents(client, { zoneId: zone.id, since: firewallSince, until, pending: previous?.continuation,
         onPage: page => options.collection?.publish('Cloudflare', endpoint, 'firewall_event', page.value, { complete: false, status: 'collecting', continuation: page.pending, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.value.length }) });
       summary.rawSecurityRecords.push(...result.value.map(payload => ({ payload, endpoint, recordType: 'firewall_event' })));
-      const state = { ...result, value: undefined, pending: undefined, endpoint, status: result.complete ? 'complete' : 'partial', error: result.warnings.join('; ') || null, recordsRetrieved: result.value.length };
+      const state = { ...result, value: undefined, pending: undefined, endpoint, status: result.complete ? 'complete' : 'partial', graphQLAttempted: true, error: result.warnings.join('; ') || null, recordsRetrieved: result.value.length };
       summary.retrieval.push(state);
       options.collection?.publish('Cloudflare', endpoint, 'firewall_event', [], { ...state, continuation: result.pending.length ? result.pending : null,
         ...(result.complete && !options.range?.explicit ? { completeThrough: until, ...(!incremental ? { lastReconciledAt: new Date().toISOString() } : {}) } : {}) });
     }));
-    if (!zones.length) summary.retrieval.push({ endpoint: '/graphql/firewallEventsAdaptive', status: 'unavailable', complete: false, error: 'No accessible zones returned for this account. Zone Read and Zone Analytics Read are required for firewall/WAF/DDoS analytics.' });
+    if (!zones.length) summary.retrieval.push({
+      endpoint: '/graphql/firewallEventsAdaptive',
+      status: zoneDiscovery?.status || 'empty',
+      complete: false,
+      httpStatus: zoneDiscovery?.httpStatus || null,
+      errorCode: zoneDiscovery?.code || null,
+      zoneCount: zoneDiscovery?.zoneCount ?? 0,
+      graphQLAttempted: false,
+      recordsRetrieved: 0,
+      error: zoneDiscovery?.status === 'empty'
+        ? 'Zone discovery returned HTTP 200 with zero valid zones.'
+        : (zoneDiscovery?.message || 'Zone discovery failed before GraphQL collection could be attempted.')
+    });
   }
   return summary;
 }

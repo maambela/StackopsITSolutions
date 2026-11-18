@@ -9,7 +9,7 @@ function collectionRows(data) {
 
 async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, timeoutMs = 60000, now = Date.now, onPage = () => {}, resumeQuery = null, preview = false, requireCollection = false } = {}) {
     const rows = [], seen = new Set(), pageContents = new Set();
-    let params = { ...(resumeQuery || query) }, pages = 0, retries = 0, rateLimits = 0;
+    let params = { ...(resumeQuery || query) }, pages = 0, retries = 0, rateLimits = 0, httpStatus = null;
     const deadline = now() + timeoutMs;
     try {
         while (true) {
@@ -20,7 +20,9 @@ async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, tim
             let data;
             for (let attempt = 0; ; attempt++) {
                 try {
-                    data = (await client.get(url, { params, timeout: Math.max(1, deadline - now()) })).data;
+                    const response = await client.get(url, { params, timeout: Math.max(1, deadline - now()) });
+                    data = response.data;
+                    if (Number.isFinite(Number(response.status))) httpStatus = Number(response.status);
                     if (data?.success === false) throw new Error(data.errors?.map(e => e.message).join('; ') || 'Cloudflare API failure');
                     break;
                 } catch (error) {
@@ -36,7 +38,7 @@ async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, tim
             pages++;
             const pageRows = collectionRows(data);
             if (!pageRows && requireCollection) throw new Error('Cloudflare returned an unrecognized collection shape; coverage is incomplete');
-            if (!pageRows) return { ...data, collection: { pages, retries, rateLimits, complete: true } };
+            if (!pageRows) return { ...data, collection: { pages, retries, rateLimits, httpStatus, complete: true } };
             const signature = JSON.stringify(pageRows);
             if (pageRows.length && pageContents.has(signature)) throw new Error('Cloudflare returned a repeated page');
             pageContents.add(signature);
@@ -50,7 +52,7 @@ async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, tim
                 : pageSize > 0 && pageRows.length >= pageSize;
             if (cursor) params = { ...params, cursor };
             else if (!Object.hasOwn(info, 'cursor') && !info.cursors && more && pageRows.length) params = { ...params, page: page + 1 };
-            else { onPage({ value: pageRows, nextQuery: null, pages, retries, rateLimits, recordsRetrieved: rows.length }); return { ...data, result: rows, collection: { pages, retries, rateLimits, complete: true } }; }
+            else { onPage({ value: pageRows, nextQuery: null, pages, retries, rateLimits, recordsRetrieved: rows.length }); return { ...data, result: rows, collection: { pages, retries, rateLimits, httpStatus, complete: true } }; }
             onPage({ value: pageRows, nextQuery: params, pages, retries, rateLimits, recordsRetrieved: rows.length });
             if (preview) return { ...data, result: rows, collection: { pages, retries, rateLimits, complete: false, nextQuery: params } };
         }

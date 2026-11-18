@@ -24,7 +24,7 @@ test('Logpush authentication requires the mapped account and its delivery secret
         CloudflareAccountID: 'account-a',
         LogpushSecretSha256: hashSecret('secret-a')
     } });
-    const store = createCloudflareLogpushStore({ pool });
+    const store = createCloudflareLogpushStore({ persistenceEnabled: true, pool });
     assert.deepEqual(await store.authenticate({ accountId: 'account-a', secret: 'secret-a' }), { companyId: 42, accountId: 'account-a' });
     assert.equal(await store.authenticate({ accountId: 'account-a', secret: 'wrong-secret' }), null);
     assert.equal(await store.authenticate({ accountId: 'account-b', secret: 'secret-a' }), null);
@@ -32,7 +32,7 @@ test('Logpush authentication requires the mapped account and its delivery secret
 
 test('Logpush ingestion records the verified company scope and reports duplicates', async () => {
     const pool = createPool({ insertResults: [1, 0] });
-    const store = createCloudflareLogpushStore({ pool, now: () => new Date('2026-10-30T12:00:00Z') });
+    const store = createCloudflareLogpushStore({ persistenceEnabled: true, pool, now: () => new Date('2026-10-30T12:00:00Z') });
     const result = await store.ingest({
         companyId: 42,
         accountId: 'account-a',

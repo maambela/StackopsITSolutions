@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { normaliseCloudflareLogpushPayload } = require('./cloudflare-logpush');
+const { SECURITY_ALERT_STORAGE_ENABLED } = require('./security-storage-policy');
 
 const SCHEMA = [
     `CREATE TABLE IF NOT EXISTS StackCTRLCloudflareTenantMappings (
@@ -46,10 +47,11 @@ function mysqlDate(value) {
     return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 23).replace('T', ' ');
 }
 
-function createCloudflareLogpushStore({ pool, now = () => new Date(), onRecords = () => {} } = {}) {
+function createCloudflareLogpushStore({ pool, now = () => new Date(), onRecords = () => {}, persistenceEnabled = SECURITY_ALERT_STORAGE_ENABLED } = {}) {
     if (!pool?.query) throw new Error('Cloudflare Logpush storage requires a database pool');
     return {
         async ensureSchema() {
+            if (!persistenceEnabled) return { storageMode: 'memory_only' };
             for (const statement of SCHEMA) await pool.query(statement);
         },
         async authenticate({ accountId, secret }) {
@@ -70,6 +72,7 @@ function createCloudflareLogpushStore({ pool, now = () => new Date(), onRecords 
         async ingest({ companyId, accountId, dataset, payload }) {
             const records = normaliseCloudflareLogpushPayload(payload, { dataset, accountId });
             onRecords({ companyId, accountId, dataset, records });
+            if (!persistenceEnabled) return { received: records.length, inserted: 0, duplicates: 0, stored: false, storageMode: 'memory_only' };
             let inserted = 0;
             for (const record of records) {
                 const [result] = await pool.query(
@@ -83,6 +86,7 @@ function createCloudflareLogpushStore({ pool, now = () => new Date(), onRecords 
             return { received: records.length, inserted, duplicates: records.length - inserted };
         },
         async recentEvents(companyId, { days = Number(process.env.SECURITY_EVIDENCE_HISTORY_DAYS) || 15 } = {}) {
+            if (!persistenceEnabled) return [];
             const records = []; let after = 0;
             while (true) {
                 const [rows] = await pool.query(

@@ -113,18 +113,18 @@ test('empty correlated layer directs operators to raw provider evidence without 
     });
     assert.match(html, /No correlated finding generated/);
     assert.match(html, /4 raw provider records/);
-    assert.match(html, /View raw provider evidence/);
+    assert.match(html, /View security activity/);
     assert.doesNotMatch(html, /clean result/i);
 });
 
 test('security shell names the two evidence layers explicitly', () => {
     assert.match(source, /Correlated findings &amp; AI assessment/);
-    assert.match(source, /Raw provider evidence/);
+    assert.match(source, /<h3>Security Activity<\/h3>/);
     assert.match(source, /Raw provider activity does not automatically create a finding or AI summary/);
     assert.match(source, /sunbird-security-raw-evidence-header/);
 });
 
-test('raw evidence header keeps Cloudflare counts and the last evaluation time when collection is partial', () => {
+test('activity header explains partial coverage without retrieval counts or internal errors', () => {
     const target = { innerHTML: '' };
     const headerContext = vm.createContext({
         document: { getElementById: id => id === 'sunbird-security-raw-evidence-header' ? target : null },
@@ -133,7 +133,7 @@ test('raw evidence header keeps Cloudflare counts and the last evaluation time w
         sunbirdSecurityStatusLabel: value => String(value || '').replace(/_/g, ' '),
         sunbirdSecurityFormatTime: value => `formatted:${value}`
     });
-    vm.runInContext(extract('renderSunbirdSecurityRawEvidenceHeader'), headerContext);
+    vm.runInContext(extract('getSunbirdSecurityCoverageWarnings') + '\n' + extract('renderSunbirdSecurityRawEvidenceHeader'), headerContext);
     headerContext.renderSunbirdSecurityRawEvidenceHeader({
         allEvents: [{}],
         rawEvidence: {
@@ -144,10 +144,8 @@ test('raw evidence header keeps Cloudflare counts and the last evaluation time w
             cloudflare: { status: 'partial', recordsReturned: 1, reason: 'Audit permission is unavailable.' }
         }
     });
-    assert.match(target.innerHTML, /1 retained raw Cloudflare record/);
-    assert.match(target.innerHTML, /Cloudflare collection is partial/);
-    assert.match(target.innerHTML, /Last evaluated formatted:2026-10-30T12:00:00Z/);
-    assert.match(target.innerHTML, /awaiting the next correlation and AI evaluation/);
+    assert.match(target.innerHTML, /Cloudflare security monitoring has partial coverage/);
+    assert.doesNotMatch(target.innerHTML, /records|Last evaluated|permission|12:00|API|evaluation/);
 });
 
 test('security data requests the live API directly and surfaces a live failure', async () => {

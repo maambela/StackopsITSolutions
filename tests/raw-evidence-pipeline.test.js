@@ -41,7 +41,7 @@ test('API pages reach the subscriber before storage finishes; repeated sync upse
     const pool = fakePool(), events = [];
     let release;
     pool.holdWrites(new Promise(resolve => { release = resolve; }));
-    const journal = createRawEvidenceJournal({ pool });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     const collection = journal.collection(11, { onEvent: event => events.push(event) });
     const result = await collection.graph({ token: 'fixture', url: 'https://graph.microsoft.com/v1.0/security/alerts_v2', fetchImpl: async () => graphResponse([{ id: 'same', title: 'Provider title' }]) });
     assert.equal(result.value.length, 1);
@@ -59,12 +59,12 @@ function awaitableRecord(companyId) { return rawSecurityRecord({ id: 'id' }, { p
 
 test('failed later page survives restart and resumes while the newest page still arrives first', async () => {
     const pool = fakePool(), url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
-    let journal = createRawEvidenceJournal({ pool });
+    let journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     const first = await journal.collection(11).graph({ token: 'fixture', url, fetchImpl: async requested => requested === url
         ? graphResponse([{ id: 'first' }], url + '?next=2')
         : { ok: false, status: 403, text: async () => 'Permission unavailable' } });
     assert.equal(first.ok, false); await journal.flush(11);
-    journal = createRawEvidenceJournal({ pool });
+    journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     await journal.hydrate(11);
     const calls = [];
     const second = await journal.collection(11).graph({ token: 'fixture', url, fetchImpl: async requested => {
@@ -138,8 +138,70 @@ test('Cloudflare integration retrieves notifications and zone firewall events wi
     assert.ok(published.some(args => args[2] === 'firewall_event' && args[3].length));
 });
 
+test('Cloudflare zone discovery preserves HTTP status and zone count by response type', async () => {
+   const range = { since: '2026-11-17T12:00:00Z', until: '2026-11-17T13:00:00Z', explicit: true };
+   const cases = [
+       { name: '200 with zones', status: 200, zones: [{ id: 'zone-one', name: 'example.test' }], classification: 'ok', graphQLPosts: 1 },
+       { name: '200 empty', status: 200, zones: [], classification: 'empty', graphQLPosts: 0 },
+       { name: '401', status: 401, errorCode: 10000, errorMessage: 'Invalid API Token', classification: 'error', graphQLPosts: 0 },
+       { name: '403', status: 403, errorCode: 9109, errorMessage: 'Invalid permissions', classification: 'permission_unavailable', graphQLPosts: 0 },
+       { name: '404', status: 404, errorCode: 1001, errorMessage: 'Zone resource not found', classification: 'unavailable', graphQLPosts: 0 }
+   ];
+
+   for (const scenario of cases) {
+       let graphQLPosts = 0;
+       const client = {
+           async get(url) {
+               if (url !== '/zones') return { status: 200, data: { result: [] } };
+               if (scenario.status !== 200) {
+                   const error = new Error(scenario.errorMessage);
+                   error.response = { status: scenario.status, data: { success: false, errors: [{ code: scenario.errorCode, message: scenario.errorMessage }] } };
+                   throw error;
+               }
+               return { status: 200, data: { success: true, result: scenario.zones } };
+           },
+           async post(url) {
+               graphQLPosts++;
+               assert.equal(url, '/graphql');
+               return { status: 200, data: { data: { viewer: { zones: [{ firewallEventsAdaptive: [] }] } } } };
+           }
+       };
+
+       const summary = await getCloudflareNetworkSecuritySummary({
+           client,
+           accountId: 'account-redacted',
+           apiToken: 'fixture',
+           securityOnly: true,
+           range
+       });
+       const zones = summary.retrieval.find(row => row.endpoint === '/zones');
+       const firewall = summary.retrieval.find(row => row.endpoint === '/graphql/firewallEventsAdaptive');
+       const zoneFirewall = summary.retrieval.find(row => row.endpoint?.startsWith('/graphql/firewallEventsAdaptive/'));
+       assert.equal(zones.status, scenario.classification, scenario.name);
+       assert.equal(zones.zoneCount, scenario.zones?.length || 0, scenario.name);
+       assert.equal(graphQLPosts, scenario.graphQLPosts, scenario.name);
+       if (scenario.status === 200) assert.equal(zones.httpStatus, 200, scenario.name);
+       else {
+           assert.equal(zones.httpStatus, scenario.status, scenario.name);
+           assert.equal(zones.errorCode, scenario.errorCode, scenario.name);
+           assert.match(zones.error, new RegExp(scenario.errorMessage), scenario.name);
+       }
+       if (scenario.status === 200 && scenario.zones.length) {
+           assert.equal(zones.graphQLAttempted, true);
+           assert.equal(zoneFirewall.status, 'complete');
+           assert.equal(zoneFirewall.recordsRetrieved, 0);
+           assert.equal(zoneFirewall.graphQLAttempted, true);
+       } else {
+           assert.equal(firewall.httpStatus, scenario.status === 200 ? 200 : scenario.status, scenario.name);
+           assert.equal(firewall.errorCode, scenario.errorCode || null, scenario.name);
+           assert.equal(firewall.zoneCount, scenario.zones?.length || 0, scenario.name);
+           assert.equal(firewall.graphQLAttempted, false, scenario.name);
+       }
+   }
+});
+
 test('saved raw history is reachable beyond one API page and tenant boundaries remain enforced', async () => {
-    const pool = fakePool(), journal = createRawEvidenceJournal({ pool });
+    const pool = fakePool(), journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     const records = Array.from({ length: 1005 }, (_, index) => rawSecurityRecord({ id: String(index) }, {
         provider: 'Cloudflare', endpoint: '/logpush/firewall_events', recordType: 'firewall_event', companyId: 11, retrievedAt: '2026-11-17T10:00:00Z'
     }));
@@ -151,7 +213,7 @@ test('saved raw history is reachable beyond one API page and tenant boundaries r
 });
 
 test('a saved continuation cannot send a Graph token to another host', async () => {
-    const pool = fakePool(), journal = createRawEvidenceJournal({ pool });
+    const pool = fakePool(), journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     const collector = journal.collection(11);
     collector.publish('Microsoft Graph', '/v1.0/security/alerts_v2', 'alert', [], { continuation: 'https://attacker.invalid/collect' });
     let calls = 0;
@@ -163,7 +225,7 @@ test('a saved continuation cannot send a Graph token to another host', async () 
 });
 
 test('a burst beyond the newest page is drained before resuming an old backlog', async () => {
-    const journal = createRawEvidenceJournal({ pool: fakePool() });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool: fakePool() });
     const url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
     const collector = journal.collection(11);
     collector.publish('Microsoft Graph', '/v1.0/security/alerts_v2', 'alert', [], { headIds: ['older'], continuation: url + '?backlog=1' });
@@ -181,7 +243,7 @@ test('failed storage cannot advance the saved cursor beyond a missing page; reco
     const pool = fakePool(), getConnection = pool.getConnection;
     let fail = true;
     pool.getConnection = async () => { if (fail) throw new Error('Database unavailable'); return getConnection(); };
-    const journal = createRawEvidenceJournal({ pool, logger: { warn() {} } });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool, logger: { warn() {} } });
     const collector = journal.collection(11), url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
     const fetchImpl = async requested => requested === url ? graphResponse([{ id: 'first' }], url + '?page=2') : graphResponse([{ id: 'second' }]);
     await collector.graph({ url, token: 'fixture', fetchImpl });
@@ -233,7 +295,7 @@ test('Logpush accepts compressed NDJSON and validation probes; distinct full rec
 });
 
 test('live Graph collection bounds history by modification time, retaining newly updated old alerts', async () => {
-    const journal = createRawEvidenceJournal({ pool: fakePool() });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool: fakePool() });
     const range = { since: '2026-11-02T10:00:00.000Z', until: '2026-11-17T10:00:00.000Z', explicit: false };
     await journal.collection(11, { range }).graph({ url: 'https://graph.microsoft.com/v1.0/security/alerts_v2', token: 'fixture', fetchImpl: async url => {
         assert.equal(new URL(url).searchParams.get('$filter'), 'lastUpdateDateTime ge ' + range.since + ' and lastUpdateDateTime le ' + range.until);
@@ -244,7 +306,7 @@ test('live Graph collection bounds history by modification time, retaining newly
 
 test('successful live sync advances with overlap, reconciles hourly, and preserves the watermark after failure', async () => {
     const pool = fakePool(); let at = new Date('2026-11-17T10:00:00Z');
-    const journal = createRawEvidenceJournal({ pool, now: () => at });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool, now: () => at });
     const filters = [], since = '2026-11-02T10:00:00.000Z';
     async function collect(fail = false) {
         const result = await journal.collection(11, { range: { since, until: at.toISOString(), explicit: false } }).graph({
@@ -271,7 +333,7 @@ test('unchanged stored payloads skip repeated writes while record batches retain
         connection.query = async (sql, params) => { if (sql.includes('INSERT INTO StackCTRLRawSecurityRecords')) writes++; return query(sql, params); };
         return connection;
     };
-    const journal = createRawEvidenceJournal({ pool });
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
     const rows = Array.from({ length: 205 }, (_, index) => rowFor(index));
     function rowFor(index) { return rawSecurityRecord({ id: String(index), title: 'Original ' + index }, { companyId: 11, provider: 'Microsoft Graph', endpoint: '/alerts', recordType: 'alert', retrievedAt: '2026-11-17T10:00:00Z' }); }
     await journal.queue(11, rows); assert.equal(writes, 3); assert.equal(pool.records.size, 205);

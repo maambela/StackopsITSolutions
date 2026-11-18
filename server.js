@@ -1,4 +1,6 @@
 const { createRawEvidenceJournal } = require('./services/intelligence/raw-evidence-journal');
+const { SECURITY_ALERT_STORAGE_ENABLED } = require('./services/intelligence/security-storage-policy');
+const { canViewSecurityDiagnostics, securityCoverage, presentSecurityPayload, presentSecurityEvent } = require('./services/intelligence/raw-evidence-delivery');
 const { createRawEvidencePoller } = require('./services/intelligence/raw-evidence-poller');
 const { presentRawEvidence } = require('./services/intelligence/raw-evidence-interpretation');
 const { parseCloudflareLogpushPayload } = require('./services/intelligence/cloudflare-logpush');
@@ -11559,7 +11561,7 @@ async function upsertDashboardMetricCaches() {
                 [companyId, JSON.stringify(emailSecurity)]
             );
 
-            await pool.query(
+            if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
                 `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
                  VALUES (?, ?, NOW())`,
                 [companyId, JSON.stringify(securityEvents)]
@@ -14875,6 +14877,7 @@ function isSecurityFindingAiEnabled() {
 }
 
 async function persistRealtimeSecurityAlert(companyId, alert) {
+    if (!SECURITY_ALERT_STORAGE_ENABLED) return { stored: false, storageMode: 'memory_only' };
     if (!companyId) return;
     await ensureRealtimeSecurityAlertTable();
     const eventKey = securityRealtimeAlertKey(alert);
@@ -14910,6 +14913,7 @@ function mergeUniqueSecurityAlerts(baseAlerts = [], realtimeAlerts = []) {
 }
 
 async function mergeStoredRealtimeSecurityAlerts(companyId, payload = {}) {
+    if (!SECURITY_ALERT_STORAGE_ENABLED) return payload;
     if (!companyId || !pool) return payload;
     await ensureRealtimeSecurityAlertTable();
     const [rows] = await pool.query(
@@ -15055,21 +15059,21 @@ async function collectCompanyScopedCloudflareSecuritySummary(companyId, options 
 }
 
 async function handleRealtimeSecurityAlert({ companyId, alert, provider }) {
-    if (!companyId) throw new Error('SECURITY_ALERTS_WEBHOOK_COMPANY_ID is required to store real-time alerts.');
+    if (!companyId) throw new Error('SECURITY_ALERTS_WEBHOOK_COMPANY_ID is required to route real-time alerts.');
     rawEvidenceJournal?.collection(Number(companyId)).publish(provider,
         provider === 'Microsoft Graph' ? '/v1.0/security/alerts_v2' : '/webhooks/cloudflare-security-alerts',
         'alert', [alert.rawPayload || alert], { complete: false, status: 'receiving', recordsRetrieved: 1 });
     await persistRealtimeSecurityAlert(companyId, alert);
     if (isResolvedRealtimeSecurityAlert(alert)) {
-        console.info(`[Security Webhook] Stored resolved ${provider} alert without WhatsApp notification.`, { id: alert.id });
-        return { stored: true, notification: null };
+        console.info(`[Security Webhook] Received resolved ${provider} alert without WhatsApp notification.`, { id: alert.id });
+        return { stored: SECURITY_ALERT_STORAGE_ENABLED, notification: null };
     }
-    console.info(`[Security Webhook] Stored ${provider} alert for finding correlation; raw events do not send WhatsApp.`, {
+    console.info(`[Security Webhook] Received ${provider} alert; raw events do not send WhatsApp.`, {
         id: alert.id,
         severity: alert.severity
     });
     return {
-        stored: true,
+        stored: SECURITY_ALERT_STORAGE_ENABLED,
         notification: {
             status: 'deferred_to_finding_correlation',
             reason: 'Raw provider events are not WhatsApp notification candidates.'
@@ -15897,7 +15901,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         processedRiskyUsers.length +
         findings.length;
 
-    allMetrics.recordsStored = 0; // Storage is asynchronous; collection does not confirm persistence.
+    allMetrics.recordsStored = 0; // Security alert database persistence is disabled.
     allMetrics.recordsOmitted = Math.max(0, allMetrics.recordsFetched - allMetrics.recordsPrepared);
 
     if (allMetrics.recordsOmitted > 0) {
@@ -16088,6 +16092,12 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        if (!SECURITY_ALERT_STORAGE_ENABLED) {
+            const payload = await fetchSecurityEventsPayloadFromApi({ companyId: Number(context.companyId), tenantKey: context.tenantId || context.accessType,
+                skipFindingAiAssessment: true, skipWhatsAppAuto: true });
+            res.set('Cache-Control', 'no-store');
+            return res.json({ ...rawEvidenceClientPayload(payload), source: 'api', storageMode: 'memory_only' });
+        }
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM SecurityEventsPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -16112,7 +16122,7 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
             companyId: context.companyId,
             tenantKey: context.tenantId || context.accessType || null
         });
-        await pool.query(
+        if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
             `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
              VALUES (?, ?, NOW())`,
             [context.companyId, JSON.stringify(api)]
@@ -16136,13 +16146,11 @@ function securityEvidenceRange(query = {}) {
     if (!Number.isFinite(since.getTime()) || !Number.isFinite(until.getTime()) || since >= until) throw new Error('Invalid evidence date range');
     return { since: since.toISOString(), until: until.toISOString(), explicit: Boolean(query.since || query.until) };
 }
-function rawEvidenceClientPayload(payload) {
-    return { ...payload, rawRecords: (payload.rawRecords || []).map(presentRawEvidence) };
+function rawEvidenceClientPayload(payload, diagnostics = false) {
+    return presentSecurityPayload(payload, diagnostics);
 }
-function rawEvidenceClientEvent(event) {
-    if (event.type === 'records') return { ...event, records: event.records.map(presentRawEvidence) };
-    if (event.type === 'complete') return { ...event, payload: rawEvidenceClientPayload(event.payload) };
-    return event;
+function rawEvidenceClientEvent(event, diagnostics = false, companyId) {
+    return presentSecurityEvent(event, diagnostics, rawEvidenceJournal.sources(companyId));
 }
 app.get('/api/security-events/record', authenticateToken, async (req, res) => {
     const tenant = getTenantByEmail(req.user.email);
@@ -16150,7 +16158,7 @@ app.get('/api/security-events/record', authenticateToken, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
         const record = await rawEvidenceJournal.record(Number(tenant.companyId), String(req.query.uid || ''));
-        if (!record) return res.status(404).json({ success: false, message: 'Original evidence is not available yet. Retry after persistence completes.' });
+        if (!record) return res.status(404).json({ success: false, message: 'This original is no longer in temporary memory. Database storage is disabled; refresh the provider evidence to retrieve it again.' });
         return res.json({ success: true, record });
     } catch (error) { return res.status(503).json({ success: false, message: 'Original evidence storage is temporarily unavailable.' }); }
 });
@@ -16160,8 +16168,9 @@ app.get('/api/security-events/live', authenticateToken, (req, res) => {
     rawEvidencePoller.register(tenant.companyId);
     res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
-    const send = event => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event)) + '\n'); };
-    send({ type: 'start', companyId: tenant.companyId });
+    const diagnostics = canViewSecurityDiagnostics(req.user);
+    const send = event => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event, diagnostics, tenant.companyId)) + '\n'); };
+    send({ type: 'start', companyId: tenant.companyId, canViewDiagnostics: diagnostics });
     const unsubscribe = rawEvidenceJournal.subscribe(tenant.companyId, send);
     const heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15000);
     res.on('close', () => { unsubscribe(); clearInterval(heartbeat); });
@@ -16174,13 +16183,16 @@ for (const kind of ['history', 'health']) app.get('/api/security-events/' + kind
         const range = securityEvidenceRange(req.query);
         const data = kind === 'health' ? await rawEvidenceJournal.health(tenant.companyId)
             : await rawEvidenceJournal.history(tenant.companyId, { after: String(req.query.after || ''), since: range.since, until: range.until });
-        res.json({ success: true, ...data, ...(data.records ? { records: data.records.map(presentRawEvidence) } : {}) });
-    } catch (error) { res.status(503).json({ success: false, message: error.message }); }
+        if (kind === 'health' && !canViewSecurityDiagnostics(req.user)) return res.json({ success: true, canViewDiagnostics: false, coverage: securityCoverage(data.sources) });
+        res.json({ success: true, ...data, ...(kind === 'health' ? { coverage: securityCoverage(data.sources) } : {}), canViewDiagnostics: canViewSecurityDiagnostics(req.user), ...(data.records ? { records: data.records.map(presentRawEvidence) } : {}) });
+    } catch (error) { res.status(503).json({ success: false, message: canViewSecurityDiagnostics(req.user) ? error.message : 'Security monitoring could not refresh. Recent activity may be missing.' }); }
 });
 app.get('/api/security-events', authenticateToken, async (req, res) => {
     let heartbeat, unsubscribe;
+    let streamCompanyId;
+    const diagnostics = canViewSecurityDiagnostics(req.user);
     const streaming = req.query.stream === '1';
-    const send = event => { if (streaming && !res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event)) + '\n'); };
+    const send = event => { if (streaming && !res.destroyed && !res.writableEnded) res.write(JSON.stringify(rawEvidenceClientEvent(event, diagnostics, streamCompanyId)) + '\n'); };
     try {
         const userEmail = req.user.email;
         console.log(`[Security Events] Fetching dashboard data for: ${userEmail}`);
@@ -16196,11 +16208,12 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
 
         const range = securityEvidenceRange(req.query);
         rawEvidencePoller.register(tenant.companyId);
+        streamCompanyId = tenant.companyId;
         if (streaming) {
             res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
             res.flushHeaders();
             unsubscribe = rawEvidenceJournal.subscribe(tenant.companyId, send);
-            send({ type: 'start', companyId: tenant.companyId, requestedRange: range });
+            send({ type: 'start', companyId: tenant.companyId, canViewDiagnostics: diagnostics, ...(diagnostics ? { requestedRange: range } : {}) });
             heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15000);
         }
         const payload = await fetchSecurityEventsPayloadFromApi({
@@ -16220,7 +16233,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         });
 
         const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload: payloadWithRealtimeAlerts });
-        if (securityEvidenceService && tenant.companyId) {
+        if (SECURITY_ALERT_STORAGE_ENABLED && securityEvidenceService && tenant.companyId) {
             securityEvidenceService.persistProcessedEvidence({
                 companyId: tenant.companyId,
                 tenantKey: tenant.clientId || 'sunbird',
@@ -16232,7 +16245,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
 
         if (streaming) { send({ type: 'complete', payload: { ...dashboardPayload, source: 'api' } }); res.end(); return; }
         res.json({
-            ...rawEvidenceClientPayload(dashboardPayload),
+            ...rawEvidenceClientPayload(dashboardPayload, diagnostics),
             tenant: tenant.clientId,
             source: 'api'
         });
@@ -16243,7 +16256,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         if (streaming && res.headersSent) { send({ type: 'error', message: error.message }); res.end(); return; }
         res.status(500).json({ 
             error: 'Failed to fetch security events data',
-            message: error.message
+            message: diagnostics ? error.message : 'Security monitoring could not refresh. Recent activity may be missing.'
         });
     } finally { clearInterval(heartbeat); unsubscribe?.(); }
 });
@@ -16255,6 +16268,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
  * can inspect Graph response metadata without producing WhatsApp traffic.
  */
 app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
+    if (!canViewSecurityDiagnostics(req.user)) return res.status(403).json({ success: false, message: 'Administrator access is required for source diagnostics.' });
     const tenant = getTenantByEmail(req.user?.email);
     if (!tenant || tenant.clientId !== 'sunbird' || !tenant.companyId) {
         return res.status(403).json({
@@ -17194,6 +17208,7 @@ async function collectApplicationsEvidenceForConfiguredTenants({ trigger = 'sche
 }
 
 async function performSecurityEvidenceCollection(companyId, collectionTrigger, collectorContext = {}) {
+    if (!SECURITY_ALERT_STORAGE_ENABLED) return { companyId, status: 'persistence_disabled', storageMode: 'memory_only' };
     if (!securityEvidenceService) throw new Error('Security evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Security Alerts';
     try {
@@ -17205,7 +17220,7 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger, c
             tenantKey: collectorContext.tenantKey || 'sunbird'
         });
         const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: collectorContext.tenantKey || 'sunbird', payload });
-        await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
+        if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
         const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: collectorContext.tenantKey || 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });
         console.log('[security_alerts:storage:complete] Security Alerts evidence stored', {
             snapshotId: stored.snapshotId,
@@ -17224,6 +17239,7 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger, c
 }
 
 async function collectAndPersistSecurityEvidence(companyId, collectionTrigger = 'scheduled_hourly', collectorContext = {}) {
+    if (!SECURITY_ALERT_STORAGE_ENABLED) return { companyId, status: 'persistence_disabled', storageMode: 'memory_only' };
     return securityEvidenceCollectors.run({ companyId, sourceKey: 'security_alerts', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performSecurityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
 }
 
@@ -17567,7 +17583,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 tenantKey: `company:${companyId}`,
                 skipWhatsAppAuto: true
             });
-            await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)]);
+            if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)]);
             return null;
         }
         case 'backup': {
@@ -17784,7 +17800,7 @@ const applicationsEvidenceAutomation = createApplicationsEvidenceAutomation({
     intervalMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_INTERVAL_MS || (60 * 60 * 1000),
     startupDelayMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_STARTUP_DELAY_MS || (15 * 60 * 1000)
 });
-rawEvidenceJournal = createRawEvidenceJournal({ pool });
+rawEvidenceJournal = createRawEvidenceJournal({ pool, persistenceEnabled: SECURITY_ALERT_STORAGE_ENABLED });
 rawEvidenceJournal.ensureSchema().catch(error => console.error('[Raw evidence] Schema unavailable:', error.message));
 const rawEvidencePoller = createRawEvidencePoller({
     enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_RAW_POLL_ENABLED || 'true').toLowerCase()),
@@ -17809,12 +17825,12 @@ const rawEvidencePoller = createRawEvidencePoller({
         }
     }
 });
-securityEvidenceService = createSecurityEvidenceStore({ pool });
+securityEvidenceService = createSecurityEvidenceStore({ pool, persistenceEnabled: SECURITY_ALERT_STORAGE_ENABLED });
 const securityEvidenceSchemaReady = securityEvidenceService.ensureSchema().catch(error => {
     console.error('[Security Evidence] Schema initialization failed:', error.message);
     return { error };
 });
-cloudflareLogpushStore = createCloudflareLogpushStore({ pool, onRecords: ({ companyId, accountId, dataset, records }) => {
+cloudflareLogpushStore = createCloudflareLogpushStore({ pool, persistenceEnabled: SECURITY_ALERT_STORAGE_ENABLED, onRecords: ({ companyId, accountId, dataset, records }) => {
     rawEvidenceJournal.collection(Number(companyId)).publish('Cloudflare', '/logpush/' + accountId + '/' + dataset, dataset, records.map(row => row.raw),
         { complete: false, status: 'receiving', limitation: 'Logpush delivery is unsampled when configured without filters or sampling. Only delivered batches are confirmed.', recordsRetrieved: records.length });
 } });
@@ -17828,7 +17844,7 @@ const securityEvidenceAutomation = createSecurityEvidenceAutomation({
         if (schema?.error) throw schema.error;
         return collectSecurityEvidenceForConfiguredTenants(options);
     },
-    enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_EVIDENCE_COLLECTION_ENABLED || 'true').toLowerCase()),
+    enabled: SECURITY_ALERT_STORAGE_ENABLED && !['false', '0', 'no'].includes(String(process.env.SECURITY_EVIDENCE_COLLECTION_ENABLED || 'true').toLowerCase()),
     intervalMs: process.env.SECURITY_EVIDENCE_COLLECTION_INTERVAL_MS || (60 * 60 * 1000),
     startupDelayMs: process.env.SECURITY_EVIDENCE_COLLECTION_STARTUP_DELAY_MS || (17 * 60 * 1000)
 });

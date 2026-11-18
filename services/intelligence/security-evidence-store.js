@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { buildSecurityDashboardSource } = require('./security-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
+const { SECURITY_ALERT_STORAGE_ENABLED } = require('./security-storage-policy');
 
 const SECURITY_EVIDENCE_SCHEMA = [
     `CREATE TABLE IF NOT EXISTS StackCTRLSecurityEvidenceSnapshots (
@@ -233,9 +234,10 @@ function deriveSecurityEvidence(payload = {}) {
     };
 }
 
-function createSecurityEvidenceStore({ pool, logger = console, now = () => new Date() } = {}) {
+function createSecurityEvidenceStore({ pool, logger = console, now = () => new Date(), persistenceEnabled = SECURITY_ALERT_STORAGE_ENABLED } = {}) {
     if (!pool?.query) throw new Error('Security evidence storage requires a database pool');
     async function ensureSchema() {
+        if (!persistenceEnabled) return { tables: [], storageMode: 'memory_only' };
         for (const statement of SECURITY_EVIDENCE_SCHEMA) await pool.query(statement);
         return { tables: ['StackCTRLSecurityEvidenceSnapshots', 'StackCTRLSecurityEvidence'] };
     }
@@ -243,6 +245,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         if ((payload.rawRecords || []).some(row => Number(row.companyId) !== numericCompanyId)) throw new Error('Raw evidence tenant mismatch');
+        if (!persistenceEnabled) return { companyId: numericCompanyId, snapshotId: null, recordCount: 0, status: 'persistence_disabled', storageMode: 'memory_only' };
         const evidence = deriveSecurityEvidence(payload);
         const collectedAt = now();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
@@ -293,6 +296,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
         return { snapshotId, companyId: numericCompanyId, collectedAt: collectedAt.toISOString(), recordCount: evidence.evidenceRows.length, expectedRecordCount: evidence.expectedRecordCount, omittedRecordCount: evidence.omittedRecordCount, isComplete: evidence.isComplete, collectionStatus: evidence.collectionStatus, warnings: evidence.warnings, dashboardMetrics: evidence.dashboardMetrics };
     }
     async function recordCollectionFailure({ companyId, tenantKey = 'sunbird', collectionTrigger = 'scheduled_hourly', sourceEndpoint, error } = {}) {
+        if (!persistenceEnabled) return { companyId: Number(companyId), snapshotId: null, status: 'persistence_disabled', storageMode: 'memory_only' };
         const [result] = await pool.query(
             `INSERT INTO StackCTRLSecurityEvidenceSnapshots
              (CompanyID, TenantKey, CollectionTrigger, SourceEndpoint, CollectionStatus, IsComplete, CollectedAt,

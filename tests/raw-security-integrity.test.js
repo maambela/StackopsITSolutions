@@ -87,19 +87,20 @@ test('raw table renders the provider column, missing severity and verbatim descr
     const context = vm.createContext({
         Intl, Date, document: { getElementById: () => body },
         renderSunbirdSecurityRawEvidenceHeader: () => {},
+        renderSunbirdSecurityDiagnostics: () => {},
         getFilteredSunbirdSecurityEvents: () => [row],
         escapeIdentityText: value => String(value ?? '').replace(/[<>&"']/g, character => `&#${character.charCodeAt(0)};`)
     });
-    for (const name of ['renderSunbirdSecurityTable', 'getSunbirdSecurityMitre', 'getSunbirdSecurityApiSource',
+    for (const name of ['renderSunbirdSecurityTable', 'getSunbirdSecurityReportingSystem', 'getSunbirdSecurityMitre', 'getSunbirdSecurityApiSource',
         'getSunbirdSecurityApiCategory', 'getSunbirdSecurityDisplayTitle', 'getSunbirdSecurityDisplayAsset',
         'sunbirdSecurityFormatTime', 'isSunbirdSecurityIdentifier']) {
         const start = source.indexOf(`function ${name}(`), end = source.indexOf('\nfunction ', start + 1);
         vm.runInContext(source.slice(start, end), context);
     }
     context.renderSunbirdSecurityTable({});
-    assert.match(body.innerHTML, /data-label="API Source">Microsoft Graph/);
+    assert.equal((body.innerHTML.match(/<td /g) || []).length, 6);
     assert.match(body.innerHTML, /data-label="Severity">.*Not provided/);
     assert.match(body.innerHTML, /User must register MFA\./);
-    assert.match(body.innerHTML, /data-label="MITRE">Not mapped/);
+    assert.doesNotMatch(body.innerHTML, /data-label="(?:MITRE|API Source|Category|Evidence)"/);
     assert.match(body.innerHTML, /data-label="Source">Microsoft Entra ID/);
 });
