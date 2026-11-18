@@ -57,6 +57,87 @@ test('API pages reach the subscriber before storage finishes; repeated sync upse
 });
 function awaitableRecord(companyId) { return rawSecurityRecord({ id: 'id' }, { provider: 'Microsoft Graph', endpoint: '/alerts', recordType: 'alert', companyId, retrievedAt: new Date().toISOString() }); }
 
+test('simultaneous dashboard Graph collections share one request and its short-lived result', async () => {
+    const journal = createRawEvidenceJournal({ persistenceEnabled: false });
+    const url = 'https://graph.microsoft.com/v1.0/auditLogs/signIns';
+    let calls = 0;
+    const options = {
+        token: 'fixture-token',
+        url,
+        fetchImpl: async () => {
+            calls++;
+            return graphResponse([{ id: 'shared-signin' }]);
+        }
+    };
+
+    const [first, second] = await Promise.all([
+        journal.collection(11).graph(options),
+        journal.collection(11).graph(options)
+    ]);
+    assert.equal(calls, 1);
+    assert.equal(first.value[0].id, 'shared-signin');
+    assert.equal(second.value[0].id, 'shared-signin');
+
+    await journal.collection(11).graph(options);
+    assert.equal(calls, 1);
+});
+
+test('memory-only Graph result cache expires and refreshes the provider source', async () => {
+    let currentTime = Date.parse('2026-11-18T12:00:00Z');
+    let calls = 0;
+    const journal = createRawEvidenceJournal({
+        persistenceEnabled: false,
+        now: () => new Date(currentTime)
+    });
+    const options = {
+        token: 'fixture-token',
+        url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns',
+        fetchImpl: async () => {
+            calls++;
+            return graphResponse([{ id: `signin-${calls}` }]);
+        }
+    };
+
+    await journal.collection(11).graph(options);
+    await journal.collection(11).graph(options);
+    assert.equal(calls, 1);
+
+    currentTime += 60001;
+    const refreshed = await journal.collection(11).graph(options);
+    assert.equal(calls, 2);
+    assert.equal(refreshed.value[0].id, 'signin-2');
+});
+
+test('Graph 429 waits for Retry-After and only caches the successful retry', async () => {
+    const journal = createRawEvidenceJournal({ persistenceEnabled: false });
+    const waits = [];
+    let calls = 0;
+    const options = {
+        token: 'fixture-token',
+        url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns',
+        waitImpl: async milliseconds => waits.push(milliseconds),
+        fetchImpl: async () => {
+            calls++;
+            if (calls === 1) return {
+                ok: false,
+                status: 429,
+                headers: { get: name => name.toLowerCase() === 'retry-after' ? '2' : null },
+                text: async () => '{"error":{"code":"TooManyRequests"}}'
+            };
+            return graphResponse([{ id: 'retried-signin' }]);
+        }
+    };
+
+    const result = await journal.collection(11).graph(options);
+    assert.equal(result.ok, true);
+    assert.equal(result.value[0].id, 'retried-signin');
+    assert.equal(calls, 2);
+    assert.deepEqual(waits, [2000]);
+
+    await journal.collection(11).graph(options);
+    assert.equal(calls, 2);
+});
+
 test('failed later page survives restart and resumes while the newest page still arrives first', async () => {
     const pool = fakePool(), url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
     let journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });

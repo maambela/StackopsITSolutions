@@ -75,7 +75,7 @@ const { createSecurityFindingAiAssessment } = require('./services/intelligence/s
 const { createCloudflareLogpushStore } = require('./services/intelligence/cloudflare-logpush-store');
 const { buildCloudflareLogpushFindings, buildCloudflareLogpushRawAlerts, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
-const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry } = require('./services/intelligence/microsoft-graph-collection');
+const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry, parseRetryAfterMs } = require('./services/intelligence/microsoft-graph-collection');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
 const { extractMicrosoftAlertEntities, describeMicrosoftAlertEntityShape } = require('./services/intelligence/microsoft-alert-entities');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
@@ -434,7 +434,10 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
         });
         const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
         if (!response.ok) {
-            throw new Error(`${label} failed (${response.status}): ${body.slice(0, 300) || response.statusText}`);
+            const error = new Error(`${label} failed (${response.status}): ${body.slice(0, 300) || response.statusText}`);
+            error.status = response.status;
+            error.retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
+            throw error;
         }
         const payload = body ? JSON.parse(body) : {};
         logRuntimeOperation('graph_request_complete', {
@@ -454,7 +457,10 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
             cpuUserMicros: process.cpuUsage(cpuStart).user,
             error: message
         });
-        throw new Error(message);
+        const requestError = new Error(message);
+        if (error.status !== undefined) requestError.status = error.status;
+        if (error.retryAfterMs !== undefined) requestError.retryAfterMs = error.retryAfterMs;
+        throw requestError;
     } finally {
         clearTimeout(timeout);
     }
@@ -492,7 +498,8 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
             } catch (error) {
                 lastError = error;
                 if (attempt >= retries || !isRetryableGraphError(error)) break;
-                const retryDelayMs = 250 * (attempt + 1);
+                const retryDelayMs = error.retryAfterMs ?? 1000 * (2 ** attempt);
+                if (retryDelayMs > 30000) break;
                 logRuntimeOperation('graph_request_retry', { label, attempt: attempt + 1, retryDelayMs, error: error.message });
                 await sleep(retryDelayMs);
             }
@@ -15107,7 +15114,11 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     }
 
     options = { ...options, range: options.range || securityEvidenceRange() };
-    const collection = options.collection || rawEvidenceJournal?.collection(companyId, { onEvent: options.onEvent, range: options.range });
+    const collection = options.collection || rawEvidenceJournal?.collection(companyId, {
+        onEvent: options.onEvent,
+        range: options.range,
+        bypassGraphCache: Boolean(options.bypassGraphCache)
+    });
     const collectionOptions = { collection, range: options.range };
     const allMetrics = {
         recordsFetched: 0,
@@ -16283,6 +16294,7 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
         const payload = await fetchSecurityEventsPayloadFromApi({
             companyId: tenant.companyId,
             tenantKey: tenant.tenantId || tenant.clientId,
+            bypassGraphCache: true,
             skipWhatsAppAuto: true
         });
         const audit = {
