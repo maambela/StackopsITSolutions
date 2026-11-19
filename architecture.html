@@ -3,55 +3,150 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Stack CTRL source-to-dashboard architecture map">
+  <meta name="description" content="Stack CTRL provider, domain reporting and enterprise intelligence architecture map">
   <title>Stack CTRL · Architecture</title>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="css/architecture-page.css">
+  <style>
+:root { color-scheme: dark; --glass: rgba(9,10,12,.68); --edge: rgba(255,255,255,.18); --text: rgba(250,250,249,.96); --muted: rgba(235,233,228,.65); --stack: rgba(238,235,229,.62); --ms:#e6c75c; --op:#76aceb; --cf:#e99a5d; --report-input:#7acadd; --report-output:#8bc9aa; --report-combined:#d7bd7a; --report-return:#c6b8ef; }
+* { box-sizing:border-box; }
+body { min-width:320px; margin:0; overflow-x:clip; background:#050505; color:var(--text); font-family:"Segoe UI",system-ui,sans-serif; }
+.architecture-page__background { position:fixed; inset:0; z-index:-2; background:linear-gradient(rgba(0,0,0,.8),rgba(0,0,0,.9)),url('Images/Orangebackground.jpg') center/cover no-repeat; }
+.architecture-page__background::after { content:""; position:absolute; inset:0; background:radial-gradient(circle at 12% 0%,rgba(255,255,255,.07),transparent 30%),radial-gradient(circle at 100% 100%,rgba(255,173,112,.05),transparent 25%); }
+.architecture-page__shell { width:calc(100% - 32px); margin:0 auto; padding:22px 0 42px; }
+.glass-panel { border:1px solid var(--edge); background:linear-gradient(135deg,rgba(255,255,255,.08),var(--glass) 35%,rgba(3,3,4,.56)); box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 46px rgba(0,0,0,.26); backdrop-filter:blur(22px) saturate(112%); -webkit-backdrop-filter:blur(22px) saturate(112%); }
+.architecture-page__header { display:grid; grid-template-columns:180px minmax(0,1fr) auto; align-items:center; gap:22px; padding:18px 22px; border-radius:19px; }
+.architecture-page__back,.architecture-page__footer a { display:inline-flex; align-items:center; gap:8px; width:max-content; color:var(--text); font-size:.76rem; text-decoration:none; }
+.architecture-page__back:hover,.architecture-page__back:focus-visible,.architecture-page__footer a:hover,.architecture-page__footer a:focus-visible { text-decoration:underline; text-underline-offset:4px; }
+.architecture-page__brand { display:flex; align-items:center; gap:14px; min-width:0; }.architecture-page__brand img { width:48px; height:48px; object-fit:contain; }.architecture-page__brand p,.eyebrow { margin:0 0 4px; color:var(--muted); font-size:.62rem; letter-spacing:.14em; text-transform:uppercase; }.architecture-page__brand h1 { margin:0; font-size:clamp(1.35rem,2vw,2rem); font-weight:500; letter-spacing:-.03em; }.architecture-page__brand span { color:var(--muted); font-size:.76rem; }
+.architecture-page__legend { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:9px 13px; max-width:410px; }.legend-item { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.66rem; white-space:nowrap; }.legend-item i { width:22px; border-top:2px solid var(--stack); }.legend-item--microsoft i { border-color:var(--ms); }.legend-item--onepassword i { border-color:var(--op); }.legend-item--cloudflare i { border-color:var(--cf); }
+.architecture-intro { display:flex; align-items:end; justify-content:space-between; gap:22px; margin-top:16px; padding:17px 21px; border-radius:16px; }.architecture-intro h2 { margin:0; font-weight:500; font-size:1rem; }.architecture-intro p:last-child { max-width:440px; margin:0; color:var(--muted); font-size:.75rem; line-height:1.5; text-align:right; }
+.architecture-map-panel { margin-top:16px; padding:16px; border-radius:18px; }.map-panel-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:1px 3px 13px; color:var(--muted); font-size:.7rem; }.map-panel-heading span { display:flex; align-items:center; gap:7px; }.map-scroll-note { font-size:.63rem; letter-spacing:.04em; }
+.architecture-scroll { width:100%; max-width:100%; min-width:0; overflow:auto; border:1px solid rgba(255,255,255,.1); border-radius:14px; background:rgba(0,0,0,.18); scrollbar-color:rgba(255,255,255,.35) transparent; }.architecture-scroll:focus-visible { outline:2px solid rgba(255,255,255,.72); outline-offset:4px; }
+.architecture-sizer { position:relative; width:3420px; height:1420px; overflow:hidden; }
+.flow-canvas { position:relative; width:3420px; height:1420px; transform-origin:top left; overflow:hidden; background:linear-gradient(90deg,rgba(255,255,255,.018),transparent 18%,transparent 82%,rgba(255,255,255,.018)); }.flow-canvas::before { content:""; position:absolute; inset:0; opacity:.42; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; }
+.flow-lines { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }.flow-lines path { fill:none; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.35; }.flow-lines marker path { stroke:none; }.flow-lines marker#arrow-neutral path { fill:var(--stack) !important; }.flow-lines marker#arrow-yellow path { fill:var(--ms) !important; }.flow-lines marker#arrow-blue path { fill:var(--op) !important; }.flow-lines marker#arrow-orange path { fill:var(--cf) !important; }.line-stack { stroke:var(--stack); }.line-microsoft { stroke:var(--ms); }.line-onepassword { stroke:var(--op); }.line-cloudflare { stroke:var(--cf); }.line-fine { opacity:.78; }.line-dashed { stroke-dasharray:5 5; }
+.flow-label { position:absolute; display:flex; align-items:center; gap:7px; font-size:.65rem; letter-spacing:.04em; white-space:nowrap; }.provider-label { color:var(--muted); }.provider-caption-icon { width:13px; color:rgba(222,230,238,.76); font-size:.62rem; text-align:center; }.ms-label { left:34px; top:122px; }.op-label { left:40px; top:644px; }.cf-label { left:40px; top:728px; }.provider-logo { width:22px; height:22px; flex:0 0 22px; padding:2px; object-fit:contain; border:1px solid rgba(255,255,255,.16); border-radius:5px; background:rgba(255,255,255,.92); box-shadow:inset 0 1px 0 rgba(255,255,255,.75); }
+.source-stack { position:absolute; left:40px; top:177px; display:grid; gap:8px; width:220px; }.source-chip { display:flex; align-items:center; gap:8px; min-height:44px; padding:8px 11px; border:1px solid rgba(255,255,255,.17); border-radius:9px; background:rgba(255,255,255,.045); color:var(--text); box-shadow:inset 0 1px 0 rgba(255,255,255,.09); font-size:.68rem; }.source-chip i { color:var(--muted); width:13px; text-align:center; }.provider-source { position:absolute; width:220px; min-height:50px; }.provider-source span { display:grid; gap:2px; }.provider-source small { color:var(--muted); font-size:.57rem; }.provider-source em { margin-left:auto; max-width:80px; color:var(--muted); font-size:.51rem; font-style:normal; line-height:1.35; text-align:right; }.onepassword-source { left:40px; top:674px; }.cloudflare-source { left:40px; top:754px; }
+.stage-node { position:absolute; display:grid; place-items:center; align-content:center; width:190px; min-height:92px; padding:12px; border:1px solid rgba(255,255,255,.23); border-radius:12px; background:linear-gradient(145deg,rgba(255,255,255,.09),rgba(255,255,255,.028)); box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 8px 19px rgba(0,0,0,.18); text-align:center; }.stage-node > i { margin-bottom:5px; color:rgba(255,255,255,.82); font-size:.85rem; }.stage-node small { color:var(--muted); font-size:.59rem; }.stage-node strong { margin-top:3px; font-size:.75rem; font-weight:600; line-height:1.2; }.port { position:absolute; width:7px; height:7px; border:1px solid rgba(255,255,255,.8); border-radius:50%; background:#161616; box-shadow:0 0 0 2px rgba(0,0,0,.25); }.port-left { left:-4px; top:50%; transform:translateY(-50%); }.port-right { right:-4px; top:50%; transform:translateY(-50%); }.port-top { top:-4px; left:50%; transform:translateX(-50%); }.port-bottom { bottom:-4px; left:50%; transform:translateX(-50%); }
+.collect-node { left:390px; top:365px; }.snapshot-node { left:670px; top:365px; }.dashboard-node { left:920px; top:353px; width:240px; min-height:116px; }.dashboard-node .dashboard-logo { width:76px; height:24px; margin:0 0 2px; object-fit:contain; }.dashboard-port--top { top:28%; }.dashboard-port--middle { top:50%; }.dashboard-port--bottom { top:72%; }.provider-port { top:auto; bottom:-4px; transform:translateX(-50%); }.provider-port--cloudflare { left:calc(50% + 19px); }.provider-port--onepassword { left:calc(50% - 19px); }
+.direct-views-note { position:absolute; left:1210px; top:130px; width:190px; margin:0; color:var(--muted); font-size:.61rem; line-height:1.6; white-space:normal; }.domain-views { position:absolute; left:1210px; top:210px; display:grid; grid-template-columns:190px; gap:16px; }.domain-views div { position:relative; min-height:58px; display:grid; align-content:center; padding:9px 11px; border:1px solid rgba(255,255,255,.17); border-radius:9px; background:rgba(255,255,255,.042); font-size:.68rem; }.domain-views small { display:block; margin-top:3px; color:var(--muted); font-size:.52rem; }
+.alert-branch-label { position:absolute; left:470px; top:1122px; color:var(--muted); font-size:.64rem; letter-spacing:.06em; text-transform:uppercase; }.raw-node { left:560px; top:1194px; }.correlation-node { left:810px; top:1194px; }.ai-node { left:1060px; top:1194px; }.alert-dashboard-node { left:1310px; top:1194px; }.whatsapp-node { left:1560px; top:1194px; }.raw-node,.correlation-node,.ai-node,.alert-dashboard-node,.whatsapp-node { min-height:92px; }.ai-node { border-style:dashed; }.whatsapp-guard { position:absolute; left:1472px; top:1138px; width:188px; margin:0; color:var(--muted); font-size:.56rem; line-height:1.35; text-align:center; background:rgba(8,8,9,.72); }
+.raw-port--microsoft { top:35%; }.raw-port--cloudflare { top:65%; }
+.architecture-page__footer { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; color:var(--muted); font-size:.68rem; }.architecture-page__footer a { padding:9px 12px; border:1px solid var(--edge); border-radius:9px; background:rgba(255,255,255,.04); }
+
+/* Eleven independent reporting lanes extend the original architecture map. */
+.legend-item--input i { border-color:var(--report-input); }.legend-item--output i { border-color:var(--report-output); }
+.map-panel-heading { flex-wrap:wrap; }.map-jumps { display:flex; align-items:center; gap:8px; margin-left:auto; }.map-jumps a { display:inline-flex; align-items:center; gap:7px; padding:7px 10px; border:1px solid rgba(255,255,255,.17); border-radius:7px; background:rgba(255,255,255,.035); color:var(--text); font-size:.66rem; text-decoration:none; }.map-jumps a:hover,.map-jumps a:focus-visible { border-color:var(--report-input); background:rgba(122,202,221,.07); outline-offset:3px; }.map-scroll-note { flex-basis:100%; justify-content:flex-end; }
+.flow-lines marker#arrow-report-input path { fill:var(--report-input); }.flow-lines marker#arrow-report-output path { fill:var(--report-output); }.flow-lines marker#arrow-report-combined path { fill:var(--report-combined); }.flow-lines marker#arrow-report-return path { fill:var(--report-return); }
+.line-report-input { stroke:var(--report-input); }.line-report-output { stroke:var(--report-output); }.line-report-combined { stroke:var(--report-combined); }.line-report-return { stroke:var(--report-return); stroke-dasharray:7 5; }.flow-lines .line-report-input,.flow-lines .line-report-output,.flow-lines .line-report-combined,.flow-lines .line-report-return { stroke-width:1.5; }
+.reporting-pipeline { position:absolute; left:1460px; top:90px; width:1900px; height:955px; border:1px solid rgba(122,202,221,.18); border-radius:16px; scroll-margin-left:20px; }.reporting-pipeline-heading { position:absolute; top:15px; left:28px; right:28px; display:flex; align-items:center; justify-content:space-between; gap:35px; }.reporting-pipeline-heading h2 { margin:0; font-size:1.2rem; font-weight:500; letter-spacing:-.02em; }.reporting-pipeline-heading p:last-child { margin:7px 0 0; color:var(--muted); font-size:.67rem; }.reporting-pipeline-heading .eyebrow { font-size:.57rem; }
+.reporting-flow-key { display:flex; gap:19px; align-items:center; }.reporting-flow-key span { display:inline-flex; align-items:center; gap:7px; color:var(--muted); font-size:.61rem; white-space:nowrap; }.reporting-flow-key span::before { content:""; width:22px; border-top:2px solid; }.reporting-key-input::before { color:var(--report-input); }.reporting-key-output::before { color:var(--report-output); }.reporting-key-combined::before { color:var(--report-combined); }.reporting-key-return::before { color:var(--report-return); border-top-style:dashed !important; }
+.reporting-input-caption,.reporting-output-caption,.reporting-collection-caption,.reporting-storage-caption { position:absolute; margin:0; color:var(--muted); font-size:.63rem; letter-spacing:.015em; }.reporting-input-caption { left:18px; top:87px; }.reporting-output-caption { left:630px; top:87px; }.reporting-collection-caption { left:1040px; top:421px; color:var(--report-output); }.reporting-storage-caption { left:1307px; top:589px; color:var(--report-combined); }
+.reporting-ai-stage { position:absolute; left:199px; top:109px; width:300px; height:818px; border:1px solid rgba(122,202,221,.24); border-radius:12px; background:linear-gradient(145deg,rgba(122,202,221,.04),rgba(139,201,170,.015)); }.reporting-ai-stage h3 { position:absolute; top:-24px; left:0; display:flex; align-items:center; gap:7px; margin:0; font-size:.75rem; font-weight:600; }.reporting-ai-stage h3 i { color:var(--report-input); }.reporting-ai-stage h3 span { margin-left:6px; color:var(--muted); font-size:.58rem; font-weight:400; }.reporting-ai-lanes { position:absolute; left:17px; right:17px; top:9px; display:grid; grid-auto-rows:58px; gap:16px; }.reporting-ai-lane { position:relative; display:flex; align-items:center; gap:12px; padding:10px 13px; border:1px solid rgba(122,202,221,.24); border-radius:9px; background:rgba(6,14,17,.84); }.reporting-lane-index { color:rgba(122,202,221,.8); font-size:.61rem; font-variant-numeric:tabular-nums; }.reporting-ai-lane strong { display:block; font-size:.68rem; font-weight:500; }.reporting-ai-lane small { display:block; margin-top:4px; color:var(--muted); font-size:.54rem; }
+.reporting-domain-reports { position:absolute; left:629px; top:119px; width:230px; display:grid; grid-auto-rows:58px; gap:16px; }.reporting-domain-report { position:relative; display:grid; align-content:center; padding:10px 12px; border:1px solid rgba(139,201,170,.28); border-radius:9px; background:linear-gradient(135deg,rgba(139,201,170,.065),rgba(9,15,12,.82)); }.reporting-domain-report strong { font-size:.68rem; font-weight:500; }.reporting-domain-report small { margin-top:5px; color:var(--muted); font-size:.51rem; white-space:nowrap; }.reporting-input-port { border-color:var(--report-input); }.reporting-output-port { border-color:var(--report-output); }.reporting-combined-port { border-color:var(--report-combined); }.reporting-return-port,.dashboard-report-return { border-color:var(--report-return); }
+.reporting-assembly,.reporting-sql { top:459px; width:250px; height:118px; }.reporting-assembly { left:1039px; border-color:rgba(139,201,170,.35); }.reporting-sql { left:1429px; border-color:rgba(215,189,122,.35); }.reporting-assembly > i { color:var(--report-output); }.reporting-sql > i { color:var(--report-combined); }.reporting-assembly p,.reporting-sql p { max-width:215px; margin:7px 0 0; color:var(--muted); font-size:.58rem; line-height:1.45; }.reporting-return-label { position:absolute; left:1610px; top:1060px; margin:0; padding:5px 9px; border:1px solid rgba(198,184,239,.15); border-radius:5px; background:rgba(9,8,13,.9); color:var(--report-return); font-size:.64rem; letter-spacing:.01em; }.reporting-return-label i { margin-right:6px; }
+@media (max-width:820px) { .map-jumps { margin-left:0; flex-wrap:wrap; }.map-scroll-note { justify-content:flex-start; }.architecture-intro h2 { max-width:32ch; line-height:1.4; } }
+
+@media (max-width:820px) { .architecture-page__shell { width:calc(100% - 18px); padding-top:9px; }.architecture-page__header { grid-template-columns:1fr; gap:13px; padding:15px; }.architecture-page__back { order:3; }.architecture-page__legend { justify-content:flex-start; }.architecture-intro { align-items:flex-start; flex-direction:column; padding:15px; }.architecture-intro p:last-child { text-align:left; }.architecture-map-panel { padding:11px; }.map-panel-heading { align-items:flex-start; flex-direction:column; gap:6px; }.architecture-page__footer { align-items:flex-start; flex-direction:column; } }
+@media (max-width:540px) { .architecture-page__brand h1 { font-size:1.28rem; }.architecture-page__brand span { font-size:.69rem; }.architecture-page__legend { gap:8px 11px; }.legend-item { font-size:.6rem; }.architecture-scroll[data-view="actual"]::after { content:"Scroll the complete flow \2192"; display:block; width:max-content; padding:8px 2px 2px; margin-left:auto; color:var(--muted); font-size:.59rem; letter-spacing:.06em; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; animation:none !important; } }
+
+/* Full-width overview and optional detail inspection. */
+.architecture-page__links { display:grid; align-content:center; gap:11px; min-width:0; }.architecture-document-links { display:flex; flex-wrap:wrap; gap:7px 12px; }.architecture-document-links a { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:.64rem; text-decoration:none; }.architecture-document-links a:hover,.architecture-document-links a:focus-visible { color:var(--report-input); text-decoration:underline; text-underline-offset:4px; }
+.map-view-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }.map-view-controls button { appearance:none; display:inline-flex; align-items:center; justify-content:center; min-height:30px; padding:6px 11px; border:1px solid rgba(255,255,255,.18); border-radius:7px; background:rgba(255,255,255,.035); color:var(--muted); font:inherit; font-size:.66rem; cursor:pointer; }.map-view-controls button[aria-pressed="true"] { color:var(--text); border-color:rgba(122,202,221,.65); background:rgba(122,202,221,.1); }.map-view-controls button:hover { color:var(--text); border-color:var(--report-input); }.map-view-controls button:focus-visible { outline:2px solid var(--report-input); outline-offset:3px; }.map-panel-heading .map-zoom-status { display:inline; margin-left:4px; color:var(--muted); font-size:.63rem; font-variant-numeric:tabular-nums; }.architecture-scroll[data-view="fit"] { overflow:hidden; }.architecture-scroll[data-view="actual"] { overflow:auto; }
+@media (max-width:820px) { .architecture-page__links { order:3; }.architecture-page__links .architecture-page__back { order:initial; }.map-view-controls { width:100%; }.map-jumps a,.map-view-controls button { min-height:34px; } }
+  </style>
 </head>
 <body class="architecture-page">
   <div class="architecture-page__background" aria-hidden="true"></div>
   <main class="architecture-page__shell">
     <header class="architecture-page__header glass-panel">
-      <a class="architecture-page__back" href="ClientPortal.html"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Back to Client Portal</a>
+      <div class="architecture-page__links">
+        <a class="architecture-page__back" href="ClientPortal.html"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Back to Client Portal</a>
+        <div class="architecture-document-links"><a href="https://stackopsit.com/architecture.html" target="_blank" rel="noopener">View online <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></div>
+      </div>
       <div class="architecture-page__brand">
         <img src="Images/Logos/Ctrl big.png" alt="Stack CTRL">
-        <div><p>Source to insight</p><h1>Stack CTRL Architecture</h1><span>Connected provider paths, shared processing and safeguarded alerting.</span></div>
+        <div><p>Source to insight</p><h1>Stack CTRL Architecture</h1><span>Connected provider paths, individual domain reporting and enterprise intelligence.</span></div>
       </div>
-      <div class="architecture-page__legend" aria-label="Provider line legend">
+      <div class="architecture-page__legend" aria-label="Provider and reporting line legend">
         <span class="legend-item legend-item--microsoft"><i></i>Microsoft Graph</span>
         <span class="legend-item legend-item--onepassword"><i></i>1Password</span>
         <span class="legend-item legend-item--cloudflare"><i></i>Cloudflare</span>
         <span class="legend-item legend-item--stack"><i></i>Stack CTRL</span>
+        <span class="legend-item legend-item--input"><i></i>Domain input</span>
+        <span class="legend-item legend-item--output"><i></i>AI output</span>
       </div>
     </header>
 
     <section class="architecture-intro glass-panel" aria-labelledby="map-title">
-      <div><p class="eyebrow">Connected data flow</p><h2 id="map-title">Every provider enters shared processing once.</h2></div>
-      <p>Coloured lines identify the provider at entry. Neutral lines show Stack CTRL-owned processing and outputs.</p>
+      <div><p class="eyebrow">Connected data flow</p><h2 id="map-title">Eleven domain views. One enterprise reporting loop.</h2></div>
+      <p>Follow each domain through its own Azure AI assessment, then collect the eleven outputs into one stored enterprise report.</p>
     </section>
 
     <section class="architecture-map-panel glass-panel" aria-label="Stack CTRL connected architecture map">
       <div class="map-panel-heading">
-        <span><i class="fa-solid fa-arrows-left-right-to-line" aria-hidden="true"></i> Follow the coloured input lines, then the neutral Stack CTRL flow.</span>
-        <span class="map-scroll-note">Scroll the map horizontally when needed <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        <span><i class="fa-solid fa-arrows-left-right-to-line" aria-hidden="true"></i> Provider evidence &rarr; domain views &rarr; individual AI reports &rarr; enterprise overview.</span>
+        <nav class="map-jumps" aria-label="Architecture map sections"><a href="#architecture-sources">Sources &amp; dashboards</a><a href="#enterprise-reporting-pipeline">Reporting pipeline <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a></nav>
+        <div class="map-view-controls" role="group" aria-label="Diagram size"><button type="button" data-architecture-view="fit" aria-pressed="true" aria-controls="architecture-map-viewport">Fit width</button><button type="button" data-architecture-view="actual" aria-pressed="false" aria-controls="architecture-map-viewport">Actual size</button><span class="map-zoom-status" aria-live="polite" aria-atomic="true">Fit width</span></div>
+        <span class="map-scroll-note">The full diagram fits your screen. Use Actual size to inspect each domain.</span>
       </div>
-      <div class="architecture-scroll" tabindex="0" aria-label="Architecture diagram; coloured provider inputs enter shared Stack CTRL processing and flow to dashboards">
-        <div class="flow-canvas" role="group" aria-label="Microsoft, 1Password and Cloudflare data flow through shared collection, snapshots, dashboard, risk and alerts">
-          <svg class="flow-lines" viewBox="0 0 2020 1420" preserveAspectRatio="none" aria-hidden="true">
+      <div class="architecture-scroll" id="architecture-map-viewport" data-view="fit" tabindex="0" aria-label="Scrollable architecture diagram: provider evidence enters eleven domain views, each domain passes separately through Azure AI, reports are combined and stored in Google Cloud SQL, then returned to the Stack CTRL overview">
+        <div class="architecture-sizer">
+        <div class="flow-canvas" role="group" id="architecture-sources" aria-label="Microsoft, 1Password and Cloudflare data flow through shared evidence, eleven domain reports, enterprise reporting and safeguarded alerts">
+          <svg class="flow-lines" viewBox="0 0 3420 1420" preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <marker id="arrow-neutral" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="rgba(238,235,229,.62)" d="M0 0L8 4L0 8Z"/></marker>
               <marker id="arrow-yellow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#e6c75c" d="M0 0L8 4L0 8Z"/></marker>
               <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#76aceb" d="M0 0L8 4L0 8Z"/></marker>
               <marker id="arrow-orange" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#e99a5d" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-report-input" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#7acadd" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-report-output" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#8bc9aa" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-report-combined" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#d7bd7a" d="M0 0L8 4L0 8Z"/></marker>
+              <marker id="arrow-report-return" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path fill="#c6b8ef" d="M0 0L8 4L0 8Z"/></marker>
             </defs>
             <g class="line-microsoft"><path d="M260 199H330M260 251H330M260 303H330M260 355H330M260 407H330M260 459H330M260 511H330M260 563H330M260 615H330"/><path d="M330 199V615M330 411H390" marker-end="url(#arrow-yellow)"/></g>
             <path class="line-onepassword" d="M260 699H466V457" marker-end="url(#arrow-blue)"/>
             <path class="line-cloudflare" d="M260 779H504V457" marker-end="url(#arrow-orange)"/>
             <g class="line-stack" marker-end="url(#arrow-neutral)"><path d="M580 411H670"/><path d="M860 411H920"/></g>
             <g class="line-stack line-fine"><path d="M1160 385H1170V239V387"/><path d="M1160 411H1180V461V683"/><path d="M1160 437H1190V757V979"/><path d="M1170 239H1210"/><path d="M1170 313H1210"/><path d="M1170 387H1210"/><path d="M1180 461H1210"/><path d="M1180 535H1210"/><path d="M1180 609H1210"/><path d="M1180 683H1210"/><path d="M1190 757H1210"/><path d="M1190 831H1210"/><path d="M1190 905H1210"/><path d="M1190 979H1210"/></g>
-            <g class="line-stack line-risk"><path d="M1400 239H1420V540H1530"/><path d="M1400 313H1430V552H1530"/><path d="M1400 387H1440V564H1530"/><path d="M1400 461H1450V576H1530"/><path d="M1400 535H1460V588H1530"/><path d="M1400 609H1470V600H1530"/><path d="M1400 683H1480V612H1530"/><path d="M1400 757H1490V624H1530"/><path d="M1400 831H1500V636H1530"/><path d="M1400 905H1510V648H1530"/></g>
-            <path class="line-stack" d="M1720 610H1780" marker-end="url(#arrow-neutral)"/>
+            <path class="line-report-input" data-domain-input="Identity" d="M1400 239H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Identity" d="M1942 239H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Identity" d="M2320 239H2400"/>
+            <path class="line-report-input" data-domain-input="Devices" d="M1400 313H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Devices" d="M1942 313H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Devices" d="M2320 313H2400"/>
+            <path class="line-report-input" data-domain-input="Email" d="M1400 387H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Email" d="M1942 387H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Email" d="M2320 387H2400"/>
+            <path class="line-report-input" data-domain-input="Security Alerts" d="M1400 461H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Security Alerts" d="M1942 461H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Security Alerts" d="M2320 461H2400"/>
+            <path class="line-report-input" data-domain-input="Backup" d="M1400 535H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Backup" d="M1942 535H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Backup" d="M2320 535H2400"/>
+            <path class="line-report-input" data-domain-input="Applications" d="M1400 609H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Applications" d="M1942 609H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Applications" d="M2320 609H2400"/>
+            <path class="line-report-input" data-domain-input="Governance" d="M1400 683H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Governance" d="M1942 683H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Governance" d="M2320 683H2400"/>
+            <path class="line-report-input" data-domain-input="Compliance" d="M1400 757H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Compliance" d="M1942 757H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Compliance" d="M2320 757H2400"/>
+            <path class="line-report-input" data-domain-input="Operations" d="M1400 831H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Operations" d="M1942 831H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Operations" d="M2320 831H2400"/>
+            <path class="line-report-input" data-domain-input="Network Security" d="M1400 905H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Network Security" d="M1942 905H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Network Security" d="M2320 905H2400"/>
+            <path class="line-report-input" data-domain-input="Credential Security" d="M1400 979H1678" marker-end="url(#arrow-report-input)"/>
+            <path class="line-report-output" data-domain-output="Credential Security" d="M1942 979H2090" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-output line-report-collect" data-domain-collect="Credential Security" d="M2320 979H2400"/>
+            <path class="line-report-output" d="M2400 239V979M2400 609H2500" marker-end="url(#arrow-report-output)"/>
+            <path class="line-report-combined" d="M2750 609H2890" marker-end="url(#arrow-report-combined)"/>
+            <path class="line-report-return" d="M3140 609H3240V1090H1040V469" marker-end="url(#arrow-report-return)"/>
             <path class="line-microsoft line-dashed" d="M260 355H300V1226H560" marker-end="url(#arrow-yellow)"/>
             <path class="line-cloudflare line-dashed" d="M150 804V1254H560" marker-end="url(#arrow-orange)"/>
             <g class="line-stack" marker-end="url(#arrow-neutral)"><path d="M750 1240H810"/><path d="M1000 1240H1060"/><path d="M1250 1240H1310"/><path d="M1500 1240H1560"/></g>
@@ -66,12 +161,45 @@
           <div class="source-chip provider-source cloudflare-source"><img class="provider-logo" src="Images/cloudflare.png" alt="Cloudflare"><span><small>Network Security</small>Cloudflare</span><em>Access · Audit · Security API · Logpush</em></div>
           <article class="stage-node collect-node"><span class="port port-left"></span><span class="port port-top"></span><span class="port port-bottom provider-port provider-port--cloudflare" aria-label="Cloudflare input port"></span><span class="port port-bottom provider-port provider-port--onepassword" aria-label="1Password input port"></span><span class="port port-right"></span><i class="fa-solid fa-filter" aria-hidden="true"></i><small>Stack CTRL</small><strong>Collect &amp; validate</strong></article>
           <article class="stage-node snapshot-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-database" aria-hidden="true"></i><small>Shared evidence</small><strong>Evidence snapshots</strong></article>
-          <article class="stage-node dashboard-node"><span class="port port-left"></span><span class="port port-right dashboard-port dashboard-port--top"></span><span class="port port-right dashboard-port dashboard-port--middle"></span><span class="port port-right dashboard-port dashboard-port--bottom"></span><img class="dashboard-logo" src="Images/Logos/Ctrl big.png" alt="Stack CTRL"><small>One view</small><strong>Dashboard overview</strong></article>
-          <p class="direct-views-note">Direct Microsoft domain views · Network Security from Cloudflare · Credential Security from 1Password</p>
+          <article class="stage-node dashboard-node"><span class="port port-bottom dashboard-report-return" aria-label="Stored enterprise report returns to the Stack CTRL overview"></span><span class="port port-left"></span><span class="port port-right dashboard-port dashboard-port--top"></span><span class="port port-right dashboard-port dashboard-port--middle"></span><span class="port port-right dashboard-port dashboard-port--bottom"></span><img class="dashboard-logo" src="Images/Logos/Ctrl big.png" alt="Stack CTRL"><small>One view</small><strong>Dashboard overview</strong></article>
+          <p class="direct-views-note">11 dashboard domain views<br>Microsoft &middot; Cloudflare &middot; 1Password</p>
           <div class="domain-views" aria-label="Stack CTRL dashboard domain views"><div>Identity</div><div>Devices</div><div>Email</div><div>Security Alerts</div><div>Backup</div><div>Applications</div><div>Governance<small>Direct Microsoft evidence</small></div><div>Compliance<small>Direct Microsoft evidence</small></div><div>Operations<small>Direct Microsoft evidence</small></div><div>Network Security</div><div>Credential Security</div></div>
-          <div class="risk-annotation"><i class="fa-solid fa-code-branch" aria-hidden="true"></i>Only cross-domain aggregate</div>
-          <article class="stage-node risk-engine"><span class="port port-left risk-input-port risk-input-port--1"></span><span class="port port-left risk-input-port risk-input-port--2"></span><span class="port port-left risk-input-port risk-input-port--3"></span><span class="port port-left risk-input-port risk-input-port--4"></span><span class="port port-left risk-input-port risk-input-port--5"></span><span class="port port-left risk-input-port risk-input-port--6"></span><span class="port port-left risk-input-port risk-input-port--7"></span><span class="port port-left risk-input-port risk-input-port--8"></span><span class="port port-left risk-input-port risk-input-port--9"></span><span class="port port-left risk-input-port risk-input-port--10"></span><span class="port port-right"></span><i class="fa-solid fa-wave-square" aria-hidden="true"></i><small>Ten direct inputs</small><strong>Stack CTRL Risk Engine</strong></article>
-          <article class="stage-node risks-node"><span class="port port-left"></span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><small>Dashboard view</small><strong>Risks</strong></article>
+          <section class="reporting-pipeline" id="enterprise-reporting-pipeline" aria-labelledby="reporting-pipeline-title">
+            <header class="reporting-pipeline-heading"><div><p class="eyebrow">Domain evidence to enterprise intelligence</p><h2 id="reporting-pipeline-title">Enterprise Deep Reporting Pipeline</h2><p>Eleven independent inputs. Eleven individual reports. One combined enterprise output.</p></div><div class="reporting-flow-key" aria-label="Reporting line legend"><span class="reporting-key-input">Domain input</span><span class="reporting-key-output">AI output</span><span class="reporting-key-combined">Combined report</span><span class="reporting-key-return">Overview return</span></div></header>
+            <p class="reporting-input-caption">11 separate domain inputs</p>
+            <section class="reporting-ai-stage" aria-labelledby="reporting-ai-title"><h3 id="reporting-ai-title"><i class="fa-solid fa-microchip" aria-hidden="true"></i>Azure AI <span>Separate processing for every domain</span></h3><div class="reporting-ai-lanes">
+                <div class="reporting-ai-lane" data-domain="Identity"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">01</span><span><strong>Identity</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Devices"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">02</span><span><strong>Devices</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Email"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">03</span><span><strong>Email</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Security Alerts"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">04</span><span><strong>Security Alerts</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Backup"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">05</span><span><strong>Backup</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Applications"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">06</span><span><strong>Applications</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Governance"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">07</span><span><strong>Governance</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Compliance"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">08</span><span><strong>Compliance</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Operations"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">09</span><span><strong>Operations</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Network Security"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">10</span><span><strong>Network Security</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+                <div class="reporting-ai-lane" data-domain="Credential Security"><span class="port port-left reporting-input-port"></span><span class="reporting-lane-index">11</span><span><strong>Credential Security</strong><small>Individual domain analysis</small></span><span class="port port-right reporting-output-port"></span></div>
+              </div></section>
+            <p class="reporting-output-caption">11 individual domain reports</p>
+            <div class="reporting-domain-reports" aria-label="Individual Azure AI reporting outputs">
+              <div class="reporting-domain-report" data-domain="Identity"><span class="port port-left reporting-output-port"></span><strong>Identity report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Devices"><span class="port port-left reporting-output-port"></span><strong>Devices report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Email"><span class="port port-left reporting-output-port"></span><strong>Email report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Security Alerts"><span class="port port-left reporting-output-port"></span><strong>Security Alerts report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Backup"><span class="port port-left reporting-output-port"></span><strong>Backup report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Applications"><span class="port port-left reporting-output-port"></span><strong>Applications report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Governance"><span class="port port-left reporting-output-port"></span><strong>Governance report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Compliance"><span class="port port-left reporting-output-port"></span><strong>Compliance report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Operations"><span class="port port-left reporting-output-port"></span><strong>Operations report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Network Security"><span class="port port-left reporting-output-port"></span><strong>Network Security report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+              <div class="reporting-domain-report" data-domain="Credential Security"><span class="port port-left reporting-output-port"></span><strong>Credential Security report</strong><small>Assessment &middot; priorities &middot; recommendations</small><span class="port port-right reporting-output-port"></span></div>
+            </div>
+            <p class="reporting-collection-caption">Collect all 11 outputs together</p>
+            <article class="stage-node reporting-assembly"><span class="port port-left reporting-output-port"></span><span class="port port-right reporting-combined-port"></span><i class="fa-solid fa-layer-group" aria-hidden="true"></i><small>Main collection output</small><strong>Assemble enterprise report</strong><p>All eleven domain reports in one enterprise intelligence report.</p></article>
+            <article class="stage-node reporting-sql"><span class="port port-left reporting-combined-port"></span><span class="port port-right reporting-return-port"></span><i class="fa-solid fa-database" aria-hidden="true"></i><small>Store the combined report</small><strong>Google Cloud SQL</strong><p>Persist the enterprise report for the Stack CTRL overview.</p></article>
+            <p class="reporting-storage-caption">One combined report &rarr; database</p>
+          </section>
+          <p class="reporting-return-label"><i class="fa-solid fa-arrow-left-long" aria-hidden="true"></i> Stored enterprise report returns to the Stack CTRL overview</p>
           <div class="alert-branch-label"><i class="fa-solid fa-code-fork" aria-hidden="true"></i> Security alert branch</div>
           <article class="stage-node raw-node"><span class="port port-left raw-port raw-port--microsoft"></span><span class="port port-left raw-port raw-port--cloudflare"></span><span class="port port-right"></span><i class="fa-solid fa-list" aria-hidden="true"></i><small>Provider events</small><strong>Raw Provider Evidence</strong></article>
           <article class="stage-node correlation-node"><span class="port port-left"></span><span class="port port-right"></span><i class="fa-solid fa-diagram-project" aria-hidden="true"></i><small>Stack CTRL finding</small><strong>Deterministic correlation</strong></article>
@@ -80,9 +208,86 @@
           <article class="stage-node whatsapp-node"><span class="port port-left"></span><i class="fa-brands fa-whatsapp" aria-hidden="true"></i><small>Eligible findings only</small><strong>WhatsApp alert</strong></article>
           <p class="whatsapp-guard">High/critical · high confidence · eligible findings only</p>
         </div>
+        </div>
       </div>
     </section>
-    <footer class="architecture-page__footer"><span>Lines reflect currently configured Stack CTRL collection and processing paths.</span><a href="ClientPortal.html">Back to Client Portal <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a></footer>
+    <footer class="architecture-page__footer"><span>Provider collection, individual domain reporting and the stored-report return path.</span><a href="ClientPortal.html">Back to Client Portal <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a></footer>
   </main>
+  <script>
+(() => {
+  'use strict';
+
+  const viewport = document.querySelector('.architecture-scroll');
+  const frame = document.querySelector('.architecture-sizer');
+  const canvas = document.querySelector('.flow-canvas');
+  const controls = [...document.querySelectorAll('[data-architecture-view]')];
+  const status = document.querySelector('.map-zoom-status');
+  const note = document.querySelector('.map-scroll-note');
+  if (!viewport || !frame || !canvas) return;
+
+  const canvasWidth = canvas.offsetWidth;
+  const canvasHeight = canvas.offsetHeight;
+  let mode = 'fit';
+  let resizeFrame = 0;
+
+  function render() {
+    const scale = mode === 'fit' ? viewport.clientWidth / canvasWidth : 1;
+    if (!Number.isFinite(scale) || scale <= 0) return;
+
+    canvas.style.transform = `scale(${scale})`;
+    frame.style.width = `${canvasWidth * scale}px`;
+    frame.style.height = `${canvasHeight * scale}px`;
+    viewport.dataset.view = mode;
+    viewport.dataset.scale = scale.toFixed(6);
+    controls.forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.architectureView === mode));
+    });
+    if (status) {
+      status.textContent = `${Math.round(scale * 100)}% \u00b7 ${mode === 'fit' ? 'Fit width' : 'Actual size'}`;
+    }
+    if (note) {
+      note.textContent = mode === 'fit'
+        ? 'The full diagram fits your screen. Use Actual size to inspect each domain.'
+        : 'Scroll horizontally to follow the full flow, or choose Fit width for the complete diagram.';
+    }
+  }
+
+  function setMode(nextMode) {
+    mode = nextMode;
+    render();
+    viewport.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+  }
+
+  controls.forEach(button => {
+    button.addEventListener('click', () => setMode(button.dataset.architectureView));
+  });
+
+  document.querySelectorAll('.map-jumps a').forEach(link => {
+    link.addEventListener('click', event => {
+      const target = document.getElementById(link.hash.slice(1));
+      if (!target) return;
+      event.preventDefault();
+      setMode('actual');
+      viewport.scrollTo({
+        left: Math.max(0, target.offsetLeft - 24),
+        top: 0,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+      });
+    });
+  });
+
+  function scheduleResize() {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(render);
+  }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(scheduleResize).observe(viewport);
+  } else {
+    window.addEventListener('resize', scheduleResize);
+  }
+  render();
+})();
+  </script>
 </body>
 </html>
