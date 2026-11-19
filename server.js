@@ -1908,6 +1908,38 @@ async function applySqlMigration(relativePath) {
     for (const statement of statements) await pool.query(statement);
 }
 
+async function ensureNamedIndex(tableName, indexName, indexSql, { unique = false } = {}) {
+    if (!pool) return;
+    const [indexes] = await pool.query(
+        'SELECT INDEX_NAME FROM information_schema.statistics WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?',
+        [tableName, indexName]
+    );
+    if (indexes.length) return;
+    await pool.query(`CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${indexName} ON ${tableName} (${indexSql})`);
+}
+
+async function ensureTableExists(tableName) {
+    if (!pool) return false;
+    const [tables] = await pool.query(
+        'SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+        [tableName]
+    );
+    return tables.length > 0;
+}
+
+async function ensureTableColumn(tableName, columnName, definition) {
+    if (!pool) return false;
+    const [existing] = await pool.query(`SHOW COLUMNS FROM ${tableName} LIKE '${columnName}'`);
+    if (existing.length) return false;
+    try {
+        await pool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+        return true;
+    } catch (error) {
+        if (error.code === 'ER_DUP_FIELDNAME') return false;
+        throw error;
+    }
+}
+
 // Function to ensure database schema is up to date for automation
 async function ensureDatabaseSchema() {
     try {
@@ -1973,18 +2005,19 @@ async function ensureDatabaseSchema() {
 
         await applySqlMigration('sql/stackctrl-enterprise-intelligence.sql');
         
-        // Add PaidEmailSent column if it doesn't exist
-        const [columns] = await pool.query("SHOW COLUMNS FROM Invoices LIKE 'PaidEmailSent'");
-        if (columns.length === 0) {
-            console.log('Adding PaidEmailSent column to Invoices table...');
-            await pool.query("ALTER TABLE Invoices ADD COLUMN PaidEmailSent BOOLEAN DEFAULT FALSE");
-        }
-        
-        // Add LastReminderDate column to track daily reminders
-        const [columns2] = await pool.query("SHOW COLUMNS FROM Invoices LIKE 'LastReminderDate'");
-        if (columns2.length === 0) {
-            console.log('Adding LastReminderDate column to Invoices table...');
-            await pool.query("ALTER TABLE Invoices ADD COLUMN LastReminderDate DATE DEFAULT NULL");
+        // Optional legacy invoice migrations must not prevent startup on older databases.
+        if (await ensureTableExists('Invoices')) {
+            const [columns] = await pool.query("SHOW COLUMNS FROM Invoices LIKE 'PaidEmailSent'");
+            if (columns.length === 0) {
+                console.log('Adding PaidEmailSent column to Invoices table...');
+                await pool.query("ALTER TABLE Invoices ADD COLUMN PaidEmailSent BOOLEAN DEFAULT FALSE");
+            }
+
+            const [columns2] = await pool.query("SHOW COLUMNS FROM Invoices LIKE 'LastReminderDate'");
+            if (columns2.length === 0) {
+                console.log('Adding LastReminderDate column to Invoices table...');
+                await pool.query("ALTER TABLE Invoices ADD COLUMN LastReminderDate DATE DEFAULT NULL");
+            }
         }
 
         // Create payfast_payments table if it doesn't exist
@@ -2300,15 +2333,10 @@ async function ensureDatabaseSchema() {
             )
         `);
 
-        for (const [column, definition] of [
-            ['EnterpriseRunID', 'BIGINT DEFAULT NULL'],
-            ['EnterpriseSnapshotID', 'BIGINT DEFAULT NULL'],
-            ['IsCurrent', 'TINYINT(1) NOT NULL DEFAULT 0'],
-            ['PublishedAt', 'DATETIME DEFAULT NULL']
-        ]) {
-            const [existing] = await pool.query(`SHOW COLUMNS FROM SunbirdReports LIKE '${column}'`);
-            if (!existing.length) await pool.query(`ALTER TABLE SunbirdReports ADD COLUMN ${column} ${definition}`);
-        }
+        await ensureTableColumn('SunbirdReports', 'EnterpriseRunID', 'BIGINT DEFAULT NULL');
+        await ensureTableColumn('SunbirdReports', 'EnterpriseSnapshotID', 'BIGINT DEFAULT NULL');
+        await ensureTableColumn('SunbirdReports', 'IsCurrent', 'TINYINT(1) NOT NULL DEFAULT 0');
+        await ensureTableColumn('SunbirdReports', 'PublishedAt', 'DATETIME DEFAULT NULL');
         try {
             await pool.query('CREATE INDEX idx_sunbird_reports_current ON SunbirdReports (CompanyID, ReportType, IsCurrent, PublishedAt, CreatedAt)');
         } catch (error) {
@@ -2335,29 +2363,9 @@ async function ensureDatabaseSchema() {
         `);
 
         // User constraints/indexes for faster login and tenant lookups
-        try {
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_company ON Users(CompanyID)`);
-        } catch (idxErr) {
-            if (idxErr.code !== 'ER_DUP_KEYNAME') {
-                console.warn('[Database] Index idx_users_company creation attempted (may already exist)');
-            }
-        }
-        
-        try {
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_email ON Users(Email)`);
-        } catch (idxErr) {
-            if (idxErr.code !== 'ER_DUP_KEYNAME') {
-                console.warn('[Database] Index idx_users_email creation attempted (may already exist)');
-            }
-        }
-        
-        try {
-            await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON Users(Email)`);
-        } catch (idxErr) {
-            if (idxErr.code !== 'ER_DUP_KEYNAME') {
-                console.warn('[Database] Unique index uq_users_email creation attempted (may already exist)');
-            }
-        }
+        await ensureNamedIndex('Users', 'idx_users_company', 'CompanyID');
+        await ensureNamedIndex('Users', 'idx_users_email', 'Email');
+        await ensureNamedIndex('Users', 'uq_users_email', 'Email', { unique: true });
     } catch (err) {
         console.error('ensureDatabaseSchema error:', err);
         throw err;
@@ -4340,18 +4348,10 @@ let sunbirdReportsPublicationSchemaPromise = null;
 async function ensureSunbirdReportsPublicationSchema() {
     if (sunbirdReportsPublicationSchemaPromise) return sunbirdReportsPublicationSchemaPromise;
     sunbirdReportsPublicationSchemaPromise = (async () => {
-        for (const [column, definition] of [
-            ['EnterpriseRunID', 'BIGINT DEFAULT NULL'],
-            ['EnterpriseSnapshotID', 'BIGINT DEFAULT NULL'],
-            ['IsCurrent', 'TINYINT(1) NOT NULL DEFAULT 0'],
-            ['PublishedAt', 'DATETIME DEFAULT NULL']
-        ]) {
-            const [existing] = await pool.query(`SHOW COLUMNS FROM SunbirdReports LIKE '${column}'`);
-            if (!existing.length) {
-                await pool.query(`ALTER TABLE SunbirdReports ADD COLUMN ${column} ${definition}`);
-                console.log(`[Reports] Added missing SunbirdReports.${column} column.`);
-            }
-        }
+        await ensureTableColumn('SunbirdReports', 'EnterpriseRunID', 'BIGINT DEFAULT NULL');
+        await ensureTableColumn('SunbirdReports', 'EnterpriseSnapshotID', 'BIGINT DEFAULT NULL');
+        await ensureTableColumn('SunbirdReports', 'IsCurrent', 'TINYINT(1) NOT NULL DEFAULT 0');
+        await ensureTableColumn('SunbirdReports', 'PublishedAt', 'DATETIME DEFAULT NULL');
         try {
             await pool.query('CREATE INDEX idx_sunbird_reports_current ON SunbirdReports (CompanyID, ReportType, IsCurrent, PublishedAt, CreatedAt)');
         } catch (error) {

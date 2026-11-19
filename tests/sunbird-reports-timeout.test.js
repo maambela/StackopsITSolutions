@@ -41,6 +41,17 @@ test('reports endpoint keeps live enrichment bounded and treats the view audit a
     assert.match(source, /traceId/);
     assert.match(source, /elapsedMs/);
 });
+test('enterprise intelligence schema migration is MySQL compatible', () => {
+    const schema = fs.readFileSync('sql/stackctrl-enterprise-intelligence.sql', 'utf8');
+    assert.doesNotMatch(schema, /CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS/i);
+    assert.match(schema, /KEY ix_domain_intelligence_latest_lookup \(CompanyID, DomainKey, Status, ID\)/);
+    assert.match(schema, /KEY ix_enterprise_synthesis_latest_lookup \(CompanyID, Status, ID\)/);
+    const server = fs.readFileSync('server.js', 'utf8');
+    assert.match(server, /async function ensureTableExists\(tableName\)/);
+    assert.match(server, /async function ensureTableColumn\(tableName, columnName, definition\)/);
+    assert.match(server, /error\.code === 'ER_DUP_FIELDNAME'/);
+    assert.match(server, /Optional legacy invoice migrations must not prevent startup/);
+});
 test('enterprise daily automation includes active report tenants and supports a protected Cloud Scheduler trigger', () => {
     const enterpriseSource = fs.readFileSync('services/enterprise-intelligence.js', 'utf8');
     assert.match(enterpriseSource, /loadScheduledEnterpriseCompanyIds/);
