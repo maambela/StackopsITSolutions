@@ -1,8 +1,21 @@
 const { createHash } = require('node:crypto');
 const { rawSecurityRecord } = require('./raw-security-records');
 const { fetchGraphCollectionPagesWithRetry } = require('./microsoft-graph-collection');
+const { SECURITY_ALERT_STORAGE_ENABLED } = require('./security-storage-policy');
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const parse = value => typeof value === 'string' ? JSON.parse(value) : value;
+const GRAPH_RESULT_CACHE_TTLS_MS = Object.freeze({
+    '/v1.0/security/alerts_v2': 30000,
+    '/v1.0/security/incidents': 30000,
+    '/v1.0/auditLogs/signIns': 60000,
+    '/v1.0/identityProtection/riskDetections': 60000,
+    '/v1.0/identityProtection/riskyUsers': 60000,
+    '/v1.0/auditLogs/directoryAudits': 120000,
+    '/v1.0/security/tiIndicators': 300000
+});
+const GRAPH_RESULT_CACHE_MAX_ENTRIES = 256;
+const GRAPH_RESULT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const GRAPH_RESULT_CACHE_MAX_ENTRY_BYTES = 8 * 1024 * 1024;
 const SCHEMA = [
     `CREATE TABLE IF NOT EXISTS StackCTRLRawSecurityRecords (
         CompanyID BIGINT NOT NULL, RecordKey CHAR(64) NOT NULL, Provider VARCHAR(32) NOT NULL,
@@ -17,12 +30,14 @@ const SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 ];
 
-function createRawEvidenceJournal({ pool, now = () => new Date(), logger = console } = {}) {
+function createRawEvidenceJournal({ pool, now = () => new Date(), logger = console, persistenceEnabled = SECURITY_ALERT_STORAGE_ENABLED } = {}) {
     const listeners = new Map();
     const storageFailures = new Set();
     const restored = new Map();
     const recent = new Map();
     const persisted = new Map();
+    const completedGraph = new Map();
+    let completedGraphBytes = 0;
     let recentBytes = 0;
     function remember(record) {
         const prior = recent.get(record.uid);
@@ -37,8 +52,39 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
     }
     const states = new Map(), queues = new Map(), hydration = new Map(), activeGraph = new Map();
     const key = (companyId, provider, endpoint) => `${companyId}:${hash(`${provider}:${endpoint}`)}`;
+    function removeCompletedGraph(scope) {
+        const entry = completedGraph.get(scope);
+        if (!entry) return;
+        completedGraphBytes -= entry.bytes;
+        completedGraph.delete(scope);
+    }
+    function readCompletedGraph(scope, at) {
+        const entry = completedGraph.get(scope);
+        if (!entry) return null;
+        if (entry.expiresAt <= at) {
+            removeCompletedGraph(scope);
+            return null;
+        }
+        completedGraph.delete(scope);
+        completedGraph.set(scope, entry);
+        return JSON.parse(entry.serialized);
+    }
+    function cacheCompletedGraph(scope, endpoint, result, at) {
+        if (!result?.ok || result.hasMore || result.warnings?.length) return;
+        const serialized = JSON.stringify(result);
+        const bytes = Buffer.byteLength(serialized);
+        if (bytes > GRAPH_RESULT_CACHE_MAX_ENTRY_BYTES) return;
+        removeCompletedGraph(scope);
+        const ttlMs = GRAPH_RESULT_CACHE_TTLS_MS[endpoint] || 30000;
+        completedGraph.set(scope, { serialized, bytes, expiresAt: at + ttlMs });
+        completedGraphBytes += bytes;
+        while (completedGraph.size > GRAPH_RESULT_CACHE_MAX_ENTRIES || completedGraphBytes > GRAPH_RESULT_CACHE_MAX_BYTES) {
+            removeCompletedGraph(completedGraph.keys().next().value);
+        }
+    }
     let ready;
     function ensureSchema() {
+        if (!persistenceEnabled) return Promise.resolve({ storageMode: 'memory_only' });
         if (!ready) ready = (async () => {
             for (const sql of SCHEMA) await pool.query(sql);
             const [indexes] = await pool.query("SELECT INDEX_NAME FROM information_schema.statistics WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'StackCTRLRawSecurityRecords' AND INDEX_NAME = 'ix_raw_company_time'");
@@ -50,6 +96,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         return ready;
     }
     function hydrate(companyId) {
+        if (!persistenceEnabled) return Promise.resolve();
         if (!hydration.has(companyId)) hydration.set(companyId, (async () => {
             await ensureSchema();
             const [rows] = await pool.query('SELECT StateJson FROM StackCTRLRawSecuritySync WHERE CompanyID = ?', [companyId]);
@@ -65,6 +112,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
     function queue(companyId, records, state) {
         if (!Number.isInteger(companyId) || companyId <= 0 || records.some(row => Number(row.companyId) !== companyId)) throw new Error('Raw evidence tenant mismatch');
         records.forEach(remember);
+        if (!persistenceEnabled) return Promise.resolve({ stored: 0, storageMode: 'memory_only' });
         const task = (queues.get(companyId) || Promise.resolve()).then(async () => {
             await ensureSchema();
             const connection = await pool.getConnection();
@@ -101,7 +149,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         queues.set(companyId, handled);
         return task;
     }
-    function collection(companyId, { onEvent = () => {}, range = {} } = {}) {
+    function collection(companyId, { onEvent = () => {}, range = {}, bypassGraphCache = false } = {}) {
         if (!Number.isInteger(companyId) || companyId <= 0) throw new Error('A valid company is required');
         // Start hydration without delaying the first provider request.
         hydrate(companyId);
@@ -112,20 +160,28 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const sourceKey = key(companyId, provider, endpoint);
             const prior = states.get(sourceKey) || {};
             const state = { ...prior, provider, endpoint, recordType, requestedRange: progress.status === 'receiving' ? prior.requestedRange || range : range, lastAttemptAt: at,
-                ...progress, storageStatus: 'pending', recordsRetrieved: (progress.recordsRetrieved ?? prior.recordsRetrieved ?? 0),
+                ...progress, storageStatus: persistenceEnabled ? 'pending' : 'memory_only', recordsRetrieved: (progress.recordsRetrieved ?? prior.recordsRetrieved ?? 0),
                 lastSuccessAt: progress.complete ? at : prior.lastSuccessAt || null };
             states.set(sourceKey, state);
             emit({ type: 'records', records, source: publicState(state) });
             queue(companyId, records, state).then(() => {
-                if (states.get(sourceKey) === state) { state.storageStatus = storageFailures.has(sourceKey) ? 'partial' : 'stored'; if (!storageFailures.has(sourceKey)) delete state.storageError; }
+                if (states.get(sourceKey) === state) { state.storageStatus = !persistenceEnabled ? 'memory_only' : storageFailures.has(sourceKey) ? 'partial' : 'stored'; if (!storageFailures.has(sourceKey)) delete state.storageError; }
                 emit({ type: 'health', source: publicState(state) });
             }).catch(() => emit({ type: 'health', source: publicState(states.get(sourceKey)) }));
             return records;
         }
         function graph(options) {
-            const scope = companyId + ':' + new URL(options.url).pathname + ':' + (range.explicit ? JSON.stringify(range) : 'live');
+            const scope = companyId + ':' + new URL(options.url).pathname + ':' +
+                (range.explicit ? JSON.stringify(range) : 'live') + ':' + hash(options.token || '');
+            const endpoint = new URL(options.url).pathname;
             if (activeGraph.has(scope)) return activeGraph.get(scope);
-            const pending = collectGraph(options).finally(() => activeGraph.delete(scope));
+            const cacheable = !persistenceEnabled && !bypassGraphCache;
+            const cached = cacheable ? readCompletedGraph(scope, now().getTime()) : null;
+            if (cached) return Promise.resolve(cached);
+            const pending = collectGraph(options).then(result => {
+                if (cacheable) cacheCompletedGraph(scope, endpoint, result, now().getTime());
+                return result;
+            }).finally(() => activeGraph.delete(scope));
             activeGraph.set(scope, pending);
             return pending;
         }
@@ -134,7 +190,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const endpoint = requestedUrl.pathname;
             const previousState = states.get(key(companyId, 'Microsoft Graph', endpoint));
             const reconcile = !previousState?.lastReconciledAt || now().getTime() - Date.parse(previousState.lastReconciledAt) >= 3600000;
-            const incremental = !range.explicit && !previousState?.requestedRange?.explicit && !reconcile && previousState?.completeThrough && previousState.storageStatus === 'stored';
+            const incremental = !range.explicit && !previousState?.requestedRange?.explicit && !reconcile && previousState?.completeThrough && ['stored', 'memory_only'].includes(previousState.storageStatus);
             const filterSince = incremental ? new Date(Math.max(Date.parse(range.since), Date.parse(previousState.completeThrough) - 300000)).toISOString() : range.since;
             if (range.since && ['/v1.0/security/alerts_v2', '/v1.0/security/incidents'].includes(endpoint)) {
                 const field = range.explicit ? 'createdDateTime' : 'lastUpdateDateTime';
@@ -190,18 +246,33 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         }
         return { graph, publish, getState: (provider, endpoint) => { const sourceKey = key(companyId, provider, endpoint); if (storageFailures.has(sourceKey)) { storageFailures.delete(sourceKey); return undefined; } const state = states.get(sourceKey); return state && (range.explicit ? JSON.stringify(state.requestedRange) === JSON.stringify(range) : !state.requestedRange?.explicit) ? state : undefined; }, health: () => healthMemory(companyId) };
     }
-    function healthMemory(companyId) { return [...states.entries()].filter(([k]) => k.startsWith(`${companyId}:`)).map(([, value]) => publicState(value)); }
-    async function health(companyId) {
-        await hydrate(companyId);
-        const [counts] = await pool.query('SELECT Provider AS provider, COUNT(*) AS recordsStored FROM StackCTRLRawSecurityRecords WHERE CompanyID = ? GROUP BY Provider', [companyId]);
-        const sources = healthMemory(companyId);
+    function healthMemory(companyId) {
+        const sources = [...states.entries()].filter(([k]) => k.startsWith(`${companyId}:`)).map(([, value]) => publicState(value));
         if (!sources.some(source => source.provider === 'Cloudflare' && source.endpoint.startsWith('/logpush/'))) sources.push({
             provider: 'Cloudflare', endpoint: '/logpush', status: 'not_observed', complete: false,
             limitation: 'No Logpush delivery has been observed for this company. Verify delivery jobs and account mapping for unsampled security event coverage.'
         });
+        return sources;
+    }
+    async function health(companyId) {
+        if (!persistenceEnabled) return { sources: healthMemory(companyId), stored: [], storageMode: 'memory_only', storageMessage: 'Security alert database storage is disabled. Recent originals are held temporarily in bounded memory; history comes from provider APIs.' };
+        await hydrate(companyId);
+        const [counts] = await pool.query('SELECT Provider AS provider, COUNT(*) AS recordsStored FROM StackCTRLRawSecurityRecords WHERE CompanyID = ? GROUP BY Provider', [companyId]);
+        const sources = healthMemory(companyId);
         return { sources, stored: counts };
     }
     async function history(companyId, { after = '', since = null, until = null, pageSize = 500 } = {}) {
+        if (!persistenceEnabled) {
+            const limit = Math.min(1000, Math.max(1, Number(pageSize) || 500));
+            const available = [...recent.values()].map(entry => entry.record).filter(record => {
+                const eventTime = Date.parse(record.timestamp);
+                const time = Number.isFinite(eventTime) ? eventTime : Date.parse(record.retrievedAt);
+                return Number(record.companyId) === Number(companyId) && record.uid > after &&
+                    (!since || time >= Date.parse(since)) && (!until || time <= Date.parse(until));
+            }).sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0);
+            const records = available.slice(0, limit);
+            return { records, next: available.length > limit ? records[records.length - 1].uid : null, storageMode: 'memory_only' };
+        }
         const [rows] = await pool.query(
             `SELECT RecordKey, RecordJson FROM StackCTRLRawSecurityRecords WHERE CompanyID = ? AND RecordKey > ?
              AND (? IS NULL OR COALESCE(EventTime, LastRetrievedAt) >= ?) AND (? IS NULL OR COALESCE(EventTime, LastRetrievedAt) <= ?) ORDER BY RecordKey LIMIT ?`,
@@ -212,6 +283,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         if (!Number.isInteger(companyId) || companyId <= 0 || typeof uid !== 'string' || !uid.startsWith(companyId + ':')) return null;
         const cached = recent.get(uid)?.record;
         if (cached) return cached;
+        if (!persistenceEnabled) return null;
         const [rows] = await pool.query('SELECT RecordJson FROM StackCTRLRawSecurityRecords WHERE CompanyID = ? AND RecordKey = ? LIMIT 1', [companyId, hash(uid)]);
         const result = rows[0] ? parse(rows[0].RecordJson) : null;
         return result && Number(result.companyId) === companyId && result.uid === uid ? result : null;
@@ -221,7 +293,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         listeners.get(companyId).add(callback);
         return () => { listeners.get(companyId)?.delete(callback); if (!listeners.get(companyId)?.size) listeners.delete(companyId); };
     }
-    return { ensureSchema, collection, queue, hydrate, health, history, record, subscribe, flush: companyId => queues.get(companyId) || Promise.resolve() };
+    return { ensureSchema, collection, queue, hydrate, health, history, record, subscribe, sources: healthMemory, flush: companyId => queues.get(companyId) || Promise.resolve() };
 }
 function publicState(state = {}) {
     const { continuation, ...safe } = state;

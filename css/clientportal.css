@@ -20908,6 +20908,14 @@ body.sunbird-client-portal .touch-table-swipe-cue { display: none; }
   }
 }
 /* Provider-specific raw evidence: concise table context, structured investigation. */
+.sunbird-security-activity-cell { min-width: 19rem; width: 42%; }
+.sunbird-security-activity-link { border: 0; padding: 0; background: none; color: #f2f6ff; font: inherit; font-weight: 650; text-align: left; cursor: pointer; line-height: 1.5; }
+.sunbird-security-activity-link:hover { text-decoration: underline; }
+.sunbird-security-activity-link:focus-visible { outline: 2px solid #92c5ff; outline-offset: 4px; }
+.sunbird-security-activity-time { min-width: 12rem; font-weight: 600; font-variant-numeric: tabular-nums; color: #eef4ff; }
+.sunbird-security-coverage-warning { padding: .65rem .85rem; border-left: 3px solid #e5b66b; background: rgba(229,182,107,.08); line-height: 1.5; }
+#sunbird-security-diagnostics[hidden] { display: none !important; }
+#sunbird-security-diagnostics summary { cursor: pointer; font-weight: 600; padding: 1rem 0; }
 .sunbird-raw-description { margin: .35rem 0 0; max-width: 38rem; color: #c5cbd5; font-size: .82rem; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .sunbird-raw-dataset { display: block; margin-top: .25rem; color: #aab3c1; }
 .sunbird-raw-detail section { padding: 1rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,.12); }
