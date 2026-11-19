@@ -78,7 +78,7 @@ test('raw presentation shows seconds, missing fields and no keyword-based MITRE'
     assert.equal(context.getSunbirdSecurityEvents({ rawRecords: [{ recordType: 'signin' }], alerts: [{ title: 'derived' }] }).length, 1);
 });
 
-test('raw table renders the provider column, missing severity and verbatim description', () => {
+test('raw table restores the full evidence columns and keeps provider details accessible', () => {
     const source = fs.readFileSync(require.resolve('../js/clientportal.js'), 'utf8');
     const body = {};
     const row = rawSecurityRecord({ id: 'one', status: { failureReason: 'User must register MFA.' } }, {
@@ -98,9 +98,14 @@ test('raw table renders the provider column, missing severity and verbatim descr
         vm.runInContext(source.slice(start, end), context);
     }
     context.renderSunbirdSecurityTable({});
-    assert.equal((body.innerHTML.match(/<td /g) || []).length, 6);
+    assert.equal((body.innerHTML.match(/<td /g) || []).length, 11);
     assert.match(body.innerHTML, /data-label="Severity">.*Not provided/);
+    assert.match(body.innerHTML, /data-label="Type">.*signin/);
+    assert.match(body.innerHTML, /data-label="Incident \/ Alert">.*User must register MFA\./);
     assert.match(body.innerHTML, /User must register MFA\./);
-    assert.doesNotMatch(body.innerHTML, /data-label="(?:MITRE|API Source|Category|Evidence)"/);
     assert.match(body.innerHTML, /data-label="Source">Microsoft Entra ID/);
+    assert.match(body.innerHTML, /data-label="API Source">Microsoft Graph/);
+    assert.match(body.innerHTML, /data-label="Category">/);
+    assert.match(body.innerHTML, /data-label="MITRE">Not mapped/);
+    assert.match(body.innerHTML, /data-label="Evidence">.*>Open<\/button>/);
 });

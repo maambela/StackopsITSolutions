@@ -124,7 +124,7 @@ test('security shell names the two evidence layers explicitly', () => {
     assert.match(source, /sunbird-security-raw-evidence-header/);
 });
 
-test('activity header explains partial coverage without retrieval counts or internal errors', () => {
+test('activity header restores collection context while keeping detailed errors out of the client view', () => {
     const target = { innerHTML: '' };
     const headerContext = vm.createContext({
         document: { getElementById: id => id === 'sunbird-security-raw-evidence-header' ? target : null },
@@ -145,7 +145,10 @@ test('activity header explains partial coverage without retrieval counts or inte
         }
     });
     assert.match(target.innerHTML, /Cloudflare security monitoring has partial coverage/);
-    assert.doesNotMatch(target.innerHTML, /records|Last evaluated|permission|12:00|API|evaluation/);
+    assert.match(target.innerHTML, /1 returned record/);
+    assert.match(target.innerHTML, /1 retained raw Cloudflare record/);
+    assert.match(target.innerHTML, /Last evaluated formatted:2026-10-30T12:00:00Z/);
+    assert.doesNotMatch(target.innerHTML, /permission is unavailable|Audit permission/);
 });
 
 test('security data requests the live API directly and surfaces a live failure', async () => {
