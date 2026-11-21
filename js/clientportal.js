@@ -14372,11 +14372,35 @@ function createProjectCard(project) {
         }).join('');
     }
     const projectInfoHTML = project.id === 9 ? '' : `<div class="project-info">${metricsHTML}</div>`;
+    const microsoftLogo = {
+        src: 'Images/microsoft-transparent-microsoft-free-free-png.PNG',
+        alt: 'Microsoft logo',
+        className: 'project-card-provider-logo--microsoft'
+    };
+    const projectProviderLogos = [2, 3, 5, 7, 8].includes(Number(project.id))
+        ? [microsoftLogo]
+        : Number(project.id) === 4
+            ? [
+                microsoftLogo,
+                { src: 'Images/cloudflare.png', alt: 'Cloudflare logo', className: '' },
+                { src: 'Images/1password.webp', alt: '1Password logo', className: '' }
+            ]
+            : [];
+    const projectProviderLogosHTML = projectProviderLogos.length
+        ? `<div class="project-card-provider-logos" aria-label="Connected services">${projectProviderLogos.map(logo => `
+            <span class="project-card-provider-logo ${logo.className}" title="${logo.alt}">
+                <img src="${logo.src}" alt="${logo.alt}">
+            </span>
+        `).join('')}</div>`
+        : '';
     const projectRisksHTML = project.id === 9 ? '' : `
         <div class="project-risks">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
-            <div class="risk-indicator">
-                <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
+            <div class="project-risks-right">
+                <div class="risk-indicator">
+                    <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
+                </div>
+                ${projectProviderLogosHTML}
             </div>
         </div>
     `;

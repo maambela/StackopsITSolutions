@@ -3443,6 +3443,30 @@ body.client-portal-page {
   font-size: 0.52rem;
 }
 
+.side-peek-card .project-risks-right {
+  gap: 4px;
+}
+
+.side-peek-card .project-card-provider-logos {
+  gap: 2px;
+}
+
+.side-peek-card .project-card-provider-logo {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+}
+
+.side-peek-card .project-card-provider-logo img {
+  width: 16px;
+  height: 16px;
+}
+
+.side-peek-card .project-card-provider-logo--microsoft img {
+  width: 32px;
+  height: auto;
+}
+
 .side-peek-card:not(.expanded) .network-security-compact-panel {
   display: none;
 }
@@ -4144,6 +4168,52 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   color: #bdbdbd;
   font-size: 0.877rem;
   font-weight: 200;
+}
+
+.project-risks > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-risks-right,
+.project-card-provider-logos {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.project-risks-right {
+  gap: 6px;
+}
+
+.project-card-provider-logos {
+  gap: 4px;
+}
+
+.project-card-provider-logo {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.project-card-provider-logo img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  max-width: none;
+  object-fit: contain;
+}
+
+.project-card-provider-logo--microsoft img {
+  width: 40px;
+  height: auto;
+  flex: 0 0 auto;
 }
 
 .network-security-card-footer {
