@@ -14331,17 +14331,6 @@ function createProjectCard(project) {
     const isSummaryCard = isSummaryProjectCard(project);
     const metrics = project.id === 9 ? [] : (isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []));
     const statusMeta = getSummaryCardStatusMeta(project);
-    const isInactiveProject = String(project.status || '').toLowerCase() === 'inactive';
-    const riskDotClass = project.id === 9
-        ? 'unreported'
-        : isInactiveProject
-        ? 'critical'
-        : criticalRisks > 0 ? 'critical' : highRisks > 0 ? 'high' : (mediumRisks > 0 ? 'medium' : 'success');
-    const riskDotTitle = project.id === 9
-        ? 'Credential risk data not reported'
-        : isInactiveProject
-        ? 'Inactive'
-        : criticalRisks > 0 ? criticalRisks + ' Critical' : highRisks > 0 ? highRisks + ' High' : (mediumRisks > 0 ? mediumRisks + ' Medium' : 'No Risks detected');
 
     // Build metrics section from cardMetrics array
     let metricsHTML = '';
@@ -14372,36 +14361,9 @@ function createProjectCard(project) {
         }).join('');
     }
     const projectInfoHTML = project.id === 9 ? '' : `<div class="project-info">${metricsHTML}</div>`;
-    const microsoftLogo = {
-        src: 'Images/microsoft-transparent-microsoft-free-free-png.PNG',
-        alt: 'Microsoft logo',
-        className: 'project-card-provider-logo--microsoft'
-    };
-    const projectProviderLogos = [2, 3, 5, 7, 8].includes(Number(project.id))
-        ? [microsoftLogo]
-        : Number(project.id) === 4
-            ? [
-                microsoftLogo,
-                { src: 'Images/cloudflare.png', alt: 'Cloudflare logo', className: '' },
-                { src: 'Images/1password.webp', alt: '1Password logo', className: '' }
-            ]
-            : [];
-    const projectProviderLogosHTML = projectProviderLogos.length
-        ? `<div class="project-card-provider-logos" aria-label="Connected services">${projectProviderLogos.map(logo => `
-            <span class="project-card-provider-logo ${logo.className}" title="${logo.alt}">
-                <img src="${logo.src}" alt="${logo.alt}">
-            </span>
-        `).join('')}</div>`
-        : '';
     const projectRisksHTML = project.id === 9 ? '' : `
         <div class="project-risks">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
-            <div class="project-risks-right">
-                <div class="risk-indicator">
-                    <div class="risk-dot ${riskDotClass}" title="${riskDotTitle}"></div>
-                </div>
-                ${projectProviderLogosHTML}
-            </div>
         </div>
     `;
     
@@ -14794,6 +14756,26 @@ function renderSunbirdFullDashboardButton(target) {
             <button class="sunbird-dashboard-btn" onclick="window.openSunbirdFullDashboard('${target}')">
                 <i class="fas ${icon}"></i> View Full Dashboard
             </button>
+        </div>
+    `;
+}
+
+function renderSunbirdBillingCardFooter(target, providers) {
+    const providerLogos = {
+        microsoft: { src: 'Images/microsoft-transparent-microsoft-free-free-png.PNG', alt: 'Microsoft logo' },
+        cloudflare: { src: 'Images/cloudflare.png', alt: 'Cloudflare logo' },
+        onepassword: { src: 'Images/1password.webp', alt: '1Password logo' }
+    };
+    const logosHTML = providers.map(provider => {
+        const logo = providerLogos[provider];
+        if (!logo) throw new Error(`Unsupported billing-card provider logo: ${provider}`);
+        return `<img src="${logo.src}" alt="${logo.alt}">`;
+    }).join('');
+
+    return `
+        <div class="sunbird-billing-card-footer">
+            ${renderSunbirdFullDashboardButton(target)}
+            <div class="sunbird-billing-provider-logos" role="group" aria-label="Connected services">${logosHTML}</div>
         </div>
     `;
 }
@@ -17728,7 +17710,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                         </div>
                     </div>
                     ${renderSunbirdSecurityBillingSummary()}
-                    ${renderSunbirdFullDashboardButton('security')}
+                    ${renderSunbirdBillingCardFooter('security', ['microsoft', 'cloudflare', 'onepassword'])}
                 </div>
             `;
             ensureSunbirdBillingCardDimensions();
@@ -17802,7 +17784,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                 </div>
 
                 ${renderSunbirdSecurityBillingSummary(data)}
-                ${renderSunbirdFullDashboardButton('security')}
+                ${renderSunbirdBillingCardFooter('security', ['microsoft', 'cloudflare', 'onepassword'])}
             </div>
         `;
     } catch (error) {
@@ -17815,7 +17797,7 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
                     <h3>Security Alerts</h3>
                 </div>
                 <p class="sunbird-panel-error">Unable to load security alerts right now.</p>
-                ${renderSunbirdFullDashboardButton('security')}
+                ${renderSunbirdBillingCardFooter('security', ['microsoft', 'cloudflare', 'onepassword'])}
             </div>
         `;
     } finally {
@@ -17866,7 +17848,7 @@ async function renderSunbirdBackupRecoveryView(forceRefresh = false) {
                     <div class="sunbird-storage-row"><span>SharePoint</span><strong>${byService.sharepoint || 0} GB</strong></div>
                     <div class="sunbird-storage-row"><span>Exchange</span><strong>${byService.exchange || 0} GB</strong></div>
                 </div>
-                ${renderSunbirdFullDashboardButton('backup')}
+                ${renderSunbirdBillingCardFooter('backup', ['microsoft'])}
             </div>
         `;
     } catch (error) {
@@ -17879,7 +17861,7 @@ async function renderSunbirdBackupRecoveryView(forceRefresh = false) {
                     <h3>Backup & Recovery</h3>
                 </div>
                 <p class="sunbird-panel-error">Unable to load backup and recovery data right now.</p>
-                ${renderSunbirdFullDashboardButton('backup')}
+                ${renderSunbirdBillingCardFooter('backup', ['microsoft'])}
             </div>
         `;
     } finally {
@@ -17915,7 +17897,7 @@ async function renderSunbirdApplicationsView(forceRefresh = false) {
                     <h3>Applications & Access</h3>
                 </div>
                 <p class="sunbird-panel-error">Unable to load applications data right now.</p>
-                ${renderSunbirdFullDashboardButton('applications')}
+                ${renderSunbirdBillingCardFooter('applications', ['microsoft'])}
             </div>
         `;
     } finally {
@@ -17968,7 +17950,7 @@ function renderSunbirdApplicationsBillingMarkup(model) {
                 </div>
             </div>
 
-            ${renderSunbirdFullDashboardButton('applications')}
+            ${renderSunbirdBillingCardFooter('applications', ['microsoft'])}
         </div>
     `;
 }
