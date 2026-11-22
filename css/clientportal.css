@@ -4155,7 +4155,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .project-card-provider-logos {
   display: flex;
-  flex: 0 0 20px;
+  flex: 0 0 24px;
   align-items: center;
   justify-content: center;
   margin-left: auto;
@@ -4163,8 +4163,8 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .project-card-provider-logos img {
   display: block;
-  width: 20px;
-  height: 16px;
+  width: 24px;
+  height: 19px;
   object-fit: contain;
   object-position: center;
 }
@@ -7478,6 +7478,11 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   height: 22px;
   object-fit: contain;
   object-position: center;
+}
+
+.sunbird-billing-provider-logos img.sunbird-billing-provider-logo--emphasized {
+  width: 32px;
+  height: 25px;
 }
 
 .sunbird-dashboard-btn {
@@ -15747,6 +15752,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  body.sunbird-client-portal .project-risks.has-provider-logo span {
+    max-width: calc(100% - 26px);
   }
 }
 

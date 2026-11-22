@@ -14774,7 +14774,10 @@ function renderSunbirdBillingCardFooter(target, providers) {
     const logosHTML = providers.map(provider => {
         const logo = providerLogos[provider];
         if (!logo) throw new Error(`Unsupported billing-card provider logo: ${provider}`);
-        return `<img src="${logo.src}" alt="${logo.alt}">`;
+        const emphasizedClass = provider === 'microsoft' && ['applications', 'backup'].includes(target)
+            ? 'sunbird-billing-provider-logo--emphasized'
+            : '';
+        return `<img class="${emphasizedClass}" src="${logo.src}" alt="${logo.alt}">`;
     }).join('');
 
     return `
