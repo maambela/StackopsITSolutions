@@ -3843,7 +3843,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .project-card.glow-selected .project-icon {
   transform: scale(1.2) rotate(5deg);
-  box-shadow: 0 12px 30px rgba(255, 165, 64, 0.34);
+  box-shadow: 0 12px 30px rgba(255, 255, 255, 0.3); /* CHANGED FROM ORANGE TO WHITE */
 }
 
 /* No Interaction Project Card */
@@ -3891,8 +3891,8 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   color: var(--primary);
   flex-shrink: 0;
   box-shadow:
-    0 8px 20px rgba(255, 169, 64, 0.28),
-    inset 0 1px 0 rgba(255, 236, 179, 0.42);
+    0 8px 20px rgba(255, 255, 255, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
   transition: all 0.4s ease;
 }
 
@@ -3906,7 +3906,7 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
 
 .project-card:hover .project-icon {
   transform: scale(1.15) rotate(5deg);
-  box-shadow: 0 12px 24px rgba(255, 165, 64, 0.32);
+  box-shadow: 0 12px 24px rgba(255, 255, 255, 0.25); /* CHANGED FROM ORANGE TO WHITE */
 }
 
 .project-title {
