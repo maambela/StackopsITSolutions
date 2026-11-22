@@ -4165,6 +4165,10 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   display: block;
   width: 24px;
   height: 19px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: #080808;
   object-fit: contain;
   object-position: center;
 }
@@ -7476,6 +7480,10 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   display: block;
   width: 28px;
   height: 22px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: #080808;
   object-fit: contain;
   object-position: center;
 }
@@ -7483,6 +7491,27 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 .sunbird-billing-provider-logos img.sunbird-billing-provider-logo--emphasized {
   width: 32px;
   height: 25px;
+}
+
+.sunbird-billing-provider-logos--security {
+  gap: 2px;
+}
+
+.sunbird-billing-provider-logo-separator {
+  display: block;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 14px;
+  margin: 0 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(255, 255, 255, 0.28) 22%,
+    rgba(255, 255, 255, 0.28) 78%,
+    transparent 100%
+  );
+  box-shadow: 0 0 4px rgba(210, 235, 255, 0.12);
+  opacity: 0.8;
 }
 
 .sunbird-dashboard-btn {

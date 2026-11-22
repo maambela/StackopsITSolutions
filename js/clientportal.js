@@ -14778,12 +14778,17 @@ function renderSunbirdBillingCardFooter(target, providers) {
             ? 'sunbird-billing-provider-logo--emphasized'
             : '';
         return `<img class="${emphasizedClass}" src="${logo.src}" alt="${logo.alt}">`;
-    }).join('');
+    }).join(target === 'security'
+        ? '<span class="sunbird-billing-provider-logo-separator" aria-hidden="true"></span>'
+        : '');
+    const providerLogosClass = target === 'security'
+        ? 'sunbird-billing-provider-logos sunbird-billing-provider-logos--security'
+        : 'sunbird-billing-provider-logos';
 
     return `
         <div class="sunbird-billing-card-footer">
             ${renderSunbirdFullDashboardButton(target)}
-            <div class="sunbird-billing-provider-logos" role="group" aria-label="Connected services">${logosHTML}</div>
+            <div class="${providerLogosClass}" role="group" aria-label="Connected services">${logosHTML}</div>
         </div>
     `;
 }
