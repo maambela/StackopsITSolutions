@@ -14361,9 +14361,14 @@ function createProjectCard(project) {
         }).join('');
     }
     const projectInfoHTML = project.id === 9 ? '' : `<div class="project-info">${metricsHTML}</div>`;
+    const showMicrosoftProjectLogo = [2, 3, 5].includes(Number(project.id));
+    const microsoftProjectLogoHTML = showMicrosoftProjectLogo
+        ? '<div class="project-card-provider-logos"><img src="Images/microsoft-transparent-microsoft-free-free-png.PNG" alt="Microsoft logo"></div>'
+        : '';
     const projectRisksHTML = project.id === 9 ? '' : `
-        <div class="project-risks">
+        <div class="project-risks${showMicrosoftProjectLogo ? ' has-provider-logo' : ''}">
             <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
+            ${microsoftProjectLogoHTML}
         </div>
     `;
     

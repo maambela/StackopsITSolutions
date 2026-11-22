@@ -4146,6 +4146,29 @@ body:not(.sunbird-client-portal) .project-card.no-interaction.non-sunbird-blur-g
   font-weight: 200;
 }
 
+.project-risks.has-provider-logo > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-provider-logos {
+  display: flex;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+
+.project-card-provider-logos img {
+  display: block;
+  width: 20px;
+  height: 16px;
+  object-fit: contain;
+  object-position: center;
+}
+
 .network-security-card-footer {
   display: flex;
   align-items: center;
