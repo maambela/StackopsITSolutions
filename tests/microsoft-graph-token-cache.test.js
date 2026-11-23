@@ -7,7 +7,7 @@ const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 const start = server.indexOf('async function getMicrosoftGraphToken(options');
 const end = server.indexOf('const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS', start);
 
-function createHarness(fetchToken) {
+function createHarness(fetchToken, { fetchResponse, timers = { setTimeout, clearTimeout } } = {}) {
     let now = 0;
     const requests = [];
     const microsoftTokenCache = new Map();
@@ -17,14 +17,14 @@ function createHarness(fetchToken) {
         getMicrosoftGraphCredentials: async () => ({ tenantId: 'tenant', clientId: 'client', clientSecret: 'fixture' }),
         fetch: async (url, options) => {
             requests.push({ url, options });
+            if (fetchResponse) return fetchResponse(options.signal, requests.length);
             return { ok: true, json: () => fetchToken(requests.length) };
         },
         Date: { now: () => now },
         console: { log() {}, error() {} },
         AbortController,
         URLSearchParams,
-        setTimeout,
-        clearTimeout
+        ...timers
     });
     return { getToken, requests, microsoftTokenCache, advance: ms => { now += ms; } };
 }
@@ -43,6 +43,95 @@ test('reuses a valid token and coalesces concurrent refreshes at the margin', as
     const form = new URLSearchParams(options.body);
     assert.equal(form.get('grant_type'), 'client_credentials');
     assert.equal(form.get('scope'), 'https://graph.microsoft.com/.default');
+});
+
+function controlledDeadline() {
+    let callback;
+    return {
+        setTimeout(handler, delay) {
+            assert.equal(delay, 1000);
+            callback = handler;
+            return 1;
+        },
+        clearTimeout() { callback = undefined; },
+        fire() {
+            assert.ok(callback, 'deadline must be active');
+            callback();
+        },
+        get active() { return Boolean(callback); }
+    };
+}
+
+function stallUntilAborted(signal) {
+    return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+            reject(new DOMException('This operation was aborted', 'AbortError'));
+        }, { once: true });
+    });
+}
+
+for (const phase of ['headers', 'success body', 'HTTP-error body']) {
+    test(`times out during ${phase} and clears the shared acquisition`, async () => {
+        const timers = controlledDeadline();
+        let reachedStall;
+        const stalled = new Promise(resolve => { reachedStall = resolve; });
+        const stall = signal => {
+            reachedStall();
+            return stallUntilAborted(signal);
+        };
+        const { getToken, requests, microsoftTokenCache } = createHarness(undefined, {
+            timers,
+            fetchResponse(signal, call) {
+                if (call > 1) return { ok: true, json: async () => ({ access_token: 'fresh', expires_in: 120 }) };
+                if (phase === 'headers') return stall(signal);
+                return { ok: phase === 'success body', json: () => stall(signal) };
+            }
+        });
+
+        const results = Promise.allSettled([getToken(), getToken()]);
+        await stalled;
+        assert.equal(requests.length, 1);
+        timers.fire();
+        const [first, second] = await results;
+        assert.equal(first.status, 'rejected');
+        assert.equal(second.status, 'rejected');
+        assert.equal(first.reason.code, 'GRAPH_TOKEN_TIMEOUT');
+        assert.equal(second.reason, first.reason);
+        assert.equal(timers.active, false);
+        assert.equal(microsoftTokenCache.size, 0);
+        assert.equal(await getToken(), 'fresh');
+        assert.equal(requests.length, 2);
+        assert.equal(timers.active, false);
+    });
+}
+
+test('preserves a non-deadline failure code and clears the timer', async () => {
+    const timers = controlledDeadline();
+    const error = Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+    const { getToken } = createHarness(undefined, {
+        timers,
+        fetchResponse: async () => { throw error; }
+    });
+    await assert.rejects(getToken(), failure => failure === error);
+    assert.equal(timers.active, false);
+});
+
+test('keeps the timer active until a complete response body arrives', async () => {
+    const timers = controlledDeadline();
+    const { getToken, requests } = createHarness(undefined, {
+        timers,
+        fetchResponse: async () => ({
+            ok: true,
+            json: async () => {
+                assert.equal(timers.active, true);
+                return { access_token: 'complete', expires_in: 120 };
+            }
+        })
+    });
+    assert.equal(await getToken(), 'complete');
+    assert.equal(timers.active, false);
+    assert.equal(await getToken(), 'complete');
+    assert.equal(requests.length, 1);
 });
 
 test('rejects missing or unusable expiry metadata and allows the next acquisition', async () => {

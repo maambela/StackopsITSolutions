@@ -256,32 +256,35 @@ async function getMicrosoftGraphToken(options = {}) {
   }
 
   const load = (async () => {
+    let timeoutHandle;
+    let deadlineExceeded = false;
     try {
       const { tenantId, clientId, clientSecret } = await getMicrosoftGraphCredentials({ securityAlerts: Boolean(options.securityAlerts) });
       console.log('[Microsoft Graph] Requesting new token...');
       const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
       const controller = new AbortController();
       const requestedAt = Date.now();
-      const timeoutHandle = setTimeout(() => controller.abort(), MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS);
-      let response;
-      try {
-        response = await fetch(tokenUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id: clientId,
-            scope: 'https://graph.microsoft.com/.default',
-            client_secret: clientSecret,
-            grant_type: 'client_credentials'
-          }).toString(),
-          signal: controller.signal
-        });
-      } finally {
-        clearTimeout(timeoutHandle);
-      }
+      timeoutHandle = setTimeout(() => {
+        deadlineExceeded = true;
+        controller.abort();
+      }, MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS);
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          scope: 'https://graph.microsoft.com/.default',
+          client_secret: clientSecret,
+          grant_type: 'client_credentials'
+        }).toString(),
+        signal: controller.signal
+      });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json().catch(error => {
+          if (deadlineExceeded || error?.code) throw error;
+          return {};
+        });
         throw new Error(`Token request failed: ${errorData.error_description || response.statusText}`);
       }
 
@@ -306,9 +309,16 @@ async function getMicrosoftGraphToken(options = {}) {
       console.log('[Microsoft Graph] Token obtained successfully');
       return data.access_token;
     } catch (error) {
-      console.error('[Microsoft Graph] Token generation failed:', error.message);
-      if (!error.code && error.name === 'AbortError') error.code = 'GRAPH_TOKEN_TIMEOUT';
+      if (deadlineExceeded) {
+        const timeoutError = new Error(`Microsoft Graph token request timed out after ${MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS}ms`);
+        timeoutError.code = 'GRAPH_TOKEN_TIMEOUT';
+        console.error('[Microsoft Graph] Token generation failed:', timeoutError.message);
+        throw timeoutError;
+      }
+      console.error('[Microsoft Graph] Token generation failed.');
       throw error;
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   })();
 
