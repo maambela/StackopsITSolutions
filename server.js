@@ -15,6 +15,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { channel } = require('node:diagnostics_channel');
+const { performance, monitorEventLoopDelay } = require('node:perf_hooks');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const { Webhook } = require('svix');
 const SVGtoPDF = require('svg-to-pdfkit');
@@ -241,6 +244,60 @@ async function validateMicrosoftGraphCredentialsAtStartup() {
   }
 }
 
+const graphTokenDiagnosticContext = new AsyncLocalStorage();
+const observedGraphTokenSockets = new WeakSet();
+
+function startGraphTokenDiagnostics(deadlineMs) {
+  const startedAt = performance.now();
+  const elapsed = () => Math.round((performance.now() - startedAt) * 1000) / 1000;
+  const summary = { deadlineMs, result: 'credential_error', connection: 'unobserved' };
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  const context = {};
+  const requests = new WeakSet();
+  const connections = new WeakMap();
+  const subscriptions = [
+    [channel('undici:request:create'), ({ request }) => {
+      if (request && graphTokenDiagnosticContext.getStore() === context) {
+        requests.add(request);
+        summary.requestCreatedMs ??= elapsed();
+      }
+    }],
+    [channel('undici:client:connected'), ({ socket }) => {
+      if (socket) connections.set(socket, elapsed());
+    }],
+    [channel('undici:client:sendHeaders'), ({ request, socket }) => {
+      if (!requests.has(request) || !socket) return;
+      summary.socketReadyMs = elapsed();
+      const connectedAt = connections.get(socket);
+      if (observedGraphTokenSockets.has(socket)) {
+        summary.connection = 'reused';
+      } else if (connectedAt !== undefined) {
+        summary.connection = 'established';
+        summary.connectionEstablishedMs = connectedAt;
+      } else {
+        summary.connection = 'ready_unknown';
+      }
+      observedGraphTokenSockets.add(socket);
+    }]
+  ];
+  for (const [diagnosticChannel, listener] of subscriptions) diagnosticChannel.subscribe(listener);
+  eventLoopDelay.enable();
+
+  return {
+    summary,
+    mark(phase) { summary[phase] = elapsed(); },
+    fetch(url, options) { return graphTokenDiagnosticContext.run(context, () => fetch(url, options)); },
+    finish() {
+      eventLoopDelay.disable();
+      for (const [diagnosticChannel, listener] of subscriptions) diagnosticChannel.unsubscribe(listener);
+      summary.elapsedMs = elapsed();
+      summary.eventLoopDelaySamples = eventLoopDelay.count;
+      summary.eventLoopDelayMaxMs = eventLoopDelay.count ? eventLoopDelay.max / 1e6 : null;
+      console.log('[Runtime]', JSON.stringify({ event: 'graph_token_acquisition', at: new Date().toISOString(), ...summary }));
+    }
+  };
+}
+
 async function getMicrosoftGraphToken(options = {}) {
   const cacheKey = 'microsoft_graph_token';
   const refreshMarginMs = 60000;
@@ -256,6 +313,7 @@ async function getMicrosoftGraphToken(options = {}) {
   }
 
   const load = (async () => {
+    const diagnostic = startGraphTokenDiagnostics(MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS);
     let timeoutHandle;
     let deadlineExceeded = false;
     try {
@@ -264,11 +322,14 @@ async function getMicrosoftGraphToken(options = {}) {
       const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
       const controller = new AbortController();
       const requestedAt = Date.now();
+      diagnostic.summary.result = 'request_error';
+      diagnostic.mark('requestStartedMs');
       timeoutHandle = setTimeout(() => {
         deadlineExceeded = true;
+        diagnostic.mark('abortFiredMs');
         controller.abort();
       }, MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS);
-      const response = await fetch(tokenUrl, {
+      const response = await diagnostic.fetch(tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -279,9 +340,15 @@ async function getMicrosoftGraphToken(options = {}) {
         }).toString(),
         signal: controller.signal
       });
+      diagnostic.mark('responseHeadersMs');
+      if (Number.isInteger(response.status)) diagnostic.summary.httpStatus = response.status;
+      diagnostic.summary.result = response.ok ? 'body_error' : 'http_error';
 
       if (!response.ok) {
-        const errorData = await response.json().catch(error => {
+        const errorData = await response.json().then(data => {
+          diagnostic.mark('responseBodyMs');
+          return data;
+        }).catch(error => {
           if (deadlineExceeded || error?.code) throw error;
           return {};
         });
@@ -289,6 +356,8 @@ async function getMicrosoftGraphToken(options = {}) {
       }
 
       const data = await response.json();
+      diagnostic.mark('responseBodyMs');
+      diagnostic.summary.result = 'invalid_token_response';
       const expiresInMs = typeof data.expires_in === 'number' || typeof data.expires_in === 'string'
         ? Number(data.expires_in) * 1000
         : NaN;
@@ -306,10 +375,12 @@ async function getMicrosoftGraphToken(options = {}) {
         token: data.access_token,
         expiresAt
       });
+      diagnostic.summary.result = 'success';
       console.log('[Microsoft Graph] Token obtained successfully');
       return data.access_token;
     } catch (error) {
       if (deadlineExceeded) {
+        diagnostic.summary.result = 'timeout';
         const timeoutError = new Error(`Microsoft Graph token request timed out after ${MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS}ms`);
         timeoutError.code = 'GRAPH_TOKEN_TIMEOUT';
         console.error('[Microsoft Graph] Token generation failed:', timeoutError.message);
@@ -319,6 +390,7 @@ async function getMicrosoftGraphToken(options = {}) {
       throw error;
     } finally {
       clearTimeout(timeoutHandle);
+      diagnostic.finish();
     }
   })();
 
