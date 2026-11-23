@@ -1388,7 +1388,7 @@ async function fetchApplicationsData() {
 }
 
 // Populate Applications card in projects view
-function populateApplicationsCard(apiData, source) {
+function populateApplicationsCard(apiData, source, render = true) {
     const container = document.getElementById('applications-cards-container');
     
     // If container doesn't exist, create it dynamically in the grid
@@ -1415,7 +1415,8 @@ function populateApplicationsCard(apiData, source) {
     saveProjectCardToCache(appProject);
     
     // Re-render project cards
-    displayCurrentProject();
+    if (render) displayCurrentProject();
+    else microsoftDashboardCardsNeedRender = true;
 }
 
 // Show detailed app access (users/groups) modal/card
@@ -1674,7 +1675,7 @@ async function fetchDevicesCardData() {
     }
 }
 
-function updateDevicesProjectCard(project, data) {
+function updateDevicesProjectCard(project, data, render = true) {
     if (!project || isOlderMicrosoftDashboardData(data, latestDevicesCardData)) return;
     latestDevicesCardData = data;
     const { metrics = {}, summary = {} } = data;
@@ -1693,7 +1694,8 @@ function updateDevicesProjectCard(project, data) {
     project.cardFooter = nonCompliant === unavailable ? unavailable : `${nonCompliant} non-compliant devices in collection`;
     updateMicrosoftDashboardCardTimestamp(project, data);
     saveProjectCardToCache(project);
-    displayCurrentProject();
+    if (render) displayCurrentProject();
+    else microsoftDashboardCardsNeedRender = true;
 }
 
 async function fetchEmailCardData() {
@@ -2593,6 +2595,7 @@ function openSunbirdIdentityDashboard() {
     }
 
     loadSunbirdIdentityDashboardData();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdIdentityShell() {
@@ -3383,6 +3386,7 @@ function openSunbirdDevicesDashboard() {
     else setMicrosoftDashboardUpdate('sunbird-devices-dashboard', null, true);
 
     loadSunbirdDevicesDashboardData();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdDevicesShell() {
@@ -4216,6 +4220,7 @@ function openSunbirdEmailSecurityDashboard() {
     if (sunbirdEmailDashboardData) renderSunbirdEmailDashboard();
     else setMicrosoftDashboardUpdate('sunbird-email-dashboard', null, true);
     loadSunbirdEmailDashboardData();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdEmailShell() {
@@ -5217,6 +5222,7 @@ function openSunbirdSecurityDashboard() {
     renderSunbirdSecurityDashboard();
     loadSunbirdSecurityDashboardData();
     connectSunbirdSecurityLiveFeed();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdSecurityShell() {
@@ -5459,6 +5465,7 @@ function saveSunbirdSecuritySnapshot(data) {
 let sunbirdSecurityFeedController = null;
 let sunbirdSecurityFeedRetry = null;
 async function connectSunbirdSecurityLiveFeed() {
+    if (document.visibilityState === 'hidden' || !isMicrosoftDashboardElementActive('sunbird-security-dashboard') || !isSessionValid()) return;
     clearTimeout(sunbirdSecurityFeedRetry);
     sunbirdSecurityFeedController?.abort();
     const controller = new AbortController();
@@ -5474,7 +5481,10 @@ async function connectSunbirdSecurityLiveFeed() {
         try {
             while (true) {
                 const { value, done } = await reader.read();
-                if (!document.getElementById('sunbird-security-dashboard') || localStorage.getItem('authToken') !== token) { controller.abort(); return; }
+                if (!isMicrosoftDashboardElementActive('sunbird-security-dashboard')
+                    || document.visibilityState === 'hidden'
+                    || localStorage.getItem('authToken') !== token
+                    || !isSessionValid()) { controller.abort(); return; }
                 buffer += decoder.decode(value, { stream: !done });
                 let end;
                 while ((end = buffer.indexOf('\n')) >= 0) {
@@ -5501,7 +5511,11 @@ async function connectSunbirdSecurityLiveFeed() {
         if (error.name !== 'AbortError') console.warn('[Raw evidence feed]', error.message);
     } finally {
         clearTimeout(renderTimer);
-        if (!controller.signal.aborted && document.getElementById('sunbird-security-dashboard')) sunbirdSecurityFeedRetry = setTimeout(connectSunbirdSecurityLiveFeed, 15000);
+        if (sunbirdSecurityFeedController === controller) sunbirdSecurityFeedController = null;
+        if (!controller.signal.aborted && document.visibilityState !== 'hidden'
+            && isMicrosoftDashboardElementActive('sunbird-security-dashboard') && isSessionValid()) {
+            sunbirdSecurityFeedRetry = setTimeout(connectSunbirdSecurityLiveFeed, 15000);
+        }
     }
 }
 let sunbirdSecurityRefreshTimer = null;
@@ -5608,11 +5622,6 @@ async function loadSunbirdSecurityDashboardData() {
         } finally {
             clearTimeout(renderTimer);
             sunbirdSecurityLiveRequest = null;
-            if (document.getElementById('sunbird-security-dashboard')) {
-                sunbirdSecurityRefreshTimer = setTimeout(() => {
-                    if (document.getElementById('sunbird-security-dashboard')) loadSunbirdSecurityDashboardData();
-                }, range === sunbirdSecurityRange ? 30000 : 0);
-            }
         }
     })();
     return sunbirdSecurityLiveRequest;
@@ -6992,6 +7001,7 @@ function openSunbirdBackupDashboard() {
     if (cachedSunbirdBackupData) renderSunbirdBackupDashboard();
     else setMicrosoftDashboardUpdate('sunbird-backup-dashboard', null, true);
     loadSunbirdBackupDashboardData();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdBackupShell() {
@@ -7707,7 +7717,7 @@ function exportSunbirdBackupCsv() {
     URL.revokeObjectURL(link.href);
 }
 
-function updateBackupProjectCardFromData(data) {
+function updateBackupProjectCardFromData(data, render = true) {
     const project = mockProjects.find(p => p.isBackupRecoveryCard);
     if (!project) return;
     const model = buildSunbirdBackupModel(data);
@@ -7726,7 +7736,8 @@ function updateBackupProjectCardFromData(data) {
     };
     updateMicrosoftDashboardCardTimestamp(project, data);
     saveProjectCardToCache(project);
-    if (currentProject?.id === project.id) displayCurrentProject();
+    if (render && currentProject?.id === project.id) displayCurrentProject();
+    else if (!render) microsoftDashboardCardsNeedRender = true;
 }
 
 window.openSunbirdBackupDashboard = openSunbirdBackupDashboard;
@@ -7859,6 +7870,7 @@ function openSunbirdApplicationsDashboard() {
     if (sunbirdApplicationsPayload) renderSunbirdApplicationsDashboard();
     else setMicrosoftDashboardUpdate('sunbird-applications-dashboard', null, true);
     loadSunbirdApplicationsDashboardData();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function renderSunbirdApplicationsShell() {
@@ -10392,6 +10404,10 @@ function handleLogout() {
     if (!confirm('Are you sure you want to logout?')) {
         return;
     }
+    stopMicrosoftDashboardAutoRefresh();
+    clearTimeout(sunbirdSecurityFeedRetry);
+    sunbirdSecurityFeedController?.abort();
+    sunbirdSecurityFeedController = null;
 
     clearClientPortalAuthState();
 
@@ -10482,15 +10498,175 @@ let sunbirdDashboardData = null;
 // IDENTITY ACCESS DATA - Smooth Updates from Cached Database
 // ════════════════════════════════════════════════════════════════════════════════
 
-let identityDashboardUpdateInterval = null;
 let lastIdentityMetrics = null;
 const PROJECT_CARD_CACHE_KEY = 'stackopsProjectCardSnapshot';
+const MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS = 30000;
+const MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+let microsoftDashboardRefreshTimer = null;
+let microsoftDashboardRefreshRequest = null;
+let microsoftDashboardRefreshController = null;
+let microsoftDashboardRefreshScope = null;
+let microsoftDashboardRefreshCompanyId = null;
+let microsoftDashboardRefreshHandlersInstalled = false;
+let microsoftDashboardBatchUpdate = false;
+let microsoftDashboardCardsNeedRender = false;
+
+function isMicrosoftDashboardElementActive(id) {
+    const element = document.getElementById(id);
+    if (!element || !element.isConnected || !element.getClientRects().length) return false;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
 
 function microsoftDashboardSession() {
     if (!isSessionValid()) return null;
     const email = sessionStorage.getItem('userEmail').toLowerCase();
     const signedInAt = sessionStorage.getItem('loginTime') || decodeAuthTokenPayload(localStorage.getItem('authToken'))?.iat;
     return signedInAt ? JSON.stringify([email, signedInAt]) : null;
+}
+
+function microsoftDashboardRefreshScopeKey() {
+    return `${microsoftDashboardSession() || ''}:${localStorage.getItem('authToken') || ''}`;
+}
+
+function isMicrosoftDashboardViewActive() {
+    return [
+        'projects-view',
+        'sunbird-identity-dashboard',
+        'sunbird-devices-dashboard',
+        'sunbird-security-dashboard',
+        'sunbird-email-dashboard',
+        'sunbird-backup-dashboard',
+        'sunbird-applications-dashboard'
+    ].some(isMicrosoftDashboardElementActive);
+}
+
+function markMicrosoftDashboardCardsForRender() {
+    if (microsoftDashboardBatchUpdate) {
+        microsoftDashboardCardsNeedRender = true;
+        return;
+    }
+    displayCurrentProject();
+}
+
+function stopMicrosoftDashboardAutoRefresh() {
+    clearTimeout(microsoftDashboardRefreshTimer);
+    microsoftDashboardRefreshTimer = null;
+    microsoftDashboardRefreshController?.abort();
+    microsoftDashboardRefreshController = null;
+    microsoftDashboardRefreshRequest = null;
+    microsoftDashboardRefreshScope = null;
+    microsoftDashboardRefreshCompanyId = null;
+}
+
+function scheduleMicrosoftDashboardAutoRefresh(delay = MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS) {
+    clearTimeout(microsoftDashboardRefreshTimer);
+    microsoftDashboardRefreshTimer = null;
+    if (!isSessionValid() || !isMicrosoftDashboardViewActive()) return;
+    microsoftDashboardRefreshTimer = setTimeout(() => {
+        refreshMicrosoftDashboardSnapshots();
+    }, delay);
+}
+
+function startMicrosoftDashboardAutoRefresh() {
+    if (!microsoftDashboardRefreshHandlersInstalled) {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (isMicrosoftDashboardElementActive('sunbird-security-dashboard')
+                    && !sunbirdSecurityFeedController && isSessionValid()) connectSunbirdSecurityLiveFeed();
+                scheduleMicrosoftDashboardAutoRefresh(0);
+            } else {
+                clearTimeout(sunbirdSecurityFeedRetry);
+                sunbirdSecurityFeedController?.abort();
+                sunbirdSecurityFeedController = null;
+                scheduleMicrosoftDashboardAutoRefresh(MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS);
+            }
+        });
+        window.addEventListener('storage', event => {
+            if (event.key === 'authToken' || event.key === 'isLoggedIn' || event.key === 'userEmail') {
+                const nextScope = microsoftDashboardRefreshScopeKey();
+                if (!isSessionValid() || nextScope !== microsoftDashboardRefreshScope) stopMicrosoftDashboardAutoRefresh();
+            }
+        });
+        microsoftDashboardRefreshHandlersInstalled = true;
+    }
+    if (!isSessionValid() || !isMicrosoftDashboardViewActive()) {
+        stopMicrosoftDashboardAutoRefresh();
+        return;
+    }
+    const scope = microsoftDashboardRefreshScopeKey();
+    if (microsoftDashboardRefreshScope && microsoftDashboardRefreshScope !== scope) {
+        stopMicrosoftDashboardAutoRefresh();
+    }
+    microsoftDashboardRefreshScope = scope;
+    if (!microsoftDashboardRefreshTimer && !microsoftDashboardRefreshRequest) {
+        scheduleMicrosoftDashboardAutoRefresh(document.visibilityState === 'hidden'
+            ? MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS
+            : MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS);
+    }
+}
+
+async function refreshMicrosoftDashboardSnapshots() {
+    if (microsoftDashboardRefreshRequest) return microsoftDashboardRefreshRequest;
+    if (!isSessionValid() || !isMicrosoftDashboardViewActive()) {
+        stopMicrosoftDashboardAutoRefresh();
+        return;
+    }
+    if (document.visibilityState === 'hidden') {
+        scheduleMicrosoftDashboardAutoRefresh(MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS);
+        return;
+    }
+
+    const token = localStorage.getItem('authToken');
+    const scope = microsoftDashboardRefreshScopeKey();
+    const controller = new AbortController();
+    microsoftDashboardRefreshController = controller;
+    microsoftDashboardRefreshScope = scope;
+    microsoftDashboardRefreshRequest = (async () => {
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch('/api/db/microsoft-dashboard-snapshots', {
+                method: 'GET',
+                cache: 'no-store',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                signal: controller.signal
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success || !Number.isInteger(Number(data.companyId))) {
+                if (response.status === 401 || response.status === 403) stopMicrosoftDashboardAutoRefresh();
+                return;
+            }
+            if (token !== localStorage.getItem('authToken')
+                || scope !== microsoftDashboardRefreshScopeKey()
+                || !isSessionValid()) return;
+            if (microsoftDashboardRefreshCompanyId !== null
+                && microsoftDashboardRefreshCompanyId !== Number(data.companyId)) {
+                microsoftDashboardRefreshCompanyId = Number(data.companyId);
+                return;
+            }
+            microsoftDashboardRefreshCompanyId = Number(data.companyId);
+            applyMicrosoftDashboardSnapshots(data.snapshots || {});
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.warn('[Dashboard Refresh] Saved Microsoft snapshots could not be checked:', error.message);
+            }
+        } finally {
+            clearTimeout(timeout);
+            updateMicrosoftDashboardFreshnessStatus();
+            if (microsoftDashboardRefreshController === controller) {
+                microsoftDashboardRefreshController = null;
+                microsoftDashboardRefreshRequest = null;
+            }
+            if (isSessionValid() && isMicrosoftDashboardViewActive()) {
+                scheduleMicrosoftDashboardAutoRefresh(document.visibilityState === 'hidden'
+                    ? MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS
+                    : MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS);
+            } else {
+                stopMicrosoftDashboardAutoRefresh();
+            }
+        }
+    })();
+    return microsoftDashboardRefreshRequest;
 }
 
 function readMicrosoftDashboardCache(key) {
@@ -10542,6 +10718,157 @@ function setMicrosoftDashboardUpdate(id, data, refreshing = false, maxAgeMs) {
 function updateMicrosoftDashboardCardTimestamp(project, data) {
     project.dashboardFetchedAt = data?.fetchedAt || data?.metrics?.LastUpdated || data?.collectionStartedAt || null;
     project.lastUpdate = microsoftDashboardUpdateText(data);
+}
+
+function isNewerVerifiedMicrosoftDashboardSnapshot(incoming, current, isVerified) {
+    if (!isVerified(incoming)) return false;
+    const incomingTime = microsoftDashboardSourceTime(incoming);
+    if (!Number.isFinite(incomingTime)) return false;
+    const currentTime = microsoftDashboardSourceTime(current);
+    return !Number.isFinite(currentTime) || incomingTime > currentTime;
+}
+
+function updateMicrosoftDashboardFreshnessStatus() {
+    const sources = [
+        ['sunbird-identity-dashboard', sunbirdDashboardData],
+        ['sunbird-devices-dashboard', sunbirdDevicesDashboardData || latestDevicesCardData],
+        ['sunbird-security-dashboard', sunbirdSecurityDashboardData],
+        ['sunbird-email-dashboard', sunbirdEmailDashboardData || latestEmailCardData],
+        ['sunbird-applications-dashboard', sunbirdApplicationsPayload],
+        ['sunbird-backup-dashboard', cachedSunbirdBackupData]
+    ];
+    sources.forEach(([id, data]) => {
+        if (document.getElementById(id) && data) setMicrosoftDashboardUpdate(id, data);
+    });
+    mockProjects.forEach(project => {
+        if (project.dashboardFetchedAt) {
+            project.lastUpdate = microsoftDashboardUpdateText({ fetchedAt: project.dashboardFetchedAt });
+        }
+    });
+}
+
+function applyMicrosoftDashboardSnapshots(snapshots) {
+    const token = localStorage.getItem('authToken');
+    const session = microsoftDashboardRefreshScopeKey();
+    let changed = false;
+    microsoftDashboardBatchUpdate = true;
+    microsoftDashboardCardsNeedRender = false;
+    try {
+        const identity = snapshots.identity;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(identity, sunbirdDashboardData,
+            data => data?.complete === true && data.success === true && Array.isArray(data.users))) {
+            sunbirdDashboardData = normalizeSunbirdDashboardData(identity);
+            microsoftUsersData = (sunbirdDashboardData.users || []).map(normalizeSunbirdIdentityUser);
+            microsoftRolesData = Array.isArray(sunbirdDashboardData.roleAssignments)
+                ? sunbirdDashboardData.roleAssignments : microsoftRolesData;
+            buildUserRolesMap();
+            saveSunbirdIdentitySnapshot(sunbirdDashboardData);
+            updateIdentityProjectCardFromDashboard(sunbirdDashboardData);
+            if (document.getElementById('sunbird-identity-dashboard')) renderSunbirdIdentityDashboard();
+            changed = true;
+        }
+
+        const devices = snapshots.devices;
+        const currentDevices = sunbirdDevicesDashboardData || latestDevicesCardData;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(devices, currentDevices,
+            data => data?.complete === true && data.success === true && Array.isArray(data.devices))) {
+            latestDevicesCardData = devices;
+            if (Array.isArray(devices.devices)) {
+                sunbirdDevicesDashboardData = normalizeSunbirdDevicesData({ ...devices, deviceInventoryComplete: true });
+                saveSunbirdDevicesSnapshot(sunbirdDevicesDashboardData);
+            }
+            updateDevicesProjectCard(mockProjects.find(project => project.id === 3), devices, false);
+            if (document.getElementById('sunbird-devices-dashboard') && sunbirdDevicesDashboardData) {
+                renderSunbirdDevicesDashboard();
+            }
+            changed = true;
+        }
+
+        const security = snapshots.security;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(security, sunbirdSecurityDashboardData,
+            data => data?.complete === true && data.success === true && canReplaceSecurityDashboard(data, sunbirdSecurityDashboardData))) {
+            sunbirdSecurityDashboardData = normalizeSunbirdSecurityData(security);
+            if (!sunbirdSecurityRange.since && !sunbirdSecurityRange.until) cachedSunbirdSecurityData = sunbirdSecurityDashboardData;
+            saveSunbirdSecuritySnapshot(sunbirdSecurityDashboardData);
+            const project = mockProjects.find(item => item.isSecurityCard);
+            const metrics = getSecurityDashboardMetrics(sunbirdSecurityDashboardData);
+            if (project) {
+                project.status = 'active';
+                project.cardMetrics = [
+                    { label: 'Active Incidents', value: `: ${metrics.activeIncidents}`, icon: 'fas fa-triangle-exclamation' },
+                    { label: 'High Severity', value: `: ${metrics.highSeverityAlerts}`, icon: 'fas fa-circle-exclamation' },
+                    { label: 'Total Alerts', value: `: ${metrics.totalAlerts}`, icon: 'fas fa-bell' },
+                    { label: 'Security Score', value: `: ${metrics.securityScore}`, icon: 'fas fa-shield-alt' }
+                ];
+                project.cardFooter = microsoftDashboardUpdateText(sunbirdSecurityDashboardData);
+                updateMicrosoftDashboardCardTimestamp(project, sunbirdSecurityDashboardData);
+                saveProjectCardToCache(project);
+            }
+            if (document.getElementById('sunbird-security-dashboard')) renderSunbirdSecurityDashboard();
+            changed = true;
+        }
+
+        const email = snapshots.email;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(email, latestEmailCardData,
+            data => data?.success === true
+                && data.complete === true
+                && getEmailThreatDisplayMetrics(data).alertsAvailable
+                && getEmailThreatDisplayMetrics(data).incidentsAvailable
+                && data.sourceAudit?.mailActivityOk === true)) {
+            latestEmailCardData = normalizeSunbirdEmailData(email);
+            sunbirdEmailDashboardData = latestEmailCardData;
+            saveSunbirdEmailSnapshot(latestEmailCardData);
+            const project = mockProjects.find(item => item.id === 5);
+            if (project) {
+                const summary = latestEmailCardData.summary || {};
+                const mailSummary = summary.mailActivity || latestEmailCardData.mailActivity?.summary || {};
+                const threats = getEmailThreatDisplayMetrics(latestEmailCardData);
+                project.status = 'active';
+                project.cardMetrics = emailCardMetrics(threats);
+                const activity = mailSummary.activeMailboxes
+                    ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events` : '';
+                project.cardFooter = threats.activeThreats > 0
+                    ? `${threats.activeThreats} active threats detected`
+                    : activity || 'No active threats in collected alerts';
+                updateMicrosoftDashboardCardTimestamp(project, email);
+                saveProjectCardToCache(project);
+            }
+            if (document.getElementById('sunbird-email-dashboard')) renderSunbirdEmailDashboard();
+            changed = true;
+        }
+
+        const applications = snapshots.applications;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(applications, sunbirdApplicationsPayload,
+            data => data?.complete === true && data.success === true && Array.isArray(data.applications))) {
+            sunbirdApplicationsPayload = normalizeSunbirdApplicationsData(applications);
+            applicationsData = sunbirdApplicationsPayload.applications;
+            saveSunbirdApplicationsSnapshot(sunbirdApplicationsPayload);
+            populateApplicationsCard(sunbirdApplicationsPayload.summary, applications, false);
+            if (document.getElementById('sunbird-applications-dashboard')) renderSunbirdApplicationsDashboard();
+            changed = true;
+        }
+
+        const microsoft365 = snapshots.microsoft365;
+        if (isNewerVerifiedMicrosoftDashboardSnapshot(microsoft365, cachedSunbirdBackupData,
+            data => data?.success === true && data.summary && data.storage
+                && data.complete === true
+                && Array.isArray(data.storage.sites) && Array.isArray(data.storage.users)
+                && Array.isArray(data.storage.inactiveUsers))) {
+            cachedSunbirdBackupData = normalizeSunbirdBackupData(microsoft365);
+            saveSunbirdBackupSnapshot(cachedSunbirdBackupData);
+            updateBackupProjectCardFromData(cachedSunbirdBackupData, false);
+            if (document.getElementById('sunbird-backup-dashboard')) renderSunbirdBackupDashboard();
+            changed = true;
+        }
+    } finally {
+        microsoftDashboardBatchUpdate = false;
+    }
+
+    if (token !== localStorage.getItem('authToken') || session !== microsoftDashboardRefreshScopeKey()) return false;
+    if (changed && microsoftDashboardCardsNeedRender && document.getElementById('projects-view')?.style.display !== 'none') {
+        displayCurrentProject();
+    }
+    return changed;
 }
 
 function microsoftProjectCardFooter(project, fallback) {
@@ -10874,54 +11201,18 @@ async function fetchIdentityAccessData() {
     }
 }
 
-// Start polling for updates every 1 minute
+// Start the shared saved-snapshot refresh flow.
 function startIdentityDashboardUpdates() {
-    if (identityDashboardUpdateInterval) return;
-    
-    console.log('[Identity Dashboard] Starting smooth updates every 1 minute...');
-    
-    identityDashboardUpdateInterval = setInterval(() => {
-        fetchUpdatedIdentityData();
-    }, 60000); // Every 1 minute
+    startMicrosoftDashboardAutoRefresh();
 }
 
-// Stop polling
 function stopIdentityDashboardUpdates() {
-    if (identityDashboardUpdateInterval) {
-        clearInterval(identityDashboardUpdateInterval);
-        identityDashboardUpdateInterval = null;
-        console.log('[Identity Dashboard] Stopped polling updates');
-    }
+    stopMicrosoftDashboardAutoRefresh();
 }
 
 // Fetch updated data silently
 async function fetchUpdatedIdentityData() {
-    if (!isSunbirdUser()) {
-        stopIdentityDashboardUpdates();
-        return;
-    }
-    try {
-        const data = await fetchFreshSunbirdIdentityDashboardData();
-        if (isOlderMicrosoftDashboardData(data, sunbirdDashboardData)) return;
-        sunbirdDashboardData = normalizeSunbirdDashboardData(data);
-        microsoftUsersData = (sunbirdDashboardData.users || []).map(normalizeSunbirdIdentityUser);
-        microsoftRolesData = Array.isArray(sunbirdDashboardData.roleAssignments) ? sunbirdDashboardData.roleAssignments : microsoftRolesData;
-        buildUserRolesMap();
-        updateIdentityProjectCardFromDashboard(sunbirdDashboardData);
-        saveSunbirdIdentitySnapshot(sunbirdDashboardData);
-        
-        // Smoothly update UI values
-        updateIdentityDashboardValuesSmootly();
-        renderSunbirdIdentitySignIns(buildSunbirdIdentityModel());
-        displayCurrentProject();
-    } catch (error) {
-        if ([401, 403].includes(Number(error.statusCode))) {
-            stopIdentityDashboardUpdates();
-            console.warn(`[Identity Dashboard] Background updates stopped: ${error.message}`);
-            return;
-        }
-        console.warn('[Identity Dashboard] Background update warning:', error.message);
-    }
+    return refreshMicrosoftDashboardSnapshots();
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -11860,6 +12151,7 @@ function displayCurrentProject() {
     
     updateNavigationButtons();
     updatePortalMobileDomainSummary();
+    startMicrosoftDashboardAutoRefresh();
 }
 
 function clearSidePeekCards() {
