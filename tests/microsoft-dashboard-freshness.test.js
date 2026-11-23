@@ -53,6 +53,17 @@ test('dashboard freshness describes an available, outdated, updating, or unavail
     assert.equal(update(null), 'Temporarily unavailable');
 });
 
+test('Microsoft project card footer shows only the last updated timestamp when data is available', () => {
+    const footer = vm.runInNewContext([
+        section(client, 'function microsoftDashboardUpdateText', 'function setMicrosoftDashboardUpdate'),
+        section(client, 'function microsoftProjectCardFooter', 'function retainVerifiedEmailDashboard'),
+        'microsoftProjectCardFooter;'
+    ].join('\n'));
+    assert.match(footer({ dashboardFetchedAt: '2026-11-23T21:56:00Z' }, '42 active mailboxes'), /^Last updated /);
+    assert.equal(footer({ lastUpdate: 'Outdated · Last updated 23 Nov, 23:37' }, 'Users: 132'), 'Last updated 23 Nov, 23:37');
+    assert.equal(footer({}, 'Temporarily unavailable'), 'Temporarily unavailable');
+});
+
 test('a Security refresh retains verified source counts and never treats a failed source as zero', () => {
     const { metrics, canReplace } = vm.runInNewContext([
         section(client, 'function getSecurityDashboardMetrics', 'function emailCardMetrics'),

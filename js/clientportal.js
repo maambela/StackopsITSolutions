@@ -10544,6 +10544,15 @@ function updateMicrosoftDashboardCardTimestamp(project, data) {
     project.lastUpdate = microsoftDashboardUpdateText(data);
 }
 
+function microsoftProjectCardFooter(project, fallback) {
+    if (project.dashboardFetchedAt) {
+        return microsoftDashboardUpdateText({ fetchedAt: project.dashboardFetchedAt }, Infinity);
+    }
+    const lastUpdate = project.lastUpdate || '';
+    const start = lastUpdate.indexOf('Last updated ');
+    return start >= 0 ? lastUpdate.slice(start) : fallback;
+}
+
 function retainVerifiedEmailDashboard(previous, incoming) {
     if (!previous) return false;
     const prior = getEmailThreatDisplayMetrics(previous);
@@ -14496,12 +14505,10 @@ function createProjectCard(project) {
         ? '<div class="project-card-provider-logos"><img src="Images/microsoft-transparent-microsoft-free-free-png.PNG" alt="Microsoft logo"></div>'
         : '';
     const cardFooter = project.cardFooter || 'Risks: ' + risksCount;
-    const freshness = microsoftCard && (project.dashboardFetchedAt
-        ? microsoftDashboardUpdateText({ fetchedAt: project.dashboardFetchedAt })
-        : project.lastUpdate?.includes('Last updated') ? project.lastUpdate : '');
+    const microsoftFooter = microsoftCard ? escapeIdentityText(microsoftProjectCardFooter(project, cardFooter)) : '';
     const projectRisksHTML = project.id === 9 ? '' : `
         <div class="project-risks${showMicrosoftProjectLogo ? ' has-provider-logo' : ''}">
-            ${microsoftCard ? `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeIdentityText([freshness, cardFooter].filter(Boolean).join(' · '))}">${freshness ? escapeIdentityText(freshness) + ' · ' : ''}${cardFooter}</span>` : `<span>${cardFooter}</span>`}
+            ${microsoftCard ? `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${microsoftFooter}">${microsoftFooter}</span>` : `<span>${cardFooter}</span>`}
             ${microsoftProjectLogoHTML}
         </div>
     `;
