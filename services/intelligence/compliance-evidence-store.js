@@ -89,7 +89,7 @@ function deriveComplianceEvidence(payload = {}) {
         sourceId: complianceSourceId(control, index),
         title: String(control.name || 'Compliance control').slice(0, 500),
         area: control.area || null,
-        status: control.insight || null,
+        status: String(control.complianceStatus || 'unknown').slice(0, 50),
         processed: control
     }));
     const omittedRecordCount = metrics.manualControlsExcluded || 0;

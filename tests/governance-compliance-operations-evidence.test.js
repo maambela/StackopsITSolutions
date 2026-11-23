@@ -51,6 +51,27 @@ test('compliance evidence excludes manual attestation controls from Azure input'
     assert.equal(evidence.isComplete, true);
 });
 
+test('compliance persistence stores a short status and preserves the full insight', async () => {
+    const insight = 'MFA evidence collected successfully for every account in the current validation scope.';
+    let stored;
+    const pool = {
+        async query(sql, parameters) {
+            if (/INSERT INTO StackCTRLComplianceEvidence\s/.test(sql)) stored = parameters;
+            return [{ insertId: 501 }];
+        }
+    };
+    const result = await createComplianceEvidenceStore({ pool, logger: silentLogger }).persistProcessedEvidence({
+        companyId: 1,
+        payload: { success: true, controls: [{
+            name: 'MFA on all accounts', area: 'Identity', complianceStatus: 'Compliant',
+            insight, evidenceData: { total_users: 10 }
+        }] }
+    });
+    assert.equal(result.isComplete, true);
+    assert.equal(stored[7], 'Compliant');
+    assert.equal(JSON.parse(stored[8]).insight, insight);
+});
+
 test('operations evidence excludes manual configuration tasks such as 1Password from Azure input', () => {
     const payload = buildOperationsDashboardPayload({
         payload: {

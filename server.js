@@ -462,7 +462,12 @@ async function fetchGraphResponseWithDeadline(url, token, { signal = null, colle
                 return { response, body };
             })
         });
-        logRuntimeOperation('snapshot_source_http_completed', { ...context, elapsedMs: Date.now() - startedAt });
+        logRuntimeOperation('snapshot_source_http_completed', {
+            ...context,
+            elapsedMs: Date.now() - startedAt,
+            httpStatus: result.response.status,
+            httpOk: result.response.ok
+        });
         return result;
     } catch (error) {
         logRuntimeOperation(error?.code === 'STACKCTRL_OPERATION_TIMEOUT' ? 'snapshot_source_http_timeout' : 'snapshot_source_http_failed', { ...context, elapsedMs: Date.now() - startedAt, error: String(error?.message || error) });
@@ -11021,8 +11026,9 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
             label: 'Email activity Graph report'
         });
         if (!response.ok) {
-            console.warn('[Email Security] Email activity report returned:', response.status);
-            return { users: [], summary: {} };
+            const error = new Error(`Email activity Graph report returned HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
         }
         const rows = parseGraphReportCSV(csv, 'Email Activity');
         const users = rows
@@ -11048,7 +11054,7 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
         return { users, summary };
     } catch (error) {
         console.warn('[Email Security] Email activity report failed:', error.message);
-        return { users: [], summary: {} };
+        throw error;
     }
 }
 
