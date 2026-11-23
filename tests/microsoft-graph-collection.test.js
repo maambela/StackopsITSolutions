@@ -78,6 +78,40 @@ test('returns a structured unavailable result for known optional endpoint failur
     assert.match(result.errorDetail, /Unsupported request/);
 });
 
+test('does not retry a 429 when Retry-After cannot fit in the deadline', async () => {
+    let calls = 0;
+    const result = await fetchGraphCollectionWithRetry({
+        url: 'https://graph.microsoft.com/v1.0/users',
+        token: 'fixture',
+        timeoutMs: 1000,
+        fetchImpl: async () => {
+            calls++;
+            return response({ status: 429, headers: { 'retry-after': '90' } });
+        },
+        waitImpl: async () => assert.fail('server delay does not fit')
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.errorCode, 'GRAPH_HTTP_429');
+    assert.equal(result.retryAfterMs, 90000);
+});
+
+test('rejects an invalid or off-origin next link without sending a bearer there', async () => {
+    for (const nextLink of ['not a URL', 'https://example.invalid/users']) {
+        let calls = 0;
+        const result = await fetchGraphCollectionPagesWithRetry({
+            url: 'https://graph.microsoft.com/v1.0/users',
+            token: 'fixture',
+            fetchImpl: async () => {
+                calls++;
+                return response({ body: { value: [{ id: '1' }], '@odata.nextLink': nextLink } });
+            }
+        });
+        assert.equal(calls, 1);
+        assert.equal(result.errorCode, 'GRAPH_INVALID_NEXT_LINK');
+        assert.equal(result.partial, true);
+    }
+});
+
 test('follows Graph next links up to the configured page limit and reports an incomplete collection', async () => {
     const requests = [];
     const result = await fetchGraphCollectionPagesWithRetry({

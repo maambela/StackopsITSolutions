@@ -1,3 +1,5 @@
+const { graphCoordinator } = require('./microsoft-graph-coordinator');
+const { performance } = require('node:perf_hooks');
 const RETRYABLE_GRAPH_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 function numberInRange(value, minimum, maximum, fallback) {
@@ -13,7 +15,7 @@ function headerValue(headers, name) {
 function parseRetryAfterMs(value, now = Date.now()) {
     if (!value) return null;
     const seconds = Number(value);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+    if (!Number.isNaN(seconds)) return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1000) : null;
     const dateMs = Date.parse(value);
     return Number.isFinite(dateMs) ? Math.max(0, dateMs - now) : null;
 }
@@ -51,21 +53,23 @@ async function fetchGraphCollectionWithRetry({
     url,
     token,
     fetchImpl = globalThis.fetch,
+    readJson = response => response.json(),
     timeoutMs = 60000,
+    attemptTimeoutMs = timeoutMs,
     maxAttempts = 3,
     expectedUnavailableStatuses = [],
     optional = false,
     label = 'Microsoft Graph collection',
     baseDelayMs = 1000,
     maxRetryDelayMs = 30000,
-    now = () => Date.now(),
+    now = () => performance.now(),
     waitImpl = wait
 } = {}) {
     if (!url) throw new Error('A Microsoft Graph collection URL is required');
     if (!token) throw new Error('A Microsoft Graph access token is required');
     if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required');
 
-    const deadline = now() + numberInRange(timeoutMs, 1000, 300000, 60000);
+    const deadline = now() + numberInRange(timeoutMs, 1, 300000, 60000);
     const attemptsAllowed = numberInRange(maxAttempts, 1, 5, 3);
     let lastMetadata = { httpStatus: null, graphRequestId: null, clientRequestId: null, retryAfterMs: null };
     let lastErrorDetail = null;
@@ -76,22 +80,30 @@ async function fetchGraphCollectionWithRetry({
         if (remainingMs <= 0) break;
 
         const controller = new AbortController();
-        const timeoutHandle = setTimeout(() => controller.abort(), remainingMs);
+        const attemptBudgetMs = Math.min(remainingMs, numberInRange(attemptTimeoutMs, 1, 300000, remainingMs));
+        const attemptDeadline = now() + attemptBudgetMs;
+        const timeoutHandle = setTimeout(() => controller.abort(), attemptBudgetMs);
         try {
-            const response = await fetchImpl(url, {
-                method: 'GET',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                signal: controller.signal
+            const { response, payload } = await graphCoordinator.run(controller.signal, async () => {
+                if (now() >= attemptDeadline) controller.abort();
+                controller.signal.throwIfAborted();
+                const response = await fetchImpl(url, {
+                    method: 'GET',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    signal: controller.signal
+                });
+                lastMetadata = graphResponseMetadata(response);
+                if (!response.ok) failedRequests++;
+                if (response.status === 429) rateLimits++;
+                const payload = response.ok ? await readJson(response) : await response.text().catch(() => '');
+                return { response, payload };
             });
-            lastMetadata = graphResponseMetadata(response);
-            if (!response.ok) failedRequests++;
-            if (response.status === 429) rateLimits++;
 
             if (response.ok) {
-                const data = await response.json();
+                const data = payload;
                 if (!Array.isArray(data?.value) || data.value.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Microsoft Graph returned no value collection');
                 const value = data.value;
                 const hasMore = Boolean(data?.['@odata.nextLink']);
@@ -110,8 +122,7 @@ async function fetchGraphCollectionWithRetry({
                 };
             }
 
-            const body = await response.text().catch(() => '');
-            lastErrorDetail = boundedErrorDetail(body);
+            lastErrorDetail = boundedErrorDetail(payload);
             const unavailable = expectedUnavailableStatuses.includes(response.status);
             const retryable = RETRYABLE_GRAPH_STATUSES.has(response.status);
             if (!unavailable && retryable && attempt < attemptsAllowed) {
@@ -121,8 +132,9 @@ async function fetchGraphCollectionWithRetry({
                     remainingMs: deadline - now(),
                     baseDelayMs,
                     maxRetryDelayMs
-                });
-                if (delay > 0 && deadline - now() > delay) {
+                }) + (lastMetadata.retryAfterMs === null ? Math.random() * 250 : 0);
+                if (deadline - now() > delay) {
+                    clearTimeout(timeoutHandle);
                     await waitImpl(delay);
                     continue;
                 }
@@ -145,10 +157,13 @@ async function fetchGraphCollectionWithRetry({
         } catch (error) {
             const aborted = error?.name === 'AbortError';
             lastErrorDetail = aborted
-                ? `${label} timed out after ${timeoutMs}ms`
+                ? `${label} timed out within its ${Math.ceil(attemptBudgetMs)}ms attempt budget`
                 : String(error?.message || error).slice(0, 600);
-            if (!aborted && attempt < attemptsAllowed && deadline - now() > baseDelayMs) {
-                await waitImpl(retryDelayMs({ attempt, remainingMs: deadline - now(), baseDelayMs, maxRetryDelayMs }));
+            const retryable = error instanceof TypeError && !controller.signal.aborted;
+            const delay = retryDelayMs({ attempt, remainingMs: deadline - now(), baseDelayMs, maxRetryDelayMs }) + Math.random() * 250;
+            if (!aborted && retryable && attempt < attemptsAllowed && deadline - now() > delay) {
+                clearTimeout(timeoutHandle);
+                await waitImpl(delay);
                 continue;
             }
             return {
@@ -160,7 +175,7 @@ async function fetchGraphCollectionWithRetry({
                 recordsFetched: 0,
                 attempts: attempt,
                 ...lastMetadata, failedRequests, rateLimits,
-                errorCode: aborted ? 'GRAPH_REQUEST_TIMEOUT' : 'GRAPH_REQUEST_FAILED',
+                errorCode: aborted ? 'GRAPH_REQUEST_TIMEOUT' : error?.code === 'GRAPH_QUEUE_FULL' ? error.code : 'GRAPH_REQUEST_FAILED',
                 errorDetail: lastErrorDetail
             };
         } finally {
@@ -191,7 +206,7 @@ async function fetchGraphCollectionPagesWithRetry({
     maxPages = Infinity,
     timeoutMs = 60000,
     betweenPagesDelayMs = 0,
-    now = () => Date.now(),
+    now = () => performance.now(),
     ...options
 } = {}) {
     const pageLimit = maxPages === Infinity ? Infinity : numberInRange(maxPages, 1, Number.MAX_SAFE_INTEGER, Infinity);
@@ -208,7 +223,7 @@ async function fetchGraphCollectionPagesWithRetry({
     const providerWarnings = [];
 
     while (nextUrl && pageCount < pageLimit) {
-        if (visited.has(nextUrl) || new URL(nextUrl).origin !== new URL(options.url).origin) {
+        if (visited.has(nextUrl) || URL.parse(nextUrl)?.origin !== new URL(options.url).origin) {
             return { ...lastResult, ok: false, partial: true, value: rows, recordsFetched: rows.length, pageCount, hasMore: true,
                 warnings: ['Graph pagination returned a repeated or invalid next link.'], errorCode: 'GRAPH_INVALID_NEXT_LINK' };
         }
@@ -316,6 +331,8 @@ async function fetchGraphCollectionPagesWithRetry({
         recordsFetched: rows.length,
         attempts,
         pageCount,
+        failedRequests,
+        rateLimits,
         pageLimitReached: true,
         hasMore: true,
         nextLink: nextUrl,

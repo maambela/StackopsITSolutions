@@ -79,6 +79,7 @@ const { createCloudflareLogpushStore } = require('./services/intelligence/cloudf
 const { buildCloudflareLogpushFindings, buildCloudflareLogpushRawAlerts, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
 const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry, parseRetryAfterMs } = require('./services/intelligence/microsoft-graph-collection');
+const { graphCoordinator } = require('./services/intelligence/microsoft-graph-coordinator');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
 const { extractMicrosoftAlertEntities, describeMicrosoftAlertEntityShape } = require('./services/intelligence/microsoft-alert-entities');
 const { buildGovernanceDashboardPayload } = require('./services/intelligence/governance-dashboard-processor');
@@ -455,11 +456,11 @@ async function fetchGraphResponseWithDeadline(url, token, { signal = null, colle
             timeoutMs: MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS,
             signal,
             label,
-            operation: async ({ signal: requestSignal }) => {
+            operation: ({ signal: requestSignal }) => graphCoordinator.run(requestSignal, async () => {
                 const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` }, signal: requestSignal });
                 const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
                 return { response, body };
-            }
+            })
         });
         logRuntimeOperation('snapshot_source_http_completed', { ...context, elapsedMs: Date.now() - startedAt });
         return result;
@@ -490,6 +491,7 @@ async function writeBackupRecoveryPayloadCache(companyId, payload, { signal = nu
 async function readBoundedResponseText(response, maxBytes, label) {
     const advertisedLength = Number(response.headers.get('content-length') || 0);
     if (advertisedLength > maxBytes) {
+        await response.body?.cancel();
         throw new Error(`${label} response exceeds the ${maxBytes}-byte limit`);
     }
     if (!response.body) return '';
@@ -519,31 +521,34 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
     const cpuStart = process.cpuUsage();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS);
-    logRuntimeOperation('graph_request_start', { label });
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            signal: controller.signal
+        return await graphCoordinator.run(controller.signal, async queueMs => {
+            logRuntimeOperation('graph_request_start', { label, queueMs: Math.round(queueMs) });
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label).catch(() => '');
+                const error = new Error(`${label} failed (${response.status}): ${body.slice(0, 300) || response.statusText}`);
+                error.status = response.status;
+                error.retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
+                throw error;
+            }
+            const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
+            const payload = body ? JSON.parse(body) : {};
+            logRuntimeOperation('graph_request_complete', {
+                label,
+                responseBytes: Buffer.byteLength(body),
+                durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+                cpuUserMicros: process.cpuUsage(cpuStart).user
+            });
+            return { payload, responseBytes: Buffer.byteLength(body) };
         });
-        const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
-        if (!response.ok) {
-            const error = new Error(`${label} failed (${response.status}): ${body.slice(0, 300) || response.statusText}`);
-            error.status = response.status;
-            error.retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
-            throw error;
-        }
-        const payload = body ? JSON.parse(body) : {};
-        logRuntimeOperation('graph_request_complete', {
-            label,
-            responseBytes: Buffer.byteLength(body),
-            durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
-            cpuUserMicros: process.cpuUsage(cpuStart).user
-        });
-        return payload;
     } catch (error) {
         const message = error.name === 'AbortError'
             ? `${label} timed out after ${MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS}ms`
@@ -555,6 +560,7 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
             error: message
         });
         const requestError = new Error(message);
+        if (error.code === 'GRAPH_QUEUE_FULL') requestError.code = error.code;
         if (error.status !== undefined) requestError.status = error.status;
         if (error.retryAfterMs !== undefined) requestError.retryAfterMs = error.retryAfterMs;
         throw requestError;
@@ -567,35 +573,53 @@ function isRetryableGraphError(error) {
     return /\((?:408|429|5\d\d)\)|timed out|network|fetch failed/i.test(String(error?.message || ''));
 }
 
-async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1 } = {}) {
-    const cached = microsoftGraphJsonCache.get(url);
+async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false } = {}) {
+    const key = shared ? `${crypto.createHash('sha256').update(token).digest('hex')}:${url}:${paginate}` : null;
+    const cached = microsoftGraphJsonCache.get(key);
     if (shared && cached && cached.expiresAt > Date.now()) {
         logRuntimeOperation('graph_request_cache_hit', { label, responseBytes: cached.responseBytes });
         return cached.payload;
     }
-    if (shared && microsoftGraphJsonPromises.has(url)) {
+    if (shared && microsoftGraphJsonPromises.has(key)) {
         logRuntimeOperation('graph_request_joined', { label });
-        return microsoftGraphJsonPromises.get(url);
+        return (await microsoftGraphJsonPromises.get(key)).payload;
     }
 
     const request = (async () => {
+        if (paginate) {
+            let responseBytes = 0;
+            const result = await fetchGraphCollectionPagesWithRetry({
+                url, token, label, maxPages: 20, maxAttempts: retries + 1, timeoutMs: 60000,
+                attemptTimeoutMs: MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS,
+                readJson: async response => {
+                    const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
+                    responseBytes += Buffer.byteLength(body);
+                    if (responseBytes > 8 * 1024 * 1024) {
+                        const error = new Error(`${label} exceeded the collection response limit`);
+                        error.code = 'GRAPH_COLLECTION_LIMIT';
+                        throw error;
+                    }
+                    return JSON.parse(body);
+                }
+            });
+            logRuntimeOperation('graph_collection_result', {
+                label, status: result.httpStatus, pages: result.pageCount, records: result.recordsFetched,
+                complete: Boolean(result.ok && !result.hasMore && !result.warnings?.length),
+                errorCode: result.errorCode, rateLimits: result.rateLimits
+            });
+            if (!result.ok || result.hasMore || result.warnings?.length) {
+                throw new Error(result.warnings?.[0] || `${label} returned an incomplete collection`);
+            }
+            return { payload: { value: result.value }, responseBytes };
+        }
         let lastError;
         for (let attempt = 0; attempt <= retries; attempt += 1) {
             try {
-                const payload = await fetchMicrosoftGraphJsonAttempt(url, token, label);
-                if (shared) {
-                    const responseBytes = Buffer.byteLength(JSON.stringify(payload));
-                    microsoftGraphJsonCache.set(url, {
-                        payload,
-                        responseBytes,
-                        expiresAt: Date.now() + MICROSOFT_GRAPH_SHARED_CACHE_TTL_MS
-                    });
-                }
-                return payload;
+                return await fetchMicrosoftGraphJsonAttempt(url, token, label);
             } catch (error) {
                 lastError = error;
                 if (attempt >= retries || !isRetryableGraphError(error)) break;
-                const retryDelayMs = error.retryAfterMs ?? 1000 * (2 ** attempt);
+                const retryDelayMs = error.retryAfterMs ?? (1000 + Math.random() * 250) * (2 ** attempt);
                 if (retryDelayMs > 30000) break;
                 logRuntimeOperation('graph_request_retry', { label, attempt: attempt + 1, retryDelayMs, error: error.message });
                 await sleep(retryDelayMs);
@@ -604,12 +628,19 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
         throw lastError;
     })();
 
-    if (shared) microsoftGraphJsonPromises.set(url, request);
+    if (shared) microsoftGraphJsonPromises.set(key, request);
     try {
-        return await request;
+        const { payload, responseBytes } = await request;
+        if (shared && responseBytes <= 1024 * 1024 && microsoftGraphJsonPromises.get(key) === request) {
+            if (microsoftGraphJsonCache.size >= 32) {
+                microsoftGraphJsonCache.delete(microsoftGraphJsonCache.keys().next().value);
+            }
+            microsoftGraphJsonCache.set(key, { payload, responseBytes, expiresAt: Date.now() + MICROSOFT_GRAPH_SHARED_CACHE_TTL_MS });
+        }
+        return payload;
     } finally {
-        if (shared && microsoftGraphJsonPromises.get(url) === request) {
-            microsoftGraphJsonPromises.delete(url);
+        if (shared && microsoftGraphJsonPromises.get(key) === request) {
+            microsoftGraphJsonPromises.delete(key);
         }
     }
 }
@@ -657,7 +688,7 @@ async function fetchMicrosoftUsers(token) {
         const data = await fetchMicrosoftGraphJson(
             'https://graph.microsoft.com/v1.0/users?$top=250&$select=displayName,mail,jobTitle,mobilePhone,userPrincipalName,id,userType,accountEnabled,assignedLicenses,licenseAssignmentStates',
             token,
-            'Microsoft Graph users'
+            'Microsoft Graph users', { paginate: true }
         );
     return data.value || [];
   } catch (error) {
@@ -672,7 +703,7 @@ async function fetchMicrosoftRoleAssignments(token) {
         const data = await fetchMicrosoftGraphJson(
             'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$top=250&$expand=roleDefinition',
             token,
-            'Microsoft Graph role assignments'
+            'Microsoft Graph role assignments', { paginate: true }
         );
     return data.value || [];
   } catch (error) {
@@ -691,7 +722,7 @@ async function fetchMicrosoftSignIns(token, daysBack = 30) {
         const data = await fetchMicrosoftGraphJson(
             `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=createdDateTime ge ${filterDate}&$orderby=createdDateTime desc&$top=250&$select=createdDateTime,userPrincipalName,userId,appDisplayName,clientAppUsed,ipAddress,location,deviceDetail,status`,
             token,
-            'Microsoft Graph sign-ins'
+            'Microsoft Graph sign-ins', { paginate: true }
     );
     return data.value || [];
   } catch (error) {
@@ -729,7 +760,7 @@ async function fetchMicrosoftServicePrincipals(token) {
         const data = await fetchMicrosoftGraphJson(
             'https://graph.microsoft.com/v1.0/servicePrincipals?$top=250&$select=id,displayName,servicePrincipalType,publisherName,createdDateTime,appOwnerOrganizationId,appRoles,oauth2PermissionScopes',
             token,
-            'Microsoft Graph service principals'
+            'Microsoft Graph service principals', { paginate: true }
         );
     return data.value || [];
   } catch (error) {
@@ -744,7 +775,7 @@ async function fetchMicrosoftGroups(token) {
         const data = await fetchMicrosoftGraphJson(
             'https://graph.microsoft.com/v1.0/groups?$top=250&$select=id,displayName,mailNickname',
             token,
-            'Microsoft Graph groups'
+            'Microsoft Graph groups', { paginate: true }
         );
     return data.value || [];
   } catch (error) {
@@ -759,7 +790,7 @@ async function fetchAppRoleAssignments(token, servicePrincipalId) {
         const data = await fetchMicrosoftGraphJson(
             `https://graph.microsoft.com/v1.0/servicePrincipals/${servicePrincipalId}/appRoleAssignedTo?$top=250`,
             token,
-            `Microsoft Graph app assignments for ${servicePrincipalId}`
+            `Microsoft Graph app assignments for ${servicePrincipalId}`, { paginate: true }
         );
     return data.value || [];
   } catch (error) {
@@ -1134,7 +1165,8 @@ async function sendGraphEmail(to, subject, body, isHtml = true, fromAddress = 'n
         }
       };
       
-      await axios.post(
+      const signal = AbortSignal.timeout(10000);
+      await graphCoordinator.run(signal, () => axios.post(
         `https://graph.microsoft.com/v1.0/users/${fromAddress}/sendMail`,
         emailPayload,
         {
@@ -1142,9 +1174,10 @@ async function sendGraphEmail(to, subject, body, isHtml = true, fromAddress = 'n
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 10000,
+          signal
         }
-      );
+      ));
       
       console.log(`[Graph Email] Email successfully sent to ${to}`);
       return; // Success
@@ -1155,15 +1188,9 @@ async function sendGraphEmail(to, subject, body, isHtml = true, fromAddress = 'n
       
       console.error(`[Graph Email] Failed to send email to ${to} (attempt ${attempt}):`, errorCode, errorMsg);
       
-      // Retry logic for transient errors
-      const retryableStatuses = [408, 429, 500, 502, 503, 504];
-      const retryableCodes = ['ETIMEDOUT', 'ECONNECTION', 'ENOTFOUND', 'ESOCKET'];
-      
-      const shouldRetry = retryableStatuses.includes(errorCode) || 
-                         retryableCodes.includes(error?.code);
-      
-      if (attempt < maxRetries && shouldRetry) {
-        const delayMs = 1000 + (attempt * 500); // 1.5s, then 2s
+      // Only replay a send that Graph explicitly rejected as throttled.
+      const delayMs = parseRetryAfterMs(error.response?.headers?.['retry-after']) ?? 1500;
+      if (attempt < maxRetries && errorCode === 429 && delayMs <= 30000) {
         console.log(`[Graph Email] Retrying in ${delayMs}ms...`);
         await new Promise(r => setTimeout(r, delayMs));
       } else {
@@ -11615,7 +11642,7 @@ async function upsertDashboardMetricCaches() {
     for (const row of rows) {
         const companyId = row.CompanyID;
         try {
-            const [identity, identityDetails, devices, apps, appPayload, email, emailSecurity, securityEvents, backup] = await Promise.all([
+            const results = await Promise.allSettled([
                 fetchIdentityMetricsFromApi(),
                 fetchIdentityDetailsFromApi(),
                 fetchDeviceMetricsFromApi(),
@@ -11626,6 +11653,10 @@ async function upsertDashboardMetricCaches() {
                 fetchSecurityEventsPayloadFromApi({ companyId, tenantKey: `company:${companyId}` }),
                 fetchBackupRecoveryPayloadFromApi()
             ]);
+            const failure = results.find(result => result.status === 'rejected');
+            if (failure) throw failure.reason;
+            const [identity, identityDetails, devices, apps, appPayload, email, emailSecurity, securityEvents, backup] =
+                results.map(result => result.value);
 
             await pool.query(
                 `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
@@ -11682,10 +11713,20 @@ async function upsertDashboardMetricCaches() {
     }
 }
 
-setInterval(() => {
-    upsertDashboardMetricCaches().catch(error => {
+let dashboardMetricRefreshRunning = false;
+setInterval(async () => {
+    if (dashboardMetricRefreshRunning) {
+        logRuntimeOperation('dashboard_cache_refresh_skipped_overlap');
+        return;
+    }
+    dashboardMetricRefreshRunning = true;
+    try {
+        await upsertDashboardMetricCaches();
+    } catch (error) {
         console.error('[Cache Worker] Refresh loop failed:', error.message);
-    });
+    } finally {
+        dashboardMetricRefreshRunning = false;
+    }
 }, 5 * 60 * 1000);
 
 app.get('/api/db/identity-metrics', authenticateToken, async (req, res) => {
@@ -14133,7 +14174,7 @@ async function fetchMicrosoftDevices(token) {
     const url = 'https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=250';
     
     try {
-        const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph managed devices');
+        const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph managed devices', { paginate: true });
         return data.value || [];
     } catch (error) {
         console.error('[Microsoft Graph] Devices fetch failed:', error.message);
@@ -14148,7 +14189,7 @@ async function fetchCompliancePolicies(token) {
     const url = 'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies?$top=250';
     
     try {
-        const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph compliance policies');
+        const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph compliance policies', { paginate: true });
         return data.value || [];
     } catch (error) {
         console.error('[Microsoft Graph] Compliance policies fetch failed:', error.message);

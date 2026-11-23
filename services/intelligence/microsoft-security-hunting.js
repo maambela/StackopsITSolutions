@@ -1,3 +1,4 @@
+const { graphCoordinator } = require('./microsoft-graph-coordinator');
 const GRAPH_HUNTING_ENDPOINT = 'https://graph.microsoft.com/v1.0/security/runHuntingQuery';
 
 const SECURITY_HUNTING_QUERIES = Object.freeze({
@@ -42,51 +43,53 @@ async function runMicrosoftSecurityHuntingQuery({
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const response = await fetchImpl(GRAPH_HUNTING_ENDPOINT, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                Accept: 'application/json'
-            },
-            body: JSON.stringify({
-                Query: queryDefinition.query,
-                Timespan: queryDefinition.timespan
-            }),
-            signal: controller.signal
+        return await graphCoordinator.run(controller.signal, async () => {
+            const response = await fetchImpl(GRAPH_HUNTING_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                body: JSON.stringify({
+                    Query: queryDefinition.query,
+                    Timespan: queryDefinition.timespan
+                }),
+                signal: controller.signal
+            });
+
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                const error = new Error(buildHuntingErrorMessage(response.status, body));
+                error.status = response.status;
+                error.code = response.status === 403
+                    ? 'SECURITY_HUNTING_PERMISSION_DENIED'
+                    : 'SECURITY_HUNTING_QUERY_FAILED';
+                throw error;
+            }
+
+            const body = await response.json();
+            if (!Array.isArray(body?.results) || !Array.isArray(body?.schema)) {
+                const error = new Error('Microsoft Graph hunting query returned an invalid results/schema response');
+                error.code = 'INVALID_SECURITY_HUNTING_RESPONSE';
+                throw error;
+            }
+
+            const results = body.results.slice(0, 100);
+            return {
+                query: {
+                    id: queryDefinition.id,
+                    title: queryDefinition.title,
+                    description: queryDefinition.description,
+                    timespan: queryDefinition.timespan
+                },
+                schema: body.schema,
+                results,
+                recordsFetched: results.length,
+                resultLimit: 100,
+                isResultLimitReached: body.results.length >= 100
+            };
         });
-
-        if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            const error = new Error(buildHuntingErrorMessage(response.status, body));
-            error.status = response.status;
-            error.code = response.status === 403
-                ? 'SECURITY_HUNTING_PERMISSION_DENIED'
-                : 'SECURITY_HUNTING_QUERY_FAILED';
-            throw error;
-        }
-
-        const body = await response.json();
-        if (!Array.isArray(body?.results) || !Array.isArray(body?.schema)) {
-            const error = new Error('Microsoft Graph hunting query returned an invalid results/schema response');
-            error.code = 'INVALID_SECURITY_HUNTING_RESPONSE';
-            throw error;
-        }
-
-        const results = body.results.slice(0, 100);
-        return {
-            query: {
-                id: queryDefinition.id,
-                title: queryDefinition.title,
-                description: queryDefinition.description,
-                timespan: queryDefinition.timespan
-            },
-            schema: body.schema,
-            results,
-            recordsFetched: results.length,
-            resultLimit: 100,
-            isResultLimitReached: body.results.length >= 100
-        };
     } catch (error) {
         if (error?.name === 'AbortError') {
             const timeoutError = new Error(`Microsoft Graph hunting query timed out after ${timeoutMs}ms`);
