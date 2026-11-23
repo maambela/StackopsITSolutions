@@ -1,6 +1,6 @@
 const { createRawEvidenceJournal } = require('./services/intelligence/raw-evidence-journal');
 const { SECURITY_ALERT_STORAGE_ENABLED } = require('./services/intelligence/security-storage-policy');
-const { canViewSecurityDiagnostics, securityCoverage, presentSecurityPayload, presentSecurityEvent } = require('./services/intelligence/raw-evidence-delivery');
+const { canViewSecurityDiagnostics, securityCoverage, presentSecurityPayload, serializeSecurityDashboardResponse, presentSecurityEvent } = require('./services/intelligence/raw-evidence-delivery');
 const { createRawEvidencePoller } = require('./services/intelligence/raw-evidence-poller');
 const { presentRawEvidence } = require('./services/intelligence/raw-evidence-interpretation');
 const { parseCloudflareLogpushPayload } = require('./services/intelligence/cloudflare-logpush');
@@ -52,6 +52,7 @@ const { createStackCTRLIntelligenceScheduler, DEFAULT_OUTPUT_TYPES } = require('
 const { buildIdentityDashboardSource } = require('./services/intelligence/identity-dashboard-source');
 const { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');
 const { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');
+const { identityAdapter } = require('./services/intelligence/source-adapters');
 const { createIdentityEvidenceAutomation } = require('./services/intelligence/identity-evidence-automation');
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
@@ -134,6 +135,7 @@ const STACKCTRL_COLLECTOR_TIMEOUT_MS = Math.max(15000, Number(process.env.STACKC
 const BACKUP_DATABASE_TIMEOUT_MS = Math.max(5000, Number(process.env.BACKUP_DATABASE_TIMEOUT_MS) || 30000);
 const authMethodsCache = new Map();
 const AUTH_METHODS_CACHE_TTL_MS = 5 * 60 * 1000;
+const AUTH_METHODS_CACHE_MAX_ENTRIES = 4096;
 let identityEvidenceService = null;
 let deviceEvidenceService = null;
 let emailEvidenceService = null;
@@ -151,18 +153,22 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function getCachedAuthMethods(userId) {
-  const cached = authMethodsCache.get(userId);
+function getCachedAuthMethods(key) {
+  const cached = authMethodsCache.get(key);
   if (!cached) return null;
   if (cached.expiresAt <= Date.now()) {
-    authMethodsCache.delete(userId);
+    authMethodsCache.delete(key);
     return null;
   }
   return cached.methods;
 }
 
-function setCachedAuthMethods(userId, methods) {
-  authMethodsCache.set(userId, {
+function setCachedAuthMethods(key, methods) {
+  authMethodsCache.delete(key);
+  if (authMethodsCache.size >= AUTH_METHODS_CACHE_MAX_ENTRIES) {
+    authMethodsCache.delete(authMethodsCache.keys().next().value);
+  }
+  authMethodsCache.set(key, {
     methods: Array.isArray(methods) ? methods : [],
     expiresAt: Date.now() + AUTH_METHODS_CACHE_TTL_MS
   });
@@ -732,7 +738,7 @@ async function fetchMicrosoftRoleAssignments(token) {
 // Fetch sign-in logs from Microsoft Graph
 async function fetchMicrosoftSignIns(token, daysBack = 30) {
   try {
-    const since = new Date();
+    const since = new Date(Math.floor(Date.now() / 60000) * 60000);
     since.setDate(since.getDate() - daysBack);
     const filterDate = since.toISOString();
 
@@ -750,7 +756,12 @@ async function fetchMicrosoftSignIns(token, daysBack = 30) {
 
 // Fetch authentication methods for a specific user
 async function fetchUserAuthMethods(token, userId, retries = 2) {
+  let cacheKey;
   try {
+    // The opaque bearer binds cached data to its tenant and authorization context.
+    cacheKey = `${crypto.createHash('sha256').update(token).digest('hex')}:${userId}`;
+    const cached = getCachedAuthMethods(cacheKey);
+    if (cached) return cached;
         const data = await fetchMicrosoftGraphJson(
       `https://graph.microsoft.com/v1.0/users/${userId}/authentication/methods`,
             token,
@@ -758,13 +769,11 @@ async function fetchUserAuthMethods(token, userId, retries = 2) {
             { retries, retryTimeouts: false }
     );
     const methods = data.value || [];
-    setCachedAuthMethods(userId, methods);
+    setCachedAuthMethods(cacheKey, methods);
     return methods;
   } catch (error) {
     console.error(`[Microsoft Graph] Failed to fetch auth methods for ${userId}:`, error.message);
-    const cached = getCachedAuthMethods(userId);
-    if (cached) return cached;
-    return [];
+    return getCachedAuthMethods(cacheKey) || [];
   }
 }
 
@@ -11106,6 +11115,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                     warnings: Array.isArray(result?.warnings) ? result.warnings : [],
                     recordsFetched: Number(result?.recordsFetched || 0),
                     ok: result?.ok !== false,
+                    complete: result?.ok === true && !result.hasMore && !result.warnings?.length,
                     sourceFunction: 'fetchSecurityAlertRows'
                 };
             }
@@ -11148,6 +11158,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                     warnings: Array.isArray(result?.warnings) ? result.warnings : [],
                     recordsFetched: Number(result?.recordsFetched || 0),
                     ok: result?.ok !== false,
+                    complete: result?.ok === true && !result.hasMore && !result.warnings?.length,
                     sourceFunction: 'fetchSecurityIncidentRows'
                 };
             }
@@ -11409,7 +11420,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
 
     const hasUsableEvidence = Boolean(recordsPrepared > 0 || mailUsers.length > 0);
 
-    if (!hasUsableEvidence) {
+    if (!hasUsableEvidence && !(alertsResult.complete && incidentsResult.complete)) {
         const error = new Error(
             warnings.length
                 ? `Email evidence refresh failed: ${warnings.join('; ')}`
@@ -11504,6 +11515,8 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
             mailActivityFunction: mailActivity.sourceFunction,
             alertsOk: alertsResult.ok !== false,
             incidentsOk: incidentsResult.ok !== false,
+            alertsComplete: alertsResult.complete === true,
+            incidentsComplete: incidentsResult.complete === true,
             mailActivityOk: mailActivity.ok !== false,
             warnings
         }
@@ -11906,7 +11919,8 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         Number(summary.affectedUsersCount || 0) +
                         Number(summary.activeIncidents || 0) +
                         Number(summary.mailActivity?.totalMailActivity || 0) > 0;
-                    if (hasSignals && hasMailActivityShape) {
+                    const verifiedThreatCoverage = payload.sourceAudit?.alertsComplete === true && payload.sourceAudit?.incidentsComplete === true;
+                    if ((hasSignals || verifiedThreatCoverage) && hasMailActivityShape) {
                         return res.json({
                             ...payload,
                             source: 'db',
@@ -13874,6 +13888,44 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
 
         console.log('[Sunbird Cached Dashboard] User verified as Sunbird client');
 
+        const cacheOnly = ['true', '1'].includes(String(req.query?.cacheOnly || '').toLowerCase());
+        if (cacheOnly) {
+            if (!tenant.companyId) {
+                return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+            }
+            const snapshot = await identityAdapter({
+                pool,
+                companyId: tenant.companyId,
+                capability: { profileKey: 'sunbird', displayName: 'Identity Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
+            });
+            const users = snapshot.evidence.find(item => item.evidenceType === 'users')?.data;
+            if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users) || !users.length) {
+                return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
+            }
+            const summary = {
+                ...snapshot.metrics,
+                totalUsers: users.length,
+                activeUsers24h: snapshot.metrics.activeUsers,
+                adminUsers: snapshot.metrics.privilegedUsers,
+                mfaEnabledPercentage: snapshot.metrics.mfaCoverage,
+                mfaEnabledUsers: snapshot.metrics.mfaEnabled,
+                mfaMissingUsers: snapshot.metrics.mfaMissing,
+                privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
+            };
+            const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
+            return res.json({
+                success: true,
+                tenant: tenant.clientId,
+                fetchedAt: snapshot.freshness.lastUpdated,
+                source: 'identity_evidence_snapshot',
+                summary,
+                metrics: summary,
+                stackctrlMetrics: snapshot.dashboardSourceMetrics,
+                users,
+                roleAssignments: cachedRoles?.roleAssignments || []
+            });
+        }
+
         // Fetch data from MySQL cache tables
         let metricsRows = [];
         let usersRows = [];
@@ -13931,9 +13983,7 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
             Number(metricsRows[0].active_users_24h || 0) > 0
         );
 
-        // Cache-only callers must not restart the slow Microsoft Graph refresh they are avoiding.
-        const cacheOnly = String(req.query?.cacheOnly || '').toLowerCase() === 'true' || String(req.query?.cacheOnly || '') === '1';
-        if (!cacheHasUsableMetrics && !cacheOnly) {
+        if (!cacheHasUsableMetrics) {
             try {
                 console.log('[Sunbird Cached Dashboard] Cache empty, hydrating identity metrics from Microsoft Graph');
                 const liveMetrics = await fetchIdentityMetricsFromApi();
@@ -16404,16 +16454,16 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         }
 
         if (streaming) { send({ type: 'complete', payload: { ...dashboardPayload, source: 'api' } }); res.end(); return; }
-        res.json({
-            ...rawEvidenceClientPayload(dashboardPayload, diagnostics),
-            tenant: tenant.clientId,
-            source: 'api'
-        });
+        const body = serializeSecurityDashboardResponse(dashboardPayload, { diagnostics, tenant: tenant.clientId, range });
+        res.type('application/json').send(body);
 
     } catch (error) {
         console.error('[Security Events] ❌ Error:', error.message);
         
         if (streaming && res.headersSent) { send({ type: 'error', message: error.message }); res.end(); return; }
+        if (error.code === 'SECURITY_DASHBOARD_RESPONSE_TOO_LARGE') {
+            return res.status(503).json({ success: false, error: error.code, message: error.message, historyEndpoint: error.historyEndpoint });
+        }
         res.status(500).json({ 
             error: 'Failed to fetch security events data',
             message: diagnostics ? error.message : 'Security monitoring could not refresh. Recent activity may be missing.'

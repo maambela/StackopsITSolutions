@@ -905,10 +905,10 @@ const mockProjects = [
         lastUpdate: "Loading...",
         icon: "fas fa-envelope-open-text",
         cardMetrics: [
-            { label: "Active Threats", value: ": 0", icon: "fas fa-exclamation-triangle" },
-            { label: "High Severity", value: ": 0", icon: "fas fa-circle-exclamation" },
-            { label: "Users Targeted", value: ": 0", icon: "fas fa-user-shield" },
-            { label: "Open Incidents", value: ": 0", icon: "fas fa-bug" }
+            { label: "Active Threats", value: ": Unavailable", icon: "fas fa-exclamation-triangle" },
+            { label: "High Severity", value: ": Unavailable", icon: "fas fa-circle-exclamation" },
+            { label: "Users Targeted", value: ": Unavailable", icon: "fas fa-user-shield" },
+            { label: "Open Incidents", value: ": Unavailable", icon: "fas fa-bug" }
         ],
         cardFooter: "Monitoring threats",
         hasTabs: false,
@@ -1121,10 +1121,10 @@ function normalizeSummaryMetrics(project) {
             { label: "Stale (7+ days)", value: ": 0", icon: "fas fa-clock" }
         ],
         5: [
-            { label: "Active Threats", value: ": 0", icon: "fas fa-exclamation-triangle" },
-            { label: "High Severity", value: ": 0", icon: "fas fa-circle-exclamation" },
-            { label: "Users Targeted", value: ": 0", icon: "fas fa-user-shield" },
-            { label: "Open Incidents", value: ": 0", icon: "fas fa-bug" }
+            { label: "Active Threats", value: ": Unavailable", icon: "fas fa-exclamation-triangle" },
+            { label: "High Severity", value: ": Unavailable", icon: "fas fa-circle-exclamation" },
+            { label: "Users Targeted", value: ": Unavailable", icon: "fas fa-user-shield" },
+            { label: "Open Incidents", value: ": Unavailable", icon: "fas fa-bug" }
         ],
         8: [
             { label: "Total Apps", value: ": 0", icon: "fas fa-cubes" },
@@ -1723,7 +1723,7 @@ async function fetchEmailCardData() {
             displayCurrentProject();
         }
 
-        const response = await fetch('/api/db/email-metrics', {
+        const response = await fetch('/api/db/email-security', {
             method: 'GET',
             cache: 'no-store',
             headers: {
@@ -1737,44 +1737,21 @@ async function fetchEmailCardData() {
         }
 
         latestEmailCardData = normalizeSunbirdEmailData(data);
-
-        try {
-            const detailResponse = await fetch('/api/db/email-security', {
-                method: 'GET',
-                cache: 'no-store',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            const detailData = await detailResponse.json();
-            if (detailResponse.ok && detailData.success) {
-                latestEmailCardData = normalizeSunbirdEmailData({
-                    ...detailData,
-                    metrics: data.metrics || detailData.metrics
-                });
-                sunbirdEmailDashboardData = latestEmailCardData;
-                saveSunbirdEmailSnapshot(latestEmailCardData);
-            }
-        } catch (detailError) {
-            console.warn('[Email Card] Detailed cached email data unavailable, using cached metrics:', detailError.message);
-        }
-
+        sunbirdEmailDashboardData = latestEmailCardData;
+        saveSunbirdEmailSnapshot(latestEmailCardData);
         const summary = latestEmailCardData.summary || {};
         const mailSummary = summary.mailActivity || latestEmailCardData.mailActivity?.summary || {};
+        const threats = getEmailThreatDisplayMetrics(latestEmailCardData);
         project.status = 'active';
-        project.cardMetrics = [
-            { label: "Active Threats", value: `: ${summary.activeThreats || 0}`, icon: "fas fa-exclamation-triangle" },
-            { label: "High Severity", value: `: ${summary.highSeverityAlerts || 0}`, icon: "fas fa-circle-exclamation" },
-            { label: "Users Targeted", value: `: ${summary.affectedUsersCount || 0}`, icon: "fas fa-user-shield" },
-            { label: "Open Incidents", value: `: ${summary.activeIncidents || 0}`, icon: "fas fa-bug" }
-        ];
-        const activeThreats = summary.activeThreats || 0;
-        project.cardFooter = activeThreats > 0
-            ? `${activeThreats} active threats detected`
-            : mailSummary.activeMailboxes
-                ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events`
-                : 'No active threats';
+        project.cardMetrics = emailCardMetrics(threats);
+        const activity = mailSummary.activeMailboxes
+            ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events`
+            : '';
+        project.cardFooter = threats.alertsAvailable && threats.incidentsAvailable
+            ? threats.activeThreats > 0
+                ? `${threats.activeThreats} active threats detected`
+                : activity || 'No active threats in collected alerts'
+            : ['Threat data incomplete', activity].filter(Boolean).join(' | ');
         project.lastUpdate = new Date().toLocaleTimeString();
         saveProjectCardToCache(project);
         displayCurrentProject();
@@ -1784,7 +1761,9 @@ async function fetchEmailCardData() {
         }
     } catch (error) {
         console.error('[Email Card] Error:', error);
+        latestEmailCardData = null;
         project.status = 'error';
+        project.cardMetrics = emailCardMetrics(getEmailThreatDisplayMetrics());
         project.cardFooter = 'Data unavailable';
         displayCurrentProject();
     }
@@ -4410,6 +4389,31 @@ async function loadSunbirdEmailDashboardData() {
     }
 }
 
+function getEmailThreatDisplayMetrics(data = {}) {
+    const audit = data.sourceAudit || {};
+    const legacyComplete = Array.isArray(audit.warnings) && audit.warnings.length === 0;
+    const alertsAvailable = audit.alertsComplete ?? (audit.alertsOk === true && legacyComplete);
+    const incidentsAvailable = audit.incidentsComplete ?? (audit.incidentsOk === true && legacyComplete);
+    const summary = data.summary || {};
+    return {
+        alertsAvailable,
+        incidentsAvailable,
+        activeThreats: alertsAvailable ? summary.activeThreats ?? 'Unavailable' : 'Unavailable',
+        highSeverity: alertsAvailable ? summary.highSeverityAlerts ?? 'Unavailable' : 'Unavailable',
+        targetedUsers: alertsAvailable ? summary.affectedUsersCount ?? 'Unavailable' : 'Unavailable',
+        openIncidents: incidentsAvailable ? summary.activeIncidents ?? 'Unavailable' : 'Unavailable'
+    };
+}
+
+function emailCardMetrics(threats) {
+    return [
+        { label: 'Active Threats', value: `: ${threats.activeThreats}`, icon: 'fas fa-exclamation-triangle' },
+        { label: 'High Severity', value: `: ${threats.highSeverity}`, icon: 'fas fa-circle-exclamation' },
+        { label: 'Users Targeted', value: `: ${threats.targetedUsers}`, icon: 'fas fa-user-shield' },
+        { label: 'Open Incidents', value: `: ${threats.openIncidents}`, icon: 'fas fa-bug' }
+    ];
+}
+
 function normalizeSunbirdEmailData(data = {}) {
     const payload = data.payload && typeof data.payload === 'object' ? data.payload : data;
     const metrics = payload.metrics || data.metrics || {};
@@ -4516,11 +4520,12 @@ function renderSunbirdEmailDashboard() {
 function renderSunbirdEmailMetrics(model) {
     const el = document.getElementById('sunbird-email-metrics');
     if (!el) return;
+    const threats = getEmailThreatDisplayMetrics(model);
     const metrics = [
-        { key: 'active-threats', label: 'Active Threats', value: model.summary.activeThreats, tone: model.summary.activeThreats ? 'bad' : 'good', evidence: 'allAlerts' },
-        { key: 'high-severity', label: 'High Severity', value: model.summary.highSeverityAlerts, tone: model.summary.highSeverityAlerts ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
-        { key: 'users-targeted', label: 'Users Targeted', value: model.summary.affectedUsersCount, tone: model.summary.affectedUsersCount > 5 ? 'warn' : 'neutral', evidence: 'affectedUsers' },
-        { key: 'security-score', label: 'Email Security Score', value: `${model.summary.securityScore || 0}%`, tone: model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
+        { key: 'active-threats', label: 'Active Threats', value: threats.activeThreats, tone: !threats.alertsAvailable ? 'neutral' : threats.activeThreats ? 'bad' : 'good', evidence: 'allAlerts' },
+        { key: 'high-severity', label: 'High Severity', value: threats.highSeverity, tone: !threats.alertsAvailable ? 'neutral' : threats.highSeverity ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
+        { key: 'users-targeted', label: 'Users Targeted', value: threats.targetedUsers, tone: threats.targetedUsers > 5 ? 'warn' : 'neutral', evidence: 'affectedUsers' },
+        { key: 'security-score', label: 'Email Security Score', value: threats.alertsAvailable ? `${model.summary.securityScore || 0}%` : 'Unavailable', tone: !threats.alertsAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
     ];
     el.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
@@ -6460,6 +6465,10 @@ function renderSunbirdSecurityRawEvidenceHeader(model = buildSunbirdSecurityMode
             ? 'Evaluation time not supplied. New raw records are awaiting the next correlation and AI evaluation.'
             : 'Evaluation time not supplied.';
     const visibleWarnings = [...new Set([...(model.warnings || []), ...(model.retrieval?.limitations || []), ...warnings])];
+    if (model.evidencePreview?.truncated) {
+        const { shown, total } = model.evidencePreview;
+        visibleWarnings.push(`The dashboard response includes ${shown} of ${total} evidence records. Additional retained records are available in paginated history.`);
+    }
     target.innerHTML = `
         <div class="sunbird-security-raw-evidence-title">
             <div><p class="sunbird-security-eyebrow">04 · provider ledger</p><h3>Security Activity</h3><p>Raw provider evidence from Microsoft Graph and Cloudflare, with the previous 15 days for context. Descriptions explain provider fields; original severity and complete evidence are preserved.</p></div>
@@ -10458,6 +10467,7 @@ function saveProjectCardToCache(project) {
     if (!project || !hasRealProjectMetrics(project)) return;
     const snapshot = readProjectCardCache();
     snapshot[project.id] = {
+        ...(project.id === 5 ? { emailCoverageAware: true } : {}),
         status: project.status,
         securityScore: project.securityScore,
         risks: project.risks,
@@ -10474,6 +10484,7 @@ function applyCachedProjectCards() {
     mockProjects.forEach(project => {
         const cached = snapshot[project.id];
         if (!cached || !Array.isArray(cached.cardMetrics)) return;
+        if (project.id === 5 && cached.emailCoverageAware !== true) return;
         if (hasRealProjectMetrics(project)) return;
 
         project.status = cached.status || 'active';
@@ -10616,7 +10627,7 @@ function updateIdentityProjectCardFromDashboard(data) {
         { label: "Admin Roles", value: `: ${adminRoles}`, icon: "fas fa-crown" },
         { label: "Security Score", value: `: ${securityScore}`, icon: "fas fa-shield-alt" }
     ];
-    project.cardFooter = `Users: ${totalUsers} | Active: ${activeUsers}`;
+    project.cardFooter = `Users: ${totalUsers} | Active: ${activeUsers}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
     project.lastUpdate = new Date().toLocaleTimeString();
     saveProjectCardToCache(project);
 }
@@ -14569,12 +14580,10 @@ function buildEmailPreviewModel() {
     const mailSummary = summary.mailActivity || {};
     const phishing = model.evidence.phishingAlerts.length;
     const malware = model.evidence.malwareAlerts.length;
-    const spam = model.evidence.spamAlerts.length;
-    const activeThreats = summary.activeThreats || 0;
-    const highSeverity = summary.highSeverityAlerts || 0;
-    const targetedUsers = summary.affectedUsersCount || 0;
-    const openIncidents = summary.activeIncidents || 0;
-    const keyInsight = targetedUsers > 0
+    const { activeThreats, highSeverity, targetedUsers, openIncidents, alertsAvailable, incidentsAvailable } = getEmailThreatDisplayMetrics(data);
+    const keyInsight = !alertsAvailable || !incidentsAvailable
+        ? 'Email threat coverage is incomplete'
+        : targetedUsers > 0
         ? `${targetedUsers} users targeted by email threats today`
         : highSeverity > 0
             ? 'High severity malware or phishing alert detected'
@@ -14602,9 +14611,9 @@ function buildEmailPreviewModel() {
             { label: 'Open Incidents', value: openIncidents, icon: 'fas fa-bug', tone: 'warning' }
         ],
         riskBreakdown: [
-            { label: 'Phishing', value: phishing, tone: 'critical' },
-            { label: 'Malware', value: malware, tone: 'high' },
-            { label: 'Mail Events', value: mailSummary.totalMailActivity || spam, tone: 'medium' }
+            { label: 'Phishing', value: alertsAvailable ? phishing : 'Unavailable', tone: 'critical' },
+            { label: 'Malware', value: alertsAvailable ? malware : 'Unavailable', tone: 'high' },
+            { label: 'Mail Events', value: mailSummary.totalMailActivity ?? 'Unavailable', tone: 'medium' }
         ],
         keyInsight,
         miniFeed: feed
