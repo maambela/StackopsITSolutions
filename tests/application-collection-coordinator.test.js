@@ -30,6 +30,48 @@ test('complete application payload is reused within the TTL', async () => {
     assert.equal(calls, 1);
 });
 
+test('default payload and assignment reuse lasts 15 and 60 minutes', async () => {
+    let now = 1000;
+    let payloadCalls = 0;
+    let assignmentCalls = 0;
+    const coordinator = createApplicationCollectionCoordinator({ now: () => now });
+    const payload = { success: true, applications: [{ id: 'app-1' }] };
+
+    await coordinator.runPayload('company:1', async () => {
+        payloadCalls++;
+        return payload;
+    });
+    now += 15 * 60 * 1000 - 1;
+    assert.equal(await coordinator.runPayload('company:1', async () => {
+        payloadCalls++;
+        return payload;
+    }), payload);
+    now++;
+    await coordinator.runPayload('company:1', async () => {
+        payloadCalls++;
+        return payload;
+    });
+
+    const assignments = [{ principalType: 'User' }];
+    await coordinator.runAssignment('tenant:A:app-1', async () => {
+        assignmentCalls++;
+        return assignments;
+    });
+    now += 60 * 60 * 1000 - 1;
+    assert.equal(await coordinator.runAssignment('tenant:A:app-1', async () => {
+        assignmentCalls++;
+        return assignments;
+    }), assignments);
+    now++;
+    await coordinator.runAssignment('tenant:A:app-1', async () => {
+        assignmentCalls++;
+        return assignments;
+    });
+
+    assert.equal(payloadCalls, 2);
+    assert.equal(assignmentCalls, 2);
+});
+
 test('failed or incomplete application payloads are not cached', async () => {
     let calls = 0;
     const coordinator = createApplicationCollectionCoordinator({ payloadTtlMs: 60000 });
@@ -72,6 +114,27 @@ test('assignment collections join overlapping work and stay isolated by tenant s
     assert.equal(joined, first);
     assert.equal(tenantBCalls, 1);
     assert.deepEqual(tenantB, []);
+});
+
+test('overlapping application payload requests join the in-flight collection', async () => {
+    let calls = 0;
+    let resolvePayload;
+    const coordinator = createApplicationCollectionCoordinator();
+    const first = coordinator.runPayload('company:1', () => {
+        calls++;
+        return new Promise(resolve => { resolvePayload = resolve; });
+    });
+    const joined = coordinator.runPayload('company:1', async () => {
+        calls++;
+        return { success: true, applications: [] };
+    });
+
+    await new Promise(resolve => setImmediate(resolve));
+    resolvePayload({ success: true, applications: [{ id: 'app-1' }] });
+    const [firstPayload, joinedPayload] = await Promise.all([first, joined]);
+
+    assert.equal(calls, 1);
+    assert.equal(joinedPayload, firstPayload);
 });
 
 test('forced payload and assignment refreshes bypass recent completed results', async () => {
