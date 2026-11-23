@@ -20,7 +20,8 @@ const names = [
     'sunbirdSecurityFindingObservation', 'sunbirdSecurityFindingEventTime', 'sunbirdSecurityFindingPrimaryEntity', 'sunbirdSecuritySeverityClass',
     'getSunbirdSecurityFindingById', 'renderSunbirdSecurityEvidenceDetails',
     'renderSunbirdSecurityFindings', 'renderSunbirdSecurityAlertsOverview', 'renderSunbirdSecurityBillingSummary',
-    'renderSunbirdSecurityAiAssessmentSection', 'renderSunbirdSecurityDetailList', 'renderSunbirdSecurityFindingDetail'
+    'renderSunbirdSecurityAiAssessmentSection', 'renderSunbirdSecurityDetailList', 'renderSunbirdSecurityFindingDetail',
+    'microsoftDashboardUpdateText'
 ];
 const context = vm.createContext({
     sunbirdSecurityEscape: (value, fallback = 'Not recorded') => String(value ?? fallback).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
@@ -30,7 +31,8 @@ const context = vm.createContext({
     sunbirdSecurityReadableSourceLabel: value => String(value || 'Source not recorded'),
     sunbirdSecurityFormatTime: value => String(value || 'Not recorded'),
     sunbirdSecurityEntityLabels: entities => (entities?.users || []).map(label => ({ type: 'User', label })),
-    getSunbirdSecurityIntegrationSources: () => []
+    getSunbirdSecurityIntegrationSources: () => [],
+    SUNBIRD_CARD_CACHE_TTL_MS: 300000
 });
 vm.runInContext(names.map(extract).join('\n'), context);
 

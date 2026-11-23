@@ -138,7 +138,11 @@ function deriveEmailEvidence(payload = {}) {
     ];
     const expectedRecordCount = evidenceRows.length;
     const omittedRecordCount = 0;
-    const isComplete = Boolean(payload.success !== false);
+    const audit = payload.sourceAudit;
+    const coverageComplete = !audit || (
+        audit.alertsComplete === true && audit.incidentsComplete === true && audit.mailActivityOk === true
+    );
+    const isComplete = Boolean(payload.success !== false && coverageComplete);
     const completenessPercent = expectedRecordCount > 0 ? 100 : (isComplete ? 100 : 0);
 
     return {
@@ -175,7 +179,7 @@ function createEmailEvidenceStore({ pool, logger = console, now = () => new Date
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         const evidence = deriveEmailEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const sourceFetchedAt = payload?.fetchedAt || collectedAt;
         const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({
             rows: evidence.evidenceRows,

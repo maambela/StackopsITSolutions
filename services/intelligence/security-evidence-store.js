@@ -182,7 +182,8 @@ function deriveSecurityEvidence(payload = {}) {
     );
 
     const hasAnyEvidence = Boolean(evidenceRows.length);
-    const isComplete = hasPrimaryEvidence && dashboardSource.warnings.length === 0;
+    const isComplete = (hasPrimaryEvidence || payload.coreCoverageComplete === true) &&
+        payload.coreCoverageComplete !== false && dashboardSource.warnings.length === 0;
     const isPartial = hasPrimaryEvidence && dashboardSource.warnings.length > 0;
 
     const accounting = payload.collection?.accounting || {};
@@ -247,7 +248,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
         if ((payload.rawRecords || []).some(row => Number(row.companyId) !== numericCompanyId)) throw new Error('Raw evidence tenant mismatch');
         if (!persistenceEnabled) return { companyId: numericCompanyId, snapshotId: null, recordCount: 0, status: 'persistence_disabled', storageMode: 'memory_only' };
         const evidence = deriveSecurityEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
         const ownsConnection = connection !== pool;
         let snapshotId = null;

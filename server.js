@@ -481,7 +481,32 @@ async function fetchGraphResponseWithDeadline(url, token, { signal = null, colle
     }
 }
 
-async function writeBackupRecoveryPayloadCache(companyId, payload, { signal = null, collectorContext = {} } = {}) {
+async function writeMicrosoftDashboardCache(connection, table, columnList, values, collectionStartedAt, complete = true) {
+    if (!complete) {
+        console.warn('[Dashboard Cache] Skipped incomplete collection', { table, companyId: values[0] });
+        return;
+    }
+    const columns = columnList.split(', ');
+    const placeholders = Array(columns.length + 1).fill('?').join(', ');
+    // LastUpdated has second precision in the existing caches. Keep the current
+    // row on ties. The original collection time stays in the payload itself.
+    const timestamp = new Date(Math.floor(collectionStartedAt.getTime() / 1000) * 1000);
+    const insert = `INSERT INTO ${table} (${columnList}, LastUpdated)`;
+    if (table.endsWith('MetricsCache')) {
+        // Metrics tables have no unique CompanyID key. Readers select the newest
+        // timestamp for the company, so concurrent appends cannot regress it.
+        return connection.query(`${insert} VALUES (${placeholders})`, [...values, timestamp]);
+    }
+    const updates = columns.slice(1).concat('LastUpdated').map(column =>
+        `${column} = IF(LastUpdated IS NULL OR VALUES(LastUpdated) > LastUpdated, VALUES(${column}), ${column})`
+    );
+    return connection.query(
+        `${insert} VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updates.join(', ')}`,
+        [...values, timestamp]
+    );
+}
+
+async function writeBackupRecoveryPayloadCache(companyId, payload, { collectionStartedAt, signal = null, collectorContext = {} } = {}) {
     const connection = typeof pool.getConnection === 'function'
         ? await acquireConnectionWithDeadline(pool, { timeoutMs: BACKUP_DATABASE_TIMEOUT_MS, signal, label: 'BackupRecoveryPayloadCache connection' })
         : pool;
@@ -492,7 +517,7 @@ async function writeBackupRecoveryPayloadCache(companyId, payload, { signal = nu
             timeoutMs: BACKUP_DATABASE_TIMEOUT_MS,
             signal,
             label: 'BackupRecoveryPayloadCache write',
-            operation: () => connection.query(`REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)])
+            operation: () => writeMicrosoftDashboardCache(connection, 'BackupRecoveryPayloadCache', 'CompanyID, Payload', [companyId, JSON.stringify(payload)], collectionStartedAt)
         });
     } finally {
         if (ownsConnection && typeof connection.release === 'function') connection.release();
@@ -736,7 +761,7 @@ async function fetchMicrosoftRoleAssignments(token) {
 }
 
 // Fetch sign-in logs from Microsoft Graph
-async function fetchMicrosoftSignIns(token, daysBack = 30) {
+async function fetchMicrosoftSignIns(token, daysBack = 30, { requireComplete = false } = {}) {
   try {
     const since = new Date(Math.floor(Date.now() / 60000) * 60000);
     since.setDate(since.getDate() - daysBack);
@@ -750,12 +775,13 @@ async function fetchMicrosoftSignIns(token, daysBack = 30) {
     return data.value || [];
   } catch (error) {
     console.error('[Microsoft Graph] Failed to fetch sign-ins:', error.message);
+    if (requireComplete) throw error;
     return []; // Return empty array if sign-ins not available
   }
 }
 
 // Fetch authentication methods for a specific user
-async function fetchUserAuthMethods(token, userId, retries = 2) {
+async function fetchUserAuthMethods(token, userId, retries = 2, { requireComplete = false } = {}) {
   let cacheKey;
   try {
     // The opaque bearer binds cached data to its tenant and authorization context.
@@ -773,7 +799,9 @@ async function fetchUserAuthMethods(token, userId, retries = 2) {
     return methods;
   } catch (error) {
     console.error(`[Microsoft Graph] Failed to fetch auth methods for ${userId}:`, error.message);
-    return getCachedAuthMethods(cacheKey) || [];
+    const cached = getCachedAuthMethods(cacheKey);
+    if (!cached && requireComplete) throw error;
+    return cached || [];
   }
 }
 
@@ -806,7 +834,7 @@ async function fetchMicrosoftGroups(token) {
     return data.value || [];
   } catch (error) {
     console.error('[Microsoft Graph] Failed to fetch groups:', error.message);
-    return [];
+    throw error;
   }
 }
 
@@ -821,7 +849,7 @@ async function fetchAppRoleAssignments(token, servicePrincipalId) {
     return data.value || [];
   } catch (error) {
     console.error('[Microsoft Graph] Failed to fetch app role assignments:', error.message);
-    return [];
+    throw error;
   }
 }
 
@@ -3381,10 +3409,10 @@ async function getMicrosoftGraphTokenForCompany(companyId) {
   return tokenResponse.token;
 }
 
-async function getSecurityAlertsGraphTokenForCompany(companyId) {
+async function assertSharedGraphTenantForCompany(companyId) {
   const numericCompanyId = Number(companyId);
   if (!Number.isInteger(numericCompanyId) || numericCompanyId <= 0) {
-    const error = new Error('A valid companyId is required for the Security Alerts Graph token.');
+    const error = new Error('A valid companyId is required for Microsoft Graph.');
     error.statusCode = 400;
     throw error;
   }
@@ -3399,21 +3427,23 @@ async function getSecurityAlertsGraphTokenForCompany(companyId) {
   );
   const mappedTenantId = String(rows[0]?.TenantID || '').trim();
   if (!mappedTenantId) {
-    const error = new Error('Microsoft Graph is not configured for this security-alert tenant.');
+    const error = new Error('Microsoft Graph is not configured for this company.');
     error.statusCode = 503;
     throw error;
   }
 
-  // Security Alerts uses the already-proven shared Graph application credentials.
-  // The company mapping is still mandatory and must identify the same Microsoft tenant,
-  // so a request can never silently use those credentials for another company.
+  // Shared Graph credentials can only serve companies mapped to their Entra tenant.
   const sharedCredentials = await getMicrosoftGraphCredentials({ securityAlerts: true });
   if (mappedTenantId.toLowerCase() !== String(sharedCredentials.tenantId || '').trim().toLowerCase()) {
-    const error = new Error('The requested company is mapped to a different Microsoft tenant than the configured Security Alerts credential.');
+    const error = new Error('The requested company is mapped to a different Microsoft tenant than the shared Graph credential.');
     error.statusCode = 403;
     error.code = 'SECURITY_ALERTS_TENANT_MISMATCH';
     throw error;
   }
+}
+
+async function getSecurityAlertsGraphTokenForCompany(companyId) {
+  await assertSharedGraphTenantForCompany(companyId);
   return getMicrosoftGraphToken({ securityAlerts: true });
 }
 
@@ -4593,14 +4623,14 @@ async function loadSunbirdReportEvidence(companyId) {
         cloudflare
     ] = await Promise.all([
         pool.query('SELECT CompanyName FROM Companies WHERE ID = ? LIMIT 1', [companyId]),
-        pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
+        pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [companyId]),
         pool.query('SELECT UsersPayload, LastUpdated FROM IdentityUserDetailsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
-        pool.query('SELECT * FROM DeviceMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
-        pool.query('SELECT * FROM EmailMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
+        pool.query('SELECT * FROM DeviceMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [companyId]),
+        pool.query('SELECT * FROM EmailMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM SecurityEventsPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM BackupRecoveryPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
-        pool.query('SELECT * FROM ApplicationMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
+        pool.query('SELECT * FROM ApplicationMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM ApplicationPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM SunbirdOperationsPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
         pool.query('SELECT Payload, LastUpdated FROM SunbirdGovernancePayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [companyId]),
@@ -10758,7 +10788,7 @@ async function fetchIdentityMetricsFromApi(tokenOverride = null) {
     const [users, roleAssignments, signIns] = await Promise.all([
         fetchMicrosoftUsers(token),
         fetchMicrosoftRoleAssignments(token),
-        fetchMicrosoftSignIns(token, 1)
+        fetchMicrosoftSignIns(token, 1, { requireComplete: true })
     ]);
 
     const totalUsers = users.length;
@@ -10818,13 +10848,9 @@ function mergeUsersWithRoleAssignments(users, roleAssignments) {
     });
 }
 
-async function upsertRoleAssignmentsCache(companyId, roleAssignments) {
+async function upsertRoleAssignmentsCache(companyId, roleAssignments, collectionStartedAt) {
     if (!pool || !companyId) return;
-    await pool.query(
-        `REPLACE INTO MicrosoftRoleAssignmentsCache (CompanyID, AssignmentsPayload, LastUpdated)
-         VALUES (?, ?, NOW())`,
-        [companyId, JSON.stringify(roleAssignments || [])]
-    );
+    await writeMicrosoftDashboardCache(pool, 'MicrosoftRoleAssignmentsCache', 'CompanyID, AssignmentsPayload', [companyId, JSON.stringify(roleAssignments || [])], collectionStartedAt);
 }
 
 async function getCachedRoleAssignments(companyId) {
@@ -10847,11 +10873,12 @@ async function getCachedRoleAssignments(companyId) {
 }
 
 async function fetchRoleAssignmentsFromApi(companyId) {
+    const collectionStartedAt = new Date();
     const token = await getMicrosoftGraphToken();
     const rawAssignments = await fetchMicrosoftRoleAssignments(token);
     const roleAssignments = processMicrosoftRoleAssignments(rawAssignments);
     if (companyId) {
-        await upsertRoleAssignmentsCache(companyId, roleAssignments);
+        await upsertRoleAssignmentsCache(companyId, roleAssignments, collectionStartedAt);
     }
     return roleAssignments;
 }
@@ -10963,13 +10990,14 @@ async function fetchApplicationsPayloadFromApi(tokenOverride = null) {
 
         try {
             const assignments = await fetchAppRoleAssignments(token, sp.id);
-            assignedCount = assignments.length;
+            assignedCount = assignments.filter(assignment => assignment.principalType === 'User').length;
             assignedGroups = assignments
                 .filter(a => a.principalType === 'Group')
                 .map(a => a.principalDisplayName)
                 .filter((value, index, array) => value && array.indexOf(value) === index);
         } catch (error) {
             console.warn(`[Applications] Failed assignments for ${sp.displayName}:`, error.message);
+            return null;
         }
 
         return {
@@ -10987,6 +11015,9 @@ async function fetchApplicationsPayloadFromApi(tokenOverride = null) {
         };
     });
 
+    if (processedApps.includes(null)) {
+        throw new Error('Application access evidence is incomplete. The previous complete inventory was retained.');
+    }
     const totalApplications = processedApps.length;
     const externalApplications = processedApps.filter(app => app.isExternal).length;
     const highRiskApps = processedApps.filter(app => app.isExternal || ((app.scopeCount || 0) + (app.roleCount || 0)) > 10 || (app.userCount || 0) > 50).length;
@@ -11015,7 +11046,26 @@ async function fetchApplicationsPayloadFromApi(tokenOverride = null) {
 }
 
 async function fetchEmailMetricsFromApi() {
-    return emailMetricsFromPayload(await fetchEmailSecurityPayloadFromApi());
+    const payload = await fetchEmailSecurityPayloadFromApi();
+    if (!hasCompleteEmailThreatCoverage(payload)) {
+        throw new Error('Email threat collection is incomplete');
+    }
+    return emailMetricsFromPayload(payload);
+}
+
+function hasCompleteEmailThreatCoverage(payload) {
+    return payload?.sourceAudit?.alertsComplete === true && payload.sourceAudit.incidentsComplete === true;
+}
+
+function hasCompleteEmailDashboard(payload) {
+    return hasCompleteEmailThreatCoverage(payload) && payload.sourceAudit.mailActivityOk === true;
+}
+
+function hasCompleteSecurityDashboard(payload) {
+    const sources = payload?.collection?.sources;
+    return payload?.success === true && ['alerts', 'incidents', 'signIns'].every(key =>
+        sources?.[key]?.audit?.completed === true && sources[key].audit.partial !== true
+    );
 }
 
 function emailMetricsFromPayload(payload) {
@@ -11039,7 +11089,7 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
             error.status = response.status;
             throw error;
         }
-        const rows = parseGraphReportCSV(csv, 'Email Activity');
+        const rows = parseGraphReportCSV(csv, 'Email Activity', ['User Principal Name', 'Last Activity Date', 'Send Count', 'Receive Count', 'Read Count']);
         const users = rows
             .filter(row => row['User Principal Name'])
             .map(row => ({
@@ -11529,17 +11579,17 @@ async function fetchBackupRecoveryPayloadFromApi(tokenOverride = null, { signal 
     // Fetch OneDrive usage (returns CSV)
     const oneDriveUrl = 'https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period=\'D7\')';
     const oneDriveCSV = await fetchGraphReportCSV(oneDriveUrl, token, 'OneDrive', { signal, collectorContext });
-    const oneDriveData = parseGraphReportCSV(oneDriveCSV, 'OneDrive');
+    const oneDriveData = parseGraphReportCSV(oneDriveCSV, 'OneDrive', ['Owner Principal Name', 'Storage Used (Byte)']);
 
     // Fetch SharePoint usage (returns CSV)
     const sharePointUrl = 'https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period=\'D7\')';
     const sharePointCSV = await fetchGraphReportCSV(sharePointUrl, token, 'SharePoint', { signal, collectorContext });
-    const sharePointData = parseGraphReportCSV(sharePointCSV, 'SharePoint');
+    const sharePointData = parseGraphReportCSV(sharePointCSV, 'SharePoint', ['Site URL', 'Storage Used (Byte)']);
 
     // Fetch Exchange (Mailbox) usage (returns CSV)
     const exchangeUrl = 'https://graph.microsoft.com/v1.0/reports/getMailboxUsageDetail(period=\'D7\')';
     const exchangeCSV = await fetchGraphReportCSV(exchangeUrl, token, 'Exchange', { signal, collectorContext });
-    const exchangeData = parseGraphReportCSV(exchangeCSV, 'Exchange');
+    const exchangeData = parseGraphReportCSV(exchangeCSV, 'Exchange', ['User Principal Name', 'Storage Used (Byte)']);
 
     // Process OneDrive storage (in bytes)
     let oneDriveStorageBytes = 0;
@@ -11675,73 +11725,73 @@ async function upsertDashboardMetricCaches() {
     );
     for (const row of rows) {
         const companyId = row.CompanyID;
+        try {
+            await assertSharedGraphTenantForCompany(companyId);
+        } catch (error) {
+            console.warn(`[Cache Worker] Skipping Microsoft Graph refresh for company ${companyId}:`, error.message);
+            continue;
+        }
         const refresh = {
             async identity() {
+                const collectionStartedAt = new Date();
                 const identity = await fetchIdentityMetricsFromApi();
                 const identityDetails = await fetchIdentityDetailsFromApi();
-                await pool.query(
-                    `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
-                     VALUES (?, ?, ?, ?, ?, NOW())`,
-                    [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore]
+                await writeMicrosoftDashboardCache(pool,
+                    'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+                    [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore], collectionStartedAt
                 );
-                await pool.query(
-                    `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(identityDetails.users || [])]
-                );
-                await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || []);
+                await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [companyId, JSON.stringify(identityDetails.users || [])], collectionStartedAt);
+                await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || [], collectionStartedAt);
             },
             async devices() {
+                const collectionStartedAt = new Date();
                 const devices = await fetchDeviceMetricsFromApi();
-                await pool.query(
-                    `REPLACE INTO DeviceMetricsCache (CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices, LastUpdated)
-                     VALUES (?, ?, ?, ?, ?, NOW())`,
-                    [companyId, devices.totalDevices, devices.nonCompliant, devices.notEncrypted, devices.staleDevices]
+                await writeMicrosoftDashboardCache(pool,
+                    'DeviceMetricsCache', 'CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices',
+                    [companyId, devices.totalDevices, devices.nonCompliant, devices.notEncrypted, devices.staleDevices], collectionStartedAt
                 );
             },
             async applications() {
+                const collectionStartedAt = new Date();
                 const apps = await fetchApplicationMetricsFromApi();
                 const appPayload = await fetchApplicationsPayloadFromApi();
-                await pool.query(
-                    `REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated)
-                     VALUES (?, ?, ?, ?, ?, NOW())`,
-                    [companyId, apps.totalApps, apps.externalApps, apps.highRiskApps, apps.highAccessApps]
+                await writeMicrosoftDashboardCache(pool,
+                    'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps',
+                    [companyId, apps.totalApps, apps.externalApps, apps.highRiskApps, apps.highAccessApps], collectionStartedAt
                 );
-                await pool.query(
-                    `REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(appPayload)]
+                await writeMicrosoftDashboardCache(pool,
+                    'ApplicationPayloadCache', 'CompanyID, Payload',
+                    [companyId, JSON.stringify(appPayload)], collectionStartedAt
                 );
             },
             async email() {
+                const collectionStartedAt = new Date();
                 const emailSecurity = await fetchEmailSecurityPayloadFromApi();
                 const email = emailMetricsFromPayload(emailSecurity);
-                await pool.query(
-                    `REPLACE INTO EmailMetricsCache (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
-                     VALUES (?, ?, ?, ?, ?, NOW())`,
-                    [companyId, email.activeThreats, email.highSeverity, email.usersTargeted, email.openIncidents]
+                await writeMicrosoftDashboardCache(pool,
+                    'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
+                    [companyId, email.activeThreats, email.highSeverity, email.usersTargeted, email.openIncidents], collectionStartedAt, hasCompleteEmailThreatCoverage(emailSecurity)
                 );
 
-                await pool.query(
-                    `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(emailSecurity)]
+                await writeMicrosoftDashboardCache(pool,
+                    'EmailSecurityPayloadCache', 'CompanyID, Payload',
+                    [companyId, JSON.stringify(emailSecurity)], collectionStartedAt, hasCompleteEmailDashboard(emailSecurity)
                 );
             },
             async security() {
+                const collectionStartedAt = new Date();
                 const securityEvents = await fetchSecurityEventsPayloadFromApi({ companyId, tenantKey: `company:${companyId}` });
-                if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
-                    `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(securityEvents)]
+                if (SECURITY_ALERT_STORAGE_ENABLED) await writeMicrosoftDashboardCache(pool,
+                    'SecurityEventsPayloadCache', 'CompanyID, Payload',
+                    [companyId, JSON.stringify(securityEvents)], collectionStartedAt, hasCompleteSecurityDashboard(securityEvents)
                 );
             },
             async backup() {
+                const collectionStartedAt = new Date();
                 const backup = await fetchBackupRecoveryPayloadFromApi();
-                await pool.query(
-                    `REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(backup)]
+                await writeMicrosoftDashboardCache(pool,
+                    'BackupRecoveryPayloadCache', 'CompanyID, Payload',
+                    [companyId, JSON.stringify(backup)], collectionStartedAt
                 );
             }
         };
@@ -11775,18 +11825,20 @@ app.get('/api/db/identity-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        const [rows] = await pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [context.companyId]);
+        await assertSharedGraphTenantForCompany(context.companyId);
+        const [rows] = await pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
 
+        const collectionStartedAt = new Date();
         const api = await fetchIdentityMetricsFromApi();
-        await pool.query(
-            `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
-            [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore]
+        await writeMicrosoftDashboardCache(pool,
+            'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+            [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore], collectionStartedAt
         );
-        return res.json({ success: true, source: 'api-fallback', metrics: api });
+        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11794,6 +11846,7 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT UsersPayload, LastUpdated FROM IdentityUserDetailsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -11832,13 +11885,10 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
             }
         }
 
+        const collectionStartedAt = new Date();
         const api = await fetchIdentityDetailsFromApi();
-        await pool.query(
-            `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [context.companyId, JSON.stringify(api.users || [])]
-        );
-        await upsertRoleAssignmentsCache(context.companyId, api.roleAssignments || []);
+        await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [context.companyId, JSON.stringify(api.users || [])], collectionStartedAt);
+        await upsertRoleAssignmentsCache(context.companyId, api.roleAssignments || [], collectionStartedAt);
         return res.json({
             success: true,
             source: 'api-fallback',
@@ -11848,7 +11898,8 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
             fetchedAt: new Date().toISOString()
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11856,17 +11907,19 @@ app.get('/api/db/device-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        const [rows] = await pool.query('SELECT * FROM DeviceMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [context.companyId]);
+        await assertSharedGraphTenantForCompany(context.companyId);
+        const [rows] = await pool.query('SELECT * FROM DeviceMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
+        const collectionStartedAt = new Date();
         const api = await fetchDeviceMetricsFromApi();
-        await pool.query(
-            `REPLACE INTO DeviceMetricsCache (CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices, LastUpdated)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
-            [context.companyId, api.totalDevices, api.nonCompliant, api.notEncrypted, api.staleDevices]
+        await writeMicrosoftDashboardCache(pool,
+            'DeviceMetricsCache', 'CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices',
+            [context.companyId, api.totalDevices, api.nonCompliant, api.notEncrypted, api.staleDevices], collectionStartedAt
         );
-        return res.json({ success: true, source: 'api-fallback', metrics: api });
+        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11874,24 +11927,24 @@ app.get('/api/db/email-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        const [rows] = await pool.query('SELECT * FROM EmailMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [context.companyId]);
-        if (rows.length > 0) {
-            const cached = rows[0];
-            const hasSignals = Number(cached.ActiveThreats || 0) + Number(cached.HighSeverity || 0) + Number(cached.UsersTargeted || 0) + Number(cached.OpenIncidents || 0) > 0;
-            const ageMs = cached.LastUpdated ? Date.now() - new Date(cached.LastUpdated).getTime() : Number.POSITIVE_INFINITY;
-            const isFresh = Number.isFinite(ageMs) && ageMs < 5 * 60 * 1000;
-            if (hasSignals) return res.json({ success: true, source: 'db', metrics: cached });
-            if (isFresh) return res.json({ success: true, source: 'db', metrics: cached });
+        await assertSharedGraphTenantForCompany(context.companyId);
+        const [rows] = await pool.query('SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [context.companyId]);
+        if (rows.length > 0 && rows[0].Payload) {
+            const payload = JSON.parse(rows[0].Payload);
+            if (hasCompleteEmailThreatCoverage(payload)) {
+                return res.json({ success: true, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, metrics: emailMetricsFromPayload(payload) });
+            }
         }
+        const collectionStartedAt = new Date();
         const api = await fetchEmailMetricsFromApi();
-        await pool.query(
-            `REPLACE INTO EmailMetricsCache (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
-            [context.companyId, api.activeThreats, api.highSeverity, api.usersTargeted, api.openIncidents]
+        await writeMicrosoftDashboardCache(pool,
+            'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
+            [context.companyId, api.activeThreats, api.highSeverity, api.usersTargeted, api.openIncidents], collectionStartedAt
         );
-        return res.json({ success: true, source: 'api-fallback', metrics: api });
+        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11899,6 +11952,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -11924,22 +11978,23 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         return res.json({
                             ...payload,
                             source: 'db',
-                            fetchedAt: rows[0].LastUpdated
+                            fetchedAt: payload.fetchedAt || rows[0].LastUpdated
                         });
                     }
                 }
             } catch (_) {}
         }
 
+        const collectionStartedAt = new Date();
         const api = await fetchEmailSecurityPayloadFromApi();
-        await pool.query(
-            `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [context.companyId, JSON.stringify(api)]
+        await writeMicrosoftDashboardCache(pool,
+            'EmailSecurityPayloadCache', 'CompanyID, Payload',
+            [context.companyId, JSON.stringify(api)], collectionStartedAt, hasCompleteEmailDashboard(api)
         );
         return res.json({ ...api, source: 'api-fallback' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11947,17 +12002,19 @@ app.get('/api/db/application-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        const [rows] = await pool.query('SELECT * FROM ApplicationMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1', [context.companyId]);
+        await assertSharedGraphTenantForCompany(context.companyId);
+        const [rows] = await pool.query('SELECT * FROM ApplicationMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
+        const collectionStartedAt = new Date();
         const api = await fetchApplicationMetricsFromApi();
-        await pool.query(
-            `REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
-            [context.companyId, api.totalApps, api.externalApps, api.highRiskApps, api.highAccessApps]
+        await writeMicrosoftDashboardCache(pool,
+            'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps',
+            [context.companyId, api.totalApps, api.externalApps, api.highRiskApps, api.highAccessApps], collectionStartedAt
         );
-        return res.json({ success: true, source: 'api-fallback', metrics: api });
+        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -11965,6 +12022,7 @@ app.get('/api/db/applications', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM ApplicationPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -11975,20 +12033,21 @@ app.get('/api/db/applications', authenticateToken, async (req, res) => {
             try {
                 const payload = JSON.parse(rows[0].Payload);
                 if (payload && payload.success && Array.isArray(payload.applications)) {
-                    return res.json({ ...payload, source: 'db', fetchedAt: rows[0].LastUpdated });
+                    return res.json({ ...payload, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated });
                 }
             } catch (_) {}
         }
 
+        const collectionStartedAt = new Date();
         const api = await fetchApplicationsPayloadFromApi();
-        await pool.query(
-            `REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [context.companyId, JSON.stringify(api)]
+        await writeMicrosoftDashboardCache(pool,
+            'ApplicationPayloadCache', 'CompanyID, Payload',
+            [context.companyId, JSON.stringify(api)], collectionStartedAt
         );
         return res.json({ ...api, source: 'api-fallback' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -12004,6 +12063,7 @@ app.get('/api/db/backup-recovery', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM BackupRecoveryPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -12017,22 +12077,23 @@ app.get('/api/db/backup-recovery', authenticateToken, async (req, res) => {
                     return res.json({
                         ...payload,
                         source: 'db',
-                        fetchedAt: rows[0].LastUpdated
+                        fetchedAt: payload.fetchedAt || rows[0].LastUpdated
                     });
                 }
                 console.warn('[Backup Recovery Cache] Cached payload is missing evidence arrays; refreshing from Graph.');
             } catch (_) {}
         }
 
+        const collectionStartedAt = new Date();
         const api = await fetchBackupRecoveryPayloadFromApi();
-        await pool.query(
-            `REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [context.companyId, JSON.stringify(api)]
+        await writeMicrosoftDashboardCache(pool,
+            'BackupRecoveryPayloadCache', 'CompanyID, Payload',
+            [context.companyId, JSON.stringify(api)], collectionStartedAt
         );
         return res.json({ ...api, source: 'api-fallback' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -12183,6 +12244,7 @@ app.get('/api/microsoft-applications', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
+        await assertSharedGraphTenantForCompany(tenant.companyId);
         const payload = await fetchApplicationsPayloadFromApi();
         const dashboardPayload = buildApplicationsDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload });
         if (applicationsEvidenceService && tenant.companyId) {
@@ -12222,6 +12284,7 @@ app.get('/api/app-access/:spId', authenticateToken, async (req, res) => {
     }
 
     console.log(`[App Access] Fetching access details for SP ${spId}`);
+    await assertSharedGraphTenantForCompany(tenant.companyId);
 
     // Get Microsoft Graph token
     const token = await getMicrosoftGraphToken();
@@ -13395,6 +13458,8 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
     operation.step('tenant_verified', { companyId: tenant.companyId || null });
 
         // Get Microsoft Graph token
+        await assertSharedGraphTenantForCompany(tenant.companyId);
+        const collectionStartedAt = new Date();
         const token = await getMicrosoftGraphToken();
     operation.step('graph_token_loaded');
 
@@ -13402,7 +13467,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const [users, roleAssignments, signIns] = await Promise.all([
             fetchMicrosoftUsers(token),
             fetchMicrosoftRoleAssignments(token),
-            fetchMicrosoftSignIns(token)
+            fetchMicrosoftSignIns(token, 30, { requireComplete: true })
         ]);
         operation.step('graph_aggregates_loaded', {
             users: users.length,
@@ -13452,7 +13517,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             );
 
             // Fetch auth methods for MFA status
-            const authMethods = await fetchUserAuthMethods(token, user.id);
+            const authMethods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
             const hasMFA = hasRealMfaMethod(authMethods);
 
             // Get latest sign-in
@@ -13659,6 +13724,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const dashboardPayload = {
             success: true,
             tenant: tenant.clientId,
+            collectionStartedAt: collectionStartedAt.toISOString(),
             fetchedAt: new Date().toISOString(),
             summary: {
                 totalUsers,
@@ -13888,352 +13954,47 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
 
         console.log('[Sunbird Cached Dashboard] User verified as Sunbird client');
 
-        const cacheOnly = ['true', '1'].includes(String(req.query?.cacheOnly || '').toLowerCase());
-        if (cacheOnly) {
-            if (!tenant.companyId) {
-                return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-            }
-            const snapshot = await identityAdapter({
-                pool,
-                companyId: tenant.companyId,
-                capability: { profileKey: 'sunbird', displayName: 'Identity Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
-            });
-            const users = snapshot.evidence.find(item => item.evidenceType === 'users')?.data;
-            if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users) || !users.length) {
-                return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
-            }
-            const summary = {
-                ...snapshot.metrics,
-                totalUsers: users.length,
-                activeUsers24h: snapshot.metrics.activeUsers,
-                adminUsers: snapshot.metrics.privilegedUsers,
-                mfaEnabledPercentage: snapshot.metrics.mfaCoverage,
-                mfaEnabledUsers: snapshot.metrics.mfaEnabled,
-                mfaMissingUsers: snapshot.metrics.mfaMissing,
-                privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
-            };
-            const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
-            return res.json({
-                success: true,
-                tenant: tenant.clientId,
-                fetchedAt: snapshot.freshness.lastUpdated,
-                source: 'identity_evidence_snapshot',
-                summary,
-                metrics: summary,
-                stackctrlMetrics: snapshot.dashboardSourceMetrics,
-                users,
-                roleAssignments: cachedRoles?.roleAssignments || []
-            });
+        if (!tenant.companyId) {
+            return res.status(403).json({ success: false, message: 'Access mapping not configured' });
         }
-
-        // Fetch data from MySQL cache tables
-        let metricsRows = [];
-        let usersRows = [];
-        let riskRows = [];
-        let cacheMetadataRows = [];
-        let signinActivityRows = [];
-
-        try {
-            [metricsRows] = await pool.query(
-                'SELECT * FROM identity_metrics WHERE tenant_id = ? ORDER BY last_updated DESC LIMIT 1',
-                ['sunbird']
-            );
-        } catch (e) {
-            console.warn('[Sunbird Cached Dashboard] Failed to fetch identity_metrics:', e.message);
-        }
-
-        try {
-            [usersRows] = await pool.query(
-                'SELECT * FROM identity_users WHERE 1=1 ORDER BY last_updated DESC'
-            );
-        } catch (e) {
-            console.warn('[Sunbird Cached Dashboard] Failed to fetch identity_users:', e.message);
-        }
-
-        try {
-            [riskRows] = await pool.query(
-                'SELECT * FROM identity_risk_scores WHERE tenant_id = ? ORDER BY last_updated DESC LIMIT 1',
-                ['sunbird']
-            );
-        } catch (e) {
-            console.warn('[Sunbird Cached Dashboard] Failed to fetch identity_risk_scores:', e.message);
-        }
-
-        try {
-            [cacheMetadataRows] = await pool.query(
-                'SELECT * FROM identity_cache_metadata WHERE tenant_id = ? LIMIT 1',
-                ['sunbird']
-            );
-        } catch (e) {
-            console.warn('[Sunbird Cached Dashboard] Failed to fetch identity_cache_metadata:', e.message);
-        }
-
-        try {
-            [signinActivityRows] = await pool.query(
-                'SELECT * FROM identity_signin_activity WHERE tenant_id = ? ORDER BY last_updated DESC LIMIT 1',
-                ['sunbird']
-            );
-        } catch (e) {
-            console.warn('[Sunbird Cached Dashboard] Failed to fetch identity_signin_activity:', e.message);
-        }
-
-        const cacheHasUsableMetrics = metricsRows.length > 0 && (
-            Number(metricsRows[0].total_users || 0) > 0 ||
-            Number(metricsRows[0].admin_users || 0) > 0 ||
-            Number(metricsRows[0].active_users_24h || 0) > 0
-        );
-
-        if (!cacheHasUsableMetrics) {
-            try {
-                console.log('[Sunbird Cached Dashboard] Cache empty, hydrating identity metrics from Microsoft Graph');
-                const liveMetrics = await fetchIdentityMetricsFromApi();
-                const liveDetails = await fetchIdentityDetailsFromApi();
-                const normalizedUsers = Array.isArray(liveDetails.users) ? liveDetails.users : [];
-                const externalUsers = normalizedUsers.filter(user => user.isExternal).length;
-                const usersWithCompleteProfile = normalizedUsers.filter(user =>
-                    user.jobTitle && user.jobTitle !== 'No Title' &&
-                    user.mobilePhone && user.mobilePhone !== 'N/A'
-                ).length;
-
-                metricsRows = [{
-                    total_users: liveMetrics.totalUsers,
-                    admin_users: liveMetrics.adminRoles,
-                    mfa_enabled_users: 0,
-                    mfa_percentage: 0,
-                    high_risk_users: 0,
-                    medium_risk_users: externalUsers,
-                    active_users_24h: liveMetrics.activeUsers,
-                    users_with_complete_profile: usersWithCompleteProfile,
-                    privileged_users_without_mfa: 0,
-                    identity_risk_score: Math.max(0, 100 - liveMetrics.securityScore)
-                }];
-
-                usersRows = normalizedUsers.map(user => ({
-                    id: user.id,
-                    display_name: user.displayName,
-                    mail: user.mail,
-                    user_principal_name: user.userPrincipalName,
-                    job_title: user.jobTitle,
-                    mobile_phone: user.mobilePhone,
-                    roles: JSON.stringify(user.roles || []),
-                    mfa_enabled: false,
-                    auth_method_count: 0,
-                    risk_level: user.isExternal ? 'MEDIUM' : 'SAFE',
-                    is_external: user.isExternal,
-                    account_enabled: true,
-                    last_signin_datetime: null,
-                    days_since_signin: 999,
-                    last_signin_location: 'Unknown',
-                    last_signin_device: 'Unknown'
-                }));
-
-                if (tenant.companyId) {
-                    await pool.query(
-                        `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
-                         VALUES (?, ?, ?, ?, ?, NOW())`,
-                        [tenant.companyId, liveMetrics.totalUsers, liveMetrics.activeUsers, liveMetrics.adminRoles, liveMetrics.securityScore]
-                    ).catch(e => console.warn('[Sunbird Cached Dashboard] Failed to mirror IdentityMetricsCache:', e.message));
-
-                    await pool.query(
-                        `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
-                         VALUES (?, ?, NOW())`,
-                        [tenant.companyId, JSON.stringify(normalizedUsers)]
-                    ).catch(e => console.warn('[Sunbird Cached Dashboard] Failed to mirror IdentityUserDetailsCache:', e.message));
-
-                    await upsertRoleAssignmentsCache(tenant.companyId, liveDetails.roleAssignments || [])
-                        .catch(e => console.warn('[Sunbird Cached Dashboard] Failed to mirror roles cache:', e.message));
-                }
-            } catch (e) {
-                console.warn('[Sunbird Cached Dashboard] Microsoft Graph hydration failed:', e.message);
-            }
-        }
-
-        // Build metrics object
-        let metrics = metricsRows.length > 0 ? {
-            totalUsers: metricsRows[0].total_users || 0,
-            adminUsers: metricsRows[0].admin_users || 0,
-            mfaEnabledUsers: metricsRows[0].mfa_enabled_users || 0,
-            mfaPercentage: parseFloat(metricsRows[0].mfa_percentage) || 0,
-            highRiskUsers: metricsRows[0].high_risk_users || 0,
-            mediumRiskUsers: metricsRows[0].medium_risk_users || 0,
-            activeUsers24h: metricsRows[0].active_users_24h || 0,
-            usersWithCompleteProfile: metricsRows[0].users_with_complete_profile || 0,
-            privilegedUsersWithoutMFA: metricsRows[0].privileged_users_without_mfa || 0,
-            identityRiskScore: metricsRows[0].identity_risk_score || 0
-        } : {
-            totalUsers: 0,
-            adminUsers: 0,
-            mfaEnabledUsers: 0,
-            mfaPercentage: 0,
-            highRiskUsers: 0,
-            mediumRiskUsers: 0,
-            activeUsers24h: 0,
-            usersWithCompleteProfile: 0,
-            privilegedUsersWithoutMFA: 0,
-            identityRiskScore: 0
-        };
-
-        // Build risk breakdown object
-        const riskBreakdown = riskRows.length > 0 ? {
-            inactivity: {
-                '0-7days': riskRows[0].inactive_0_7_days || 0,
-                '7-30days': riskRows[0].inactive_7_30_days || 0,
-                '30-90days': riskRows[0].inactive_30_90_days || 0,
-                '90+days': riskRows[0].inactive_90_plus_days || 0
-            },
-            deviceTrust: {
-                managed: riskRows[0].device_managed || 0,
-                unmanaged: riskRows[0].device_unmanaged || 0,
-                unknown: riskRows[0].device_unknown || 0
-            },
-            authenticationStrength: {
-                passwordOnly: riskRows[0].auth_password_only || 0,
-                basicMFA: riskRows[0].auth_basic_mfa || 0,
-                strongMFA: riskRows[0].auth_strong_mfa || 0
-            }
-        } : {
-            inactivity: { '0-7days': 0, '7-30days': 0, '30-90days': 0, '90+days': 0 },
-            deviceTrust: { managed: 0, unmanaged: 0, unknown: 0 },
-            authenticationStrength: { passwordOnly: 0, basicMFA: 0, strongMFA: 0 }
-        };
-
-        // Helper function for safe JSON parsing
-        function safeJsonParse(str, defaultValue = []) {
-            // Check if str is a string and has content
-            if (typeof str !== 'string' || !str.trim()) return defaultValue;
-            try {
-                return JSON.parse(str);
-            } catch (e) {
-                console.warn('[Sunbird Cached Dashboard] JSON parse error:', e.message, 'for value:', str);
-                return defaultValue;
-            }
-        }
-
-        // Build users array with enriched data
-        let users = usersRows.map(user => ({
-            id: user.id,
-            displayName: user.display_name || 'Unknown User',
-            mail: user.mail,
-            userPrincipalName: user.user_principal_name,
-            jobTitle: user.job_title || 'No Title',
-            mobilePhone: user.mobile_phone || 'N/A',
-            roles: safeJsonParse(user.roles, []),
-            mfaEnabled: toBooleanMfa(user.mfa_enabled),
-            authMethodCount: user.auth_method_count || 0,
-            riskLevel: user.risk_level || 'SAFE',
-            isExternal: user.is_external || false,
-            accountEnabled: user.account_enabled !== false,
-            lastSignIn: {
-                dateTime: user.last_signin_datetime ? new Date(user.last_signin_datetime).toISOString() : null,
-                daysSince: user.days_since_signin || 999,
-                location: user.last_signin_location || 'Unknown',
-                device: user.last_signin_device || 'Unknown'
-            }
-        }));
-
-        let roleAssignments = [];
-        if (tenant.companyId) {
-            const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
-            roleAssignments = cachedRoles?.roleAssignments || [];
-        }
-
-        const usersMissingRoles = users.length > 0 && users.every(user => !Array.isArray(user.roles) || user.roles.length === 0);
-        if (usersMissingRoles && roleAssignments.length === 0 && tenant.companyId) {
-            try {
-                roleAssignments = await fetchRoleAssignmentsFromApi(tenant.companyId);
-            } catch (roleError) {
-                console.warn('[Sunbird Cached Dashboard] Failed to hydrate roles from Microsoft Graph:', roleError.message);
-            }
-        }
-
-        if (usersMissingRoles && roleAssignments.length > 0) {
-            users = mergeUsersWithRoleAssignments(users, roleAssignments);
-        }
-
-        const processedIdentitySource = buildIdentityDashboardSource({
-            metricsRow: metricsRows[0] || {},
-            usersRows: users,
-            riskRow: riskRows[0] || {},
-            signInRow: signinActivityRows[0] || {},
-            roleAssignments
+        await assertSharedGraphTenantForCompany(tenant.companyId);
+        const snapshot = await identityAdapter({
+            pool,
+            companyId: tenant.companyId,
+            capability: { profileKey: 'sunbird', displayName: 'Identity Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
         });
-        users = processedIdentitySource.users;
-        metrics = processedIdentitySource.legacyMetrics;
-
-        const topRoles = Object.entries(
-            roleAssignments.reduce((acc, assignment) => {
-                const roleName = assignment.roleName || 'Unknown Role';
-                acc[roleName] = (acc[roleName] || 0) + 1;
-                return acc;
-            }, {})
-        )
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8)
-            .map(([role, count]) => ({ role, count }));
-
-        // Build cache metadata
-        const cacheMetadata = cacheMetadataRows.length > 0 ? {
-            lastSyncTime: cacheMetadataRows[0].last_sync_time,
-            nextSyncTime: cacheMetadataRows[0].next_sync_time,
-            syncStatus: cacheMetadataRows[0].sync_status,
-            syncErrorMessage: cacheMetadataRows[0].sync_error_message,
-            totalUsersSynced: cacheMetadataRows[0].total_users_synced,
-            syncDurationSeconds: cacheMetadataRows[0].sync_duration_seconds
-        } : null;
-
-        // Build signin activity
-        const signinActivity = signinActivityRows.length > 0 ? {
-            signInCount24h: signinActivityRows[0].sign_in_count_24h || 0,
-            failedSigninCount24h: signinActivityRows[0].failed_signin_count_24h || 0,
-            uniqueLocationsCount: signinActivityRows[0].unique_locations_count || 0,
-            topLocations: safeJsonParse(signinActivityRows[0].top_locations, []),
-            recentSignins: safeJsonParse(signinActivityRows[0].recent_signings, [])
-        } : null;
-
-        console.log(`[Sunbird Cached Dashboard] Loaded ${users.length} users from cache`);
-
-        res.json({
+        const users = snapshot.evidence.find(item => item.evidenceType === 'users')?.data;
+        if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users)) {
+            return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
+        }
+        const summary = {
+            ...snapshot.metrics,
+            totalUsers: users.length,
+            activeUsers24h: snapshot.metrics.activeUsers,
+            adminUsers: snapshot.metrics.privilegedUsers,
+            mfaEnabledPercentage: snapshot.metrics.mfaCoverage,
+            mfaEnabledUsers: snapshot.metrics.mfaEnabled,
+            mfaMissingUsers: snapshot.metrics.mfaMissing,
+            privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
+        };
+        const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
+        return res.json({
             success: true,
             tenant: tenant.clientId,
-            fetchedAt: new Date().toISOString(),
-            source: 'database_cache',
-            cacheMetadata,
-            metrics,
-            stackctrlMetrics: processedIdentitySource.dashboardMetrics,
-            riskBreakdown,
+            fetchedAt: snapshot.freshness.lastUpdated,
+            source: 'identity_evidence_snapshot',
+            summary,
+            metrics: summary,
+            stackctrlMetrics: snapshot.dashboardSourceMetrics,
             users,
-            roleAssignments,
-            topRoles,
-            signinActivity,
-            summary: {
-                totalUsers: metrics.totalUsers,
-                activeUsers24h: metrics.activeUsers24h,
-                activeUsersPercentage: metrics.totalUsers > 0 ? Math.round((metrics.activeUsers24h / metrics.totalUsers) * 100) : 0,
-                adminUsers: metrics.adminUsers,
-                mfaEnabledPercentage: metrics.mfaPercentage,
-                highRiskUsers: metrics.highRiskUsers,
-                highRiskBreakdown: {
-                    adminWithoutMFA: metrics.privilegedUsersWithoutMFA,
-                    neverSignedIn: users.filter(u => u.lastSignIn.daysSince > 999).length,
-                    externalUser: users.filter(u => u.isExternal).length
-                },
-                securityScore: Math.round(
-                    (metrics.mfaPercentage * 0.4) +
-                    ((100 - (metrics.totalUsers > 0 ? (metrics.highRiskUsers / metrics.totalUsers) * 100 : 0)) * 0.3) +
-                    ((metrics.adminUsers <= 5 ? 100 : 50) * 0.3)
-                ),
-                identityRiskScore: metrics.identityRiskScore,
-                mediumRiskUsers: metrics.mediumRiskUsers,
-                privilegedUsersWithoutMFA: metrics.privilegedUsersWithoutMFA
-            }
+            roleAssignments: cachedRoles?.roleAssignments || []
         });
-
     } catch (error) {
         console.error('[Sunbird Cached Dashboard] Error:', error.message);
         console.error('[Sunbird Cached Dashboard] Stack:', error.stack);
         
         // Always return valid JSON to prevent "Unexpected end of JSON input" errors
-        return res.status(500).json({ 
+        return res.status(error.statusCode || 500).json({
             success: false,
             error: 'Failed to fetch cached dashboard data',
             message: error.message || 'An unexpected error occurred',
@@ -14279,15 +14040,20 @@ async function fetchCompliancePolicies(token) {
 /**
  * Fetch security alerts
  */
-async function fetchSecurityAlerts(token) {
+async function fetchSecurityAlerts(token, { withCoverage = false } = {}) {
     const url = 'https://graph.microsoft.com/v1.0/security/alerts?$top=50';
     
     try {
         const data = await fetchMicrosoftGraphJson(url, token, 'Microsoft Graph security alerts');
-        return data.value || [];
+        if (!withCoverage) return data.value || [];
+        return {
+            alerts: data.value || [],
+            warnings: data['@odata.nextLink'] ? ['device_security_alerts_partial'] : [],
+            complete: !data['@odata.nextLink']
+        };
     } catch (error) {
         console.error('[Microsoft Graph] Security alerts fetch failed:', error.message);
-        return []; // Return empty array if alerts API fails
+        return withCoverage ? { alerts: [], warnings: ['device_security_alerts_unavailable'], complete: false } : [];
     }
 }
 
@@ -14311,13 +14077,15 @@ app.get('/api/microsoft-devices', authenticateToken, async (req, res) => {
         }
 
         // Get Microsoft Graph token
+        await assertSharedGraphTenantForCompany(tenant.companyId);
+        const collectionStartedAt = new Date();
         const token = await getMicrosoftGraphToken();
 
         // Fetch all required data in parallel
         const [devices, policies, alerts] = await Promise.all([
             fetchMicrosoftDevices(token),
             fetchCompliancePolicies(token),
-            fetchSecurityAlerts(token)
+            fetchSecurityAlerts(token, { withCoverage: true })
         ]);
 
         // Process devices data
@@ -14432,18 +14200,21 @@ app.get('/api/microsoft-devices', authenticateToken, async (req, res) => {
         const dashboardPayload = {
             success: true,
             tenant: tenant.clientId,
+            collectionStartedAt: collectionStartedAt.toISOString(),
             fetchedAt: new Date().toISOString(),
             summary: {
                 totalDevices,
+                nonCompliantDevices: processedDevices.filter(d => d.complianceState === 'noncompliant').length,
+                notEncryptedDevices: totalDevices - encryptedDevices,
                 compliantDevices,
                 encryptedDevices,
                 registeredDevices,
-                staleDevices: activityBreakdown.stale7days,
+                staleDevices,
                 highRiskDevices: highRiskDevices.length,
                 compliancePercentage: totalDevices > 0 ? Math.round((compliantDevices / totalDevices) * 100) : 0,
                 encryptionPercentage: totalDevices > 0 ? Math.round((encryptedDevices / totalDevices) * 100) : 0,
                 deviceSecurityScore,
-                securityAlerts: processedAlerts.length
+                securityAlerts: alerts.complete === true ? processedAlerts.length : null
             },
             devices: processedDevices,
             compliance: complianceBreakdown,
@@ -14456,7 +14227,7 @@ app.get('/api/microsoft-devices', authenticateToken, async (req, res) => {
             warnings: [...new Set(normalizedAlertPayload.warnings)]
         };
 
-        if (deviceEvidenceService && tenant.companyId) {
+        if (deviceEvidenceService && tenant.companyId && alerts.complete === true) {
             deviceEvidenceService.persistProcessedEvidence({
                 companyId: tenant.companyId,
                 tenantKey: tenant.clientId,
@@ -15301,6 +15072,7 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
 }
 
 async function buildSecurityEventsPayloadFromApi(options = {}) {
+    const collectionStartedAt = new Date();
     console.log('[security_alerts:start] Security Alerts domain processing starting');
 
     const companyId = Number(options.companyId);
@@ -15997,9 +15769,18 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         }
     };
 
+    const dashboardCoverage = {
+        alerts: securityCollectionSourceAudit(null, alertsResult).completed,
+        incidents: securityCollectionSourceAudit(null, incidentsResult).completed,
+        signIns: securityCollectionSourceAudit(null, signInsResult).completed
+    };
     const payload = {
         success: hasPrimaryEvidence || rawRecords.length > 0 || [alertsResult, incidentsResult, signInsResult, cloudflareResult].some(result => result.ok),
         fetchedAt: new Date().toISOString(),
+        collectionStartedAt: collectionStartedAt.toISOString(),
+        dashboardCoverage,
+        coreCoverageComplete: Object.values(dashboardCoverage).every(Boolean),
+        indicatorFeedUnsupported: threatIndicatorsResult.errorCode === 'GRAPH_ENDPOINT_UNSUPPORTED',
         collectionStatus: allWarnings.length ? 'completed_with_warnings' : 'complete',
         warnings: allWarnings,
         collection: {
@@ -16302,6 +16083,7 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
+        await assertSharedGraphTenantForCompany(context.companyId);
         if (!SECURITY_ALERT_STORAGE_ENABLED) {
             const payload = await fetchSecurityEventsPayloadFromApi({ companyId: Number(context.companyId), tenantKey: context.tenantId || context.accessType,
                 skipFindingAiAssessment: true, skipWhatsAppAuto: true });
@@ -16322,25 +16104,25 @@ app.get('/api/db/security-events', authenticateToken, async (req, res) => {
                         await mergeStoredRealtimeSecurityAlerts(context.companyId, payload)
                     );
                     if (mergedPayload.success) {
-                        return res.json({ ...mergedPayload, source: 'db', fetchedAt: rows[0].LastUpdated });
+                        return res.json({ ...rawEvidenceClientPayload(mergedPayload, canViewSecurityDiagnostics(req.user)), source: 'db', fetchedAt: mergedPayload.fetchedAt || rows[0].LastUpdated });
                     }
                 }
             } catch (_) {}
         }
 
+        const collectionStartedAt = new Date();
         const api = await fetchSecurityEventsPayloadFromApi({
             companyId: context.companyId,
             tenantKey: context.tenantId || context.accessType || null
         });
-        if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
-            `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [context.companyId, JSON.stringify(api)]
+        if (SECURITY_ALERT_STORAGE_ENABLED) await writeMicrosoftDashboardCache(pool,
+            'SecurityEventsPayloadCache', 'CompanyID, Payload',
+            [context.companyId, JSON.stringify(api)], collectionStartedAt, hasCompleteSecurityDashboard(api)
         );
         const mergedApi = sanitizeCachedSecurityIndicators(
             await mergeStoredRealtimeSecurityAlerts(context.companyId, api)
         );
-        return res.json({ ...mergedApi, source: 'api-fallback' });
+        return res.json({ ...rawEvidenceClientPayload(mergedApi, canViewSecurityDiagnostics(req.user)), source: 'api-fallback' });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -16443,7 +16225,7 @@ app.get('/api/security-events', authenticateToken, async (req, res) => {
         });
 
         const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload: payloadWithRealtimeAlerts });
-        if (SECURITY_ALERT_STORAGE_ENABLED && securityEvidenceService && tenant.companyId) {
+        if (SECURITY_ALERT_STORAGE_ENABLED && securityEvidenceService && tenant.companyId && !range.explicit) {
             securityEvidenceService.persistProcessedEvidence({
                 companyId: tenant.companyId,
                 tenantKey: tenant.clientId || 'sunbird',
@@ -16865,6 +16647,7 @@ app.get('/api/email-security', authenticateToken, async (req, res) => {
             });
         }
 
+        await assertSharedGraphTenantForCompany(tenant.companyId);
         const payload = await fetchEmailSecurityPayloadFromApi();
         console.log(`[Email Security] Compiled: ${payload.alerts.length} email alerts, ${payload.incidents.length} incidents, ${payload.summary.affectedUsersCount} affected users`);
 
@@ -16945,14 +16728,9 @@ function parseGraphCSVLine(line, delimiter) {
     return values;
 }
 
-function parseGraphReportCSV(csvText, reportType = 'unknown') {
+function parseGraphReportCSV(csvText, reportType = 'unknown', requiredHeaders = []) {
     try {
         const lines = csvText.trim().split('\n');
-        if (lines.length < 2) {
-            console.log(`[CSV Parser] ${reportType} - No data rows (only ${lines.length} lines)`);
-            return [];
-        }
-
         // Detect delimiter: comma or tab
         const headerLine = lines[0];
         const isCommaDelimited = headerLine.includes(',') && !headerLine.includes('\t');
@@ -16961,6 +16739,9 @@ function parseGraphReportCSV(csvText, reportType = 'unknown') {
 
         // Parse header
         const header = parseGraphCSVLine(headerLine.replace(/^\uFEFF/, ''), delimiter);
+        if (!requiredHeaders.every(column => header.includes(column))) {
+            throw new Error(`${reportType} report returned an unexpected header`);
+        }
         console.log(`[CSV Parser] ${reportType} - Headers: ${header.join(', ')}`);
         
         // Parse rows
@@ -16986,6 +16767,7 @@ function parseGraphReportCSV(csvText, reportType = 'unknown') {
         return data;
     } catch (error) {
         console.error('[CSV Parser] Error parsing CSV:', error);
+        if (requiredHeaders.length) throw error;
         return [];
     }
 }
@@ -16998,15 +16780,17 @@ function parseGraphReportCSV(csvText, reportType = 'unknown') {
 app.get('/api/backup-recovery', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
+        await assertSharedGraphTenantForCompany(context?.companyId);
+        const collectionStartedAt = new Date();
         const payload = await fetchBackupRecoveryPayloadFromApi();
         if (context?.companyId) {
             const dashboardPayload = buildBackupDashboardPayload({ tenantKey: 'sunbird', payload });
-            await pool.query(`REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [context.companyId, JSON.stringify(dashboardPayload)]);
+            await writeMicrosoftDashboardCache(pool, 'BackupRecoveryPayloadCache', 'CompanyID, Payload', [context.companyId, JSON.stringify(dashboardPayload)], collectionStartedAt);
             if (backupEvidenceService) {
                 backupEvidenceService.persistProcessedEvidence({
                     companyId: context.companyId,
                     tenantKey: 'sunbird',
-                    payload: dashboardPayload,
+                    payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() },
                     collectionTrigger: 'dashboard_request',
                     sourceEndpoint: '/api/backup-recovery'
                 }).catch(error => console.warn('[Backup Evidence] Dashboard response could not be stored:', error.message));
@@ -17096,26 +16880,29 @@ async function performIdentityEvidenceCollection(companyId, collectionTrigger) {
     if (!identityEvidenceService) throw new Error('Identity evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Identity Protection';
     try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const collectionStartedAt = new Date();
         const token = await getMicrosoftGraphToken();
         const [users, roleAssignments, signIns] = await Promise.all([
             fetchMicrosoftUsers(token),
             fetchMicrosoftRoleAssignments(token),
-            fetchMicrosoftSignIns(token)
+            fetchMicrosoftSignIns(token, 30, { requireComplete: true })
         ]);
         const payload = await buildIdentityDashboardPayload({
             tenantKey: 'sunbird',
             users,
             roleAssignments,
             signIns,
-            loadAuthMethods: user => fetchUserAuthMethods(token, user.id),
+            loadAuthMethods: user => fetchUserAuthMethods(token, user.id, 2, { requireComplete: true }),
             hasRealMfaMethod,
             mapWithConcurrency,
+            now: () => collectionStartedAt,
             concurrency: Number(process.env.IDENTITY_EVIDENCE_AUTH_CONCURRENCY || 4)
         });
         return identityEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
-            payload,
+            payload: { ...payload, collectionStartedAt: collectionStartedAt.toISOString() },
             collectionTrigger,
             sourceEndpoint
         });
@@ -17163,8 +16950,10 @@ async function performDeviceEvidenceCollection(companyId, collectionTrigger) {
     if (!deviceEvidenceService) throw new Error('Device evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Device Protection';
     try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const collectionStartedAt = new Date();
         const token = await getMicrosoftGraphToken();
-        const alertsPromise = fetchSecurityAlerts(token).catch(error => {
+        const alertsPromise = fetchSecurityAlerts(token, { withCoverage: true }).catch(error => {
             console.warn('[Device Evidence] Device security alerts unavailable; continuing device refresh:', error.message);
             return { alerts: [], warnings: ['device_security_alerts_unavailable'], recordsFetched: 0 };
         });
@@ -17182,7 +16971,7 @@ async function performDeviceEvidenceCollection(companyId, collectionTrigger) {
         return deviceEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
-            payload,
+            payload: { ...payload, collectionStartedAt: collectionStartedAt.toISOString() },
             collectionTrigger,
             sourceEndpoint
         });
@@ -17234,32 +17023,31 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
     if (!emailEvidenceService) throw new Error('Email evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Email Security';
     try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const collectionStartedAt = new Date();
         const payload = await fetchEmailSecurityPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, sourceKey: 'email_security' } });
         const dashboardPayload = buildEmailDashboardPayload({
             tenantKey: 'sunbird',
             payload
         });
-        await pool.query(
-            `REPLACE INTO EmailMetricsCache
-             (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
-             VALUES (?, ?, ?, ?, ?, NOW())`,
+        await writeMicrosoftDashboardCache(pool,
+            'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
             [
                 companyId,
                 dashboardPayload.summary.activeThreats || 0,
                 dashboardPayload.summary.highSeverityAlerts || 0,
                 dashboardPayload.summary.affectedUsersCount || 0,
                 dashboardPayload.summary.activeIncidents || 0
-            ]
+            ], collectionStartedAt, hasCompleteEmailThreatCoverage(payload)
         );
-        await pool.query(
-            `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
-             VALUES (?, ?, NOW())`,
-            [companyId, JSON.stringify(dashboardPayload)]
+        await writeMicrosoftDashboardCache(pool,
+            'EmailSecurityPayloadCache', 'CompanyID, Payload',
+            [companyId, JSON.stringify(dashboardPayload)], collectionStartedAt, hasCompleteEmailDashboard(payload)
         );
         return emailEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
-            payload: dashboardPayload,
+            payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() },
             collectionTrigger,
             sourceEndpoint
         });
@@ -17365,10 +17153,12 @@ async function performBackupEvidenceCollection(companyId, collectionTrigger, col
     if (!backupEvidenceService) throw new Error('Backup evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Backup and Recovery';
     try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const collectionStartedAt = new Date();
         const payload = await fetchBackupRecoveryPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, sourceKey: 'backup' } });
         const dashboardPayload = buildBackupDashboardPayload({ tenantKey: 'sunbird', payload });
-        await writeBackupRecoveryPayloadCache(companyId, dashboardPayload, { signal: collectorContext.signal || null, collectorContext });
-        return backupEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint, signal: collectorContext.signal || null, timeoutMs: BACKUP_DATABASE_TIMEOUT_MS });
+        await writeBackupRecoveryPayloadCache(companyId, dashboardPayload, { collectionStartedAt, signal: collectorContext.signal || null, collectorContext });
+        return backupEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() }, collectionTrigger, sourceEndpoint, signal: collectorContext.signal || null, timeoutMs: BACKUP_DATABASE_TIMEOUT_MS });
     } catch (error) {
         await backupEvidenceService.recordCollectionFailure({ companyId, tenantKey: 'sunbird', collectionTrigger, sourceEndpoint, error, timeoutMs: BACKUP_DATABASE_TIMEOUT_MS }).catch(() => {});
         throw error;
@@ -17393,11 +17183,13 @@ async function performApplicationsEvidenceCollection(companyId, collectionTrigge
     if (!applicationsEvidenceService) throw new Error('Applications evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Applications';
     try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const collectionStartedAt = new Date();
         const payload = await fetchApplicationsPayloadFromApi();
         const dashboardPayload = buildApplicationsDashboardPayload({ tenantKey: 'sunbird', payload });
-        await pool.query(`REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated) VALUES (?, ?, ?, ?, ?, NOW())`, [companyId, dashboardPayload.summary.totalApplications, dashboardPayload.summary.externalApplications, dashboardPayload.summary.highRiskApps, dashboardPayload.summary.highAccessApps]);
-        await pool.query(`REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
-        return applicationsEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });
+        await writeMicrosoftDashboardCache(pool, 'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps', [companyId, dashboardPayload.summary.totalApplications, dashboardPayload.summary.externalApplications, dashboardPayload.summary.highRiskApps, dashboardPayload.summary.highAccessApps], collectionStartedAt);
+        await writeMicrosoftDashboardCache(pool, 'ApplicationPayloadCache', 'CompanyID, Payload', [companyId, JSON.stringify(dashboardPayload)], collectionStartedAt);
+        return applicationsEvidenceService.persistProcessedEvidence({ companyId, tenantKey: 'sunbird', payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() }, collectionTrigger, sourceEndpoint });
     } catch (error) {
         await applicationsEvidenceService.recordCollectionFailure({ companyId, tenantKey: 'sunbird', collectionTrigger, sourceEndpoint, error }).catch(() => {});
         throw error;
@@ -17426,13 +17218,14 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger, c
         // The scheduled collection is the automatic notification path.  The
         // notification ledger suppresses recurring provider noise before any
         // WhatsApp message is sent.
+        const collectionStartedAt = new Date();
         const payload = await fetchSecurityEventsPayloadFromApi({
             companyId,
             tenantKey: collectorContext.tenantKey || 'sunbird'
         });
         const dashboardPayload = buildSecurityDashboardPayload({ tenantKey: collectorContext.tenantKey || 'sunbird', payload });
-        if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(dashboardPayload)]);
-        const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: collectorContext.tenantKey || 'sunbird', payload: dashboardPayload, collectionTrigger, sourceEndpoint });
+        if (SECURITY_ALERT_STORAGE_ENABLED) await writeMicrosoftDashboardCache(pool, 'SecurityEventsPayloadCache', 'CompanyID, Payload', [companyId, JSON.stringify(dashboardPayload)], collectionStartedAt, hasCompleteSecurityDashboard(payload));
+        const stored = await securityEvidenceService.persistProcessedEvidence({ companyId, tenantKey: collectorContext.tenantKey || 'sunbird', payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() }, collectionTrigger, sourceEndpoint });
         console.log('[security_alerts:storage:complete] Security Alerts evidence stored', {
             snapshotId: stored.snapshotId,
             recordsFetched: dashboardPayload.collection?.accounting?.recordsFetched || 0,
@@ -17585,8 +17378,12 @@ async function collectOperationsEvidenceForConfiguredTenants({ trigger = 'schedu
 }
 
 async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collectorContext = {}) {
+    if (['identity', 'devices', 'email_security', 'security_alerts', 'backup', 'applications'].includes(sourceKey)) {
+        await assertSharedGraphTenantForCompany(companyId);
+    }
     switch (sourceKey) {
         case 'identity': {
+            const collectionStartedAt = new Date();
             if (identityEvidenceService) {
                 try {
                     await collectAndPersistIdentityEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17610,18 +17407,12 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 ]);
                 
                 // Update Azure cache
-                await pool.query(
-                    `REPLACE INTO IdentityMetricsCache
-                     (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
-                     VALUES (?, ?, ?, ?, ?, NOW())`,
-                    [companyId, metrics.totalUsers, metrics.activeUsers, metrics.adminRoles, metrics.securityScore]
+                await writeMicrosoftDashboardCache(pool,
+                    'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+                    [companyId, metrics.totalUsers, metrics.activeUsers, metrics.adminRoles, metrics.securityScore], collectionStartedAt
                 );
-                await pool.query(
-                    `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
-                     VALUES (?, ?, NOW())`,
-                    [companyId, JSON.stringify(details.users || [])]
-                );
-                await upsertRoleAssignmentsCache(companyId, details.roleAssignments || []);
+                await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [companyId, JSON.stringify(details.users || [])], collectionStartedAt);
+                await upsertRoleAssignmentsCache(companyId, details.roleAssignments || [], collectionStartedAt);
                 
                 // ALSO update Sunbird dashboard tables for fresh identity source
                 try {
@@ -17711,6 +17502,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
             }
         }
         case 'devices': {
+            const collectionStartedAt = new Date();
             if (deviceEvidenceService) {
                 try {
                     await collectAndPersistDeviceEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17726,11 +17518,9 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
             }
             const token = await getMicrosoftGraphToken();
             const result = await fetchDeviceIntelligenceEvidenceFromApi(token);
-            await pool.query(
-                `REPLACE INTO DeviceMetricsCache
-                 (CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, result.totalDevices, result.nonCompliant, result.notEncrypted, result.staleDevices]
+            await writeMicrosoftDashboardCache(pool,
+                'DeviceMetricsCache', 'CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices',
+                [companyId, result.totalDevices, result.nonCompliant, result.notEncrypted, result.staleDevices], collectionStartedAt
             );
             return {
                 metrics: {
@@ -17744,6 +17534,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
             };
         }
         case 'email_security': {
+            const collectionStartedAt = new Date();
             if (emailEvidenceService) {
                 try {
                     await collectAndPersistEmailEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17763,20 +17554,18 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 usersTargeted: payload.summary?.affectedUsersCount || 0,
                 openIncidents: payload.summary?.activeIncidents || 0
             };
-            await pool.query(
-                `REPLACE INTO EmailMetricsCache
-                 (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, metrics.activeThreats, metrics.highSeverity, metrics.usersTargeted, metrics.openIncidents]
+            await writeMicrosoftDashboardCache(pool,
+                'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
+                [companyId, metrics.activeThreats, metrics.highSeverity, metrics.usersTargeted, metrics.openIncidents], collectionStartedAt, hasCompleteEmailThreatCoverage(payload)
             );
-            await pool.query(
-                `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(payload)]
+            await writeMicrosoftDashboardCache(pool,
+                'EmailSecurityPayloadCache', 'CompanyID, Payload',
+                [companyId, JSON.stringify(payload)], collectionStartedAt, hasCompleteEmailDashboard(payload)
             );
             return null;
         }
         case 'security_alerts': {
+            const collectionStartedAt = new Date();
             if (securityEvidenceService) {
                 try {
                     await collectAndPersistSecurityEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17794,10 +17583,11 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 tenantKey: `company:${companyId}`,
                 skipWhatsAppAuto: true
             });
-            if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(`REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)]);
+            if (SECURITY_ALERT_STORAGE_ENABLED) await writeMicrosoftDashboardCache(pool, 'SecurityEventsPayloadCache', 'CompanyID, Payload', [companyId, JSON.stringify(payload)], collectionStartedAt, hasCompleteSecurityDashboard(payload));
             return null;
         }
         case 'backup': {
+            const collectionStartedAt = new Date();
             if (backupEvidenceService) {
                 try {
                     await collectAndPersistBackupEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17811,10 +17601,11 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 }
             }
             const payload = await fetchBackupRecoveryPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, sourceKey: 'backup' } });
-            await writeBackupRecoveryPayloadCache(companyId, payload, { signal: collectorContext.signal || null, collectorContext });
+            await writeBackupRecoveryPayloadCache(companyId, payload, { collectionStartedAt, signal: collectorContext.signal || null, collectorContext });
             return null;
         }
         case 'applications': {
+            const collectionStartedAt = new Date();
             if (applicationsEvidenceService) {
                 try {
                     await collectAndPersistApplicationsEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
@@ -17828,8 +17619,8 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 }
             }
             const [metrics, payload] = await Promise.all([fetchApplicationMetricsFromApi(), fetchApplicationsPayloadFromApi()]);
-            await pool.query(`REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated) VALUES (?, ?, ?, ?, ?, NOW())`, [companyId, metrics.totalApps, metrics.externalApps, metrics.highRiskApps, metrics.highAccessApps]);
-            await pool.query(`REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`, [companyId, JSON.stringify(payload)]);
+            await writeMicrosoftDashboardCache(pool, 'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps', [companyId, metrics.totalApps, metrics.externalApps, metrics.highRiskApps, metrics.highAccessApps], collectionStartedAt);
+            await writeMicrosoftDashboardCache(pool, 'ApplicationPayloadCache', 'CompanyID, Payload', [companyId, JSON.stringify(payload)], collectionStartedAt);
             return null;
         }
         case 'cloudflare_network_security': {

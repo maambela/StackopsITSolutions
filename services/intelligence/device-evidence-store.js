@@ -112,10 +112,11 @@ function deriveDeviceEvidence(payload = {}) {
     };
     const expectedRecordCount = Number(payload.summary?.totalDevices ?? devices.length) || 0;
     const omittedRecordCount = Math.max(0, expectedRecordCount - devices.length);
-    const isComplete = Boolean(payload.success !== false && devices.length > 0 && omittedRecordCount === 0);
+    const verifiedEmpty = payload.success === true && Array.isArray(payload.devices) && payload.summary?.totalDevices === 0;
+    const isComplete = payload.success !== false && (devices.length > 0 || verifiedEmpty) && devices.length === expectedRecordCount;
     const completenessPercent = expectedRecordCount > 0
         ? Number(((devices.length / expectedRecordCount) * 100).toFixed(2))
-        : 0;
+        : (isComplete ? 100 : 0);
 
     return {
         devices,
@@ -158,7 +159,7 @@ function createDeviceEvidenceStore({ pool, logger = console, now = () => new Dat
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         const evidence = deriveDeviceEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const sourceFetchedAt = payload?.fetchedAt || collectedAt;
         const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({
             devices: evidence.sourceDevices,

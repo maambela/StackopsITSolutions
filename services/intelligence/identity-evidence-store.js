@@ -140,7 +140,8 @@ function deriveIdentityEvidence(payload = {}) {
     };
     const expectedRecordCount = Number(payload.summary?.totalUsers ?? users.length) || 0;
     const omittedRecordCount = Math.max(0, expectedRecordCount - users.length);
-    const isComplete = Boolean(payload.success !== false && users.length > 0 && omittedRecordCount === 0);
+    const verifiedEmpty = payload.success === true && Array.isArray(payload.users) && payload.summary?.totalUsers === 0;
+    const isComplete = payload.success !== false && (users.length > 0 || verifiedEmpty) && users.length === expectedRecordCount;
     const completenessPercent = expectedRecordCount > 0
         ? Number(((users.length / expectedRecordCount) * 100).toFixed(2))
         : 0;
@@ -183,7 +184,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         const evidence = deriveIdentityEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const sourceFetchedAt = payload?.fetchedAt || collectedAt;
         const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({
             users: evidence.sourceUsers,

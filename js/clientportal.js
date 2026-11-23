@@ -841,10 +841,10 @@ const mockProjects = [
         lastUpdate: "Loading...",
         icon: "fas fa-shield-alt",
         cardMetrics: [
-            { label: "Total Users", value: ": 0", icon: "fas fa-users" },
-            { label: "Active (24h)", value: ": 0", icon: "fas fa-user-check" },
-            { label: "Admin Roles", value: ": 0", icon: "fas fa-crown" },
-            { label: "Security Score", value: ": 0", icon: "fas fa-shield-alt" }
+            { label: "Total Users", value: ": Unavailable", icon: "fas fa-users" },
+            { label: "Active (24h)", value: ": Unavailable", icon: "fas fa-user-check" },
+            { label: "Admin Roles", value: ": Unavailable", icon: "fas fa-crown" },
+            { label: "Security Score", value: ": Unavailable", icon: "fas fa-shield-alt" }
         ],
         cardFooter: "Live data",
         hasTabs: false,
@@ -863,10 +863,10 @@ const mockProjects = [
         lastUpdate: "Loading...",
         icon: "fas fa-laptop",
         cardMetrics: [
-            { label: "Total Devices", value: ": 0", icon: "fas fa-desktop" },
-            { label: "Non-Compliant", value: ": 0", icon: "fas fa-times-circle" },
-            { label: "Not Encrypted", value: ": 0", icon: "fas fa-lock-open" },
-            { label: "Stale (7+ days)", value: ": 0", icon: "fas fa-clock" }
+            { label: "Total Devices", value: ": Unavailable", icon: "fas fa-desktop" },
+            { label: "Non-Compliant", value: ": Unavailable", icon: "fas fa-times-circle" },
+            { label: "Not Encrypted", value: ": Unavailable", icon: "fas fa-lock-open" },
+            { label: "Stale (7+ days)", value: ": Unavailable", icon: "fas fa-clock" }
         ],
         cardFooter: "Live device status",
         hasTabs: false,
@@ -944,8 +944,8 @@ const mockProjects = [
         lastUpdate: "Loading...",
         icon: "fas fa-shield-alt",
         cardMetrics: [
-            { label: "Total Storage", value: ": ...", icon: "fas fa-database" },
-            { label: "Services Covered", value: ": 3", icon: "fas fa-cloud" }
+            { label: "Total Storage", value: ": Unavailable", icon: "fas fa-database" },
+            { label: "Services Covered", value: ": Unavailable", icon: "fas fa-cloud" }
         ],
         cardFooter: "Fetching from Microsoft Graph...",
         hasTabs: false,
@@ -964,10 +964,10 @@ const mockProjects = [
         lastUpdate: "Loading...",
         icon: "fas fa-cubes",
         cardMetrics: [
-            { label: "Total Apps", value: ": 0", icon: "fas fa-cubes" },
-            { label: "External Apps", value: ": 0", icon: "fas fa-globe" },
-            { label: "High Risk Apps", value: ": 0", icon: "fas fa-exclamation-circle" },
-            { label: "High Access Apps", value: ": 0", icon: "fas fa-users" }
+            { label: "Total Apps", value: ": Unavailable", icon: "fas fa-cubes" },
+            { label: "External Apps", value: ": Unavailable", icon: "fas fa-globe" },
+            { label: "High Risk Apps", value: ": Unavailable", icon: "fas fa-exclamation-circle" },
+            { label: "High Access Apps", value: ": Unavailable", icon: "fas fa-users" }
         ],
         cardFooter: "Access monitoring active",
         hasTabs: false,
@@ -1088,11 +1088,11 @@ function getSummaryCardStatusMeta(project) {
 
     const normalizedStatus = String(project.status || '').toLowerCase();
     if (normalizedStatus.includes('error')) {
-        return { status: 'error', text: 'Data unavailable', dotClass: 'error' };
+        return { status: 'error', text: 'Temporarily unavailable', dotClass: 'error' };
     }
 
     if (normalizedStatus.includes('loading') || normalizedStatus.includes('syncing')) {
-        return { status: 'loading', text: 'Live data', dotClass: 'partial' };
+        return { status: 'loading', text: 'Updating…', dotClass: 'partial' };
     }
 
     return { status: 'active', text: '', dotClass: 'ok' };
@@ -1100,6 +1100,7 @@ function getSummaryCardStatusMeta(project) {
 
 function toMetricValue(value, fallback = 0) {
     const raw = String(value ?? '').replace(':', '').trim();
+    if (raw === 'Unavailable') return 'Temporarily unavailable';
     if (!raw || raw === '...') return String(fallback);
     return raw;
 }
@@ -1109,16 +1110,16 @@ function normalizeSummaryMetrics(project) {
 
     const defaultMetricsByCard = {
         2: [
-            { label: "Total Users", value: ": 0", icon: "fas fa-users" },
-            { label: "Active (24h)", value: ": 0", icon: "fas fa-user-check" },
-            { label: "Admin Roles", value: ": 0", icon: "fas fa-crown" },
-            { label: "Security Score", value: ": 0", icon: "fas fa-shield-alt" }
+            { label: "Total Users", value: ": Unavailable", icon: "fas fa-users" },
+            { label: "Active (24h)", value: ": Unavailable", icon: "fas fa-user-check" },
+            { label: "Admin Roles", value: ": Unavailable", icon: "fas fa-crown" },
+            { label: "Security Score", value: ": Unavailable", icon: "fas fa-shield-alt" }
         ],
         3: [
-            { label: "Total Devices", value: ": 0", icon: "fas fa-desktop" },
-            { label: "Non-Compliant", value: ": 0", icon: "fas fa-times-circle" },
-            { label: "Not Encrypted", value: ": 0", icon: "fas fa-lock-open" },
-            { label: "Stale (7+ days)", value: ": 0", icon: "fas fa-clock" }
+            { label: "Total Devices", value: ": Unavailable", icon: "fas fa-desktop" },
+            { label: "Non-Compliant", value: ": Unavailable", icon: "fas fa-times-circle" },
+            { label: "Not Encrypted", value: ": Unavailable", icon: "fas fa-lock-open" },
+            { label: "Stale (7+ days)", value: ": Unavailable", icon: "fas fa-clock" }
         ],
         5: [
             { label: "Active Threats", value: ": Unavailable", icon: "fas fa-exclamation-triangle" },
@@ -1127,10 +1128,10 @@ function normalizeSummaryMetrics(project) {
             { label: "Open Incidents", value: ": Unavailable", icon: "fas fa-bug" }
         ],
         8: [
-            { label: "Total Apps", value: ": 0", icon: "fas fa-cubes" },
-            { label: "External Apps", value: ": 0", icon: "fas fa-globe" },
-            { label: "High Risk Apps", value: ": 0", icon: "fas fa-exclamation-circle" },
-            { label: "High Access Apps", value: ": 0", icon: "fas fa-users" }
+            { label: "Total Apps", value: ": Unavailable", icon: "fas fa-cubes" },
+            { label: "External Apps", value: ": Unavailable", icon: "fas fa-globe" },
+            { label: "High Risk Apps", value: ": Unavailable", icon: "fas fa-exclamation-circle" },
+            { label: "High Access Apps", value: ": Unavailable", icon: "fas fa-users" }
         ]
     };
 
@@ -1333,6 +1334,7 @@ function populateIdentityCards(apiData) {
 
 // Fetch Applications data from API
 async function fetchApplicationsData() {
+    const project = mockProjects.find(item => item.isApplicationsCard);
     try {
         const authToken = localStorage.getItem('authToken');
         if (!authToken) {
@@ -1344,6 +1346,11 @@ async function fetchApplicationsData() {
         if (!isSunbirdUser()) {
             console.log('[Applications] Non-Sunbird user. Skipping fetch.');
             return;
+        }
+        if (project && !project.dashboardFetchedAt) {
+            project.status = 'loading';
+            project.cardFooter = 'Updating…';
+            displayCurrentProject();
         }
         
         console.log('[Applications] Fetching applications data...');
@@ -1359,43 +1366,29 @@ async function fetchApplicationsData() {
 
         if (payloadResponse.ok) {
             const payloadData = await payloadResponse.json();
+            if (authToken !== localStorage.getItem('authToken')) return;
             if (payloadData.success) {
+                if (isOlderMicrosoftDashboardData(payloadData, sunbirdApplicationsPayload)) return;
                 sunbirdApplicationsPayload = normalizeSunbirdApplicationsData(payloadData);
                 applicationsData = sunbirdApplicationsPayload.applications;
                 saveSunbirdApplicationsSnapshot(sunbirdApplicationsPayload);
-                populateApplicationsCard(sunbirdApplicationsPayload.summary);
+                populateApplicationsCard(sunbirdApplicationsPayload.summary, payloadData);
                 return;
             }
         }
 
-        const response = await fetch('/api/db/application-metrics', {
-            method: 'GET',
-            cache: 'no-store',
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Failed to load application metrics');
-        const metrics = data.metrics || {};
-        applicationsData = applicationsData || [];
-        console.log('[Applications] Loaded DB application metrics');
-        populateApplicationsCard({
-            totalApplications: metrics.TotalApps || metrics.totalApps || 0,
-            externalApplications: metrics.ExternalApps || metrics.externalApps || 0,
-            highRiskApps: metrics.HighRiskApps || metrics.highRiskApps || 0,
-            highAccessApps: metrics.HighAccessApps || metrics.highAccessApps || 0
-        });
+        throw new Error('Complete application inventory unavailable');
         
     } catch (error) {
         console.error('[Applications] Exception:', error);
-        showNotification('Failed to load Applications data', false);
+        if (!sunbirdApplicationsPayload && !project?.dashboardFetchedAt) {
+            populateApplicationsCard({});
+        }
     }
 }
 
 // Populate Applications card in projects view
-function populateApplicationsCard(apiData) {
+function populateApplicationsCard(apiData, source) {
     const container = document.getElementById('applications-cards-container');
     
     // If container doesn't exist, create it dynamically in the grid
@@ -1404,20 +1397,21 @@ function populateApplicationsCard(apiData) {
     if (!appProject) return;
     
     // Update project card metrics
-    const totalApps = apiData.totalApplications || 0;
-    const externalApps = apiData.externalApplications || 0;
-    const highRiskApps = apiData.highRiskApps ?? calculateHighRiskApplications(applicationsData);
-    const highAccessApps = apiData.highAccessApps ?? applicationsData.filter(app => (app.userCount || 0) >= 20).length;
+    const totalApps = apiData.totalApplications ?? 'Unavailable';
+    const externalApps = apiData.externalApplications ?? 'Unavailable';
+    const highRiskApps = apiData.highRiskApps ?? 'Unavailable';
+    const highAccessApps = apiData.highAccessApps ?? 'Unavailable';
 
-    appProject.status = 'active';
+    appProject.status = source ? 'active' : 'error';
     appProject.cardMetrics = [
         { label: "Total Apps", value: `: ${totalApps}`, icon: "fas fa-cubes" },
         { label: "External Apps", value: `: ${externalApps}`, icon: "fas fa-globe" },
         { label: "High Risk Apps", value: `: ${highRiskApps}`, icon: "fas fa-exclamation-circle" },
         { label: "High Access Apps", value: `: ${highAccessApps}`, icon: "fas fa-users" }
     ];
-    appProject.cardFooter = highRiskApps > 0 ? `${highRiskApps} high risk apps` : 'No high risk apps detected';
-    appProject.lastUpdate = new Date().toLocaleTimeString();
+    appProject.cardFooter = highRiskApps === 'Unavailable' ? 'Temporarily unavailable'
+        : `${highRiskApps} high risk apps in collection`;
+    updateMicrosoftDashboardCardTimestamp(appProject, source);
     saveProjectCardToCache(appProject);
     
     // Re-render project cards
@@ -1647,8 +1641,9 @@ async function fetchDevicesCardData() {
         const token = localStorage.getItem('authToken');
         if (!token) return;
 
-        if (!hasRealProjectMetrics(project)) {
+        if (!latestDevicesCardData && !project.lastUpdate?.includes('Last updated')) {
             project.status = 'loading';
+            project.cardFooter = 'Updating…';
             displayCurrentProject();
         }
 
@@ -1661,53 +1656,44 @@ async function fetchDevicesCardData() {
             }
         });
         const data = await response.json();
+        if (token !== localStorage.getItem('authToken')) return;
         if (!response.ok || !data.success) {
             throw new Error(data.message || 'Failed to fetch device metrics');
         }
 
-        latestDevicesCardData = data;
-        try {
-            const detailResponse = await fetch('/api/microsoft-devices', {
-                method: 'GET',
-                cache: 'no-store',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            const detailData = await detailResponse.json();
-            if (detailResponse.ok && detailData.success) {
-                latestDevicesCardData = normalizeSunbirdDevicesData(detailData);
-                sunbirdDevicesDashboardData = latestDevicesCardData;
-                saveSunbirdDevicesSnapshot(latestDevicesCardData);
-            }
-        } catch (detailError) {
-            console.warn('[Devices Card] Detailed device data unavailable, using cached metrics:', detailError.message);
-        }
-
-        const normalized = normalizeSunbirdDevicesData(latestDevicesCardData);
-        const total = normalized.summary.totalDevices || 0;
-        const nonCompliant = normalized.summary.nonCompliantDevices || 0;
-        const notEncrypted = Math.max(0, total - (normalized.summary.encryptedDevices || 0));
-        const stale7days = normalized.activityBreakdown?.stale7days ?? normalized.summary.staleDevices ?? 0;
-
-        project.status = 'active';
-        project.cardMetrics = [
-            { label: "Total Devices", value: `: ${total}`, icon: "fas fa-desktop" },
-            { label: "Non-Compliant", value: `: ${nonCompliant}`, icon: "fas fa-times-circle" },
-            { label: "Not Encrypted", value: `: ${notEncrypted}`, icon: "fas fa-lock-open" },
-            { label: "Stale (7+ days)", value: `: ${stale7days}`, icon: "fas fa-clock" }
-        ];
-        project.cardFooter = nonCompliant > 0 ? `${nonCompliant} non-compliant devices` : 'All devices compliant';
-        project.lastUpdate = new Date().toLocaleTimeString();
-        saveProjectCardToCache(project);
-        displayCurrentProject();
+        updateDevicesProjectCard(project, data);
     } catch (error) {
         console.error('[Devices Card] Error:', error);
-        project.status = 'error';
-        project.cardFooter = 'Data unavailable';
+        if (latestDevicesCardData || project.lastUpdate?.includes('Last updated')) {
+            if (latestDevicesCardData) project.lastUpdate = microsoftDashboardUpdateText(latestDevicesCardData);
+        } else {
+            project.status = 'error';
+            project.cardFooter = 'Temporarily unavailable';
+        }
         displayCurrentProject();
     }
+}
+
+function updateDevicesProjectCard(project, data) {
+    if (!project || isOlderMicrosoftDashboardData(data, latestDevicesCardData)) return;
+    latestDevicesCardData = data;
+    const { metrics = {}, summary = {} } = data;
+    const unavailable = 'Temporarily unavailable';
+    const total = summary.totalDevices ?? metrics.TotalDevices ?? metrics.totalDevices ?? unavailable;
+    const nonCompliant = summary.nonCompliantDevices ?? metrics.NonCompliant ?? metrics.nonCompliant ?? unavailable;
+    const notEncrypted = summary.notEncryptedDevices ?? metrics.NotEncrypted ?? metrics.notEncrypted ?? unavailable;
+    const stale = summary.staleDevices ?? metrics.StaleDevices ?? metrics.staleDevices ?? unavailable;
+    project.status = 'active';
+    project.cardMetrics = [
+        { label: 'Total Devices', value: `: ${total}`, icon: 'fas fa-desktop' },
+        { label: 'Non-Compliant', value: `: ${nonCompliant}`, icon: 'fas fa-times-circle' },
+        { label: 'Not Encrypted', value: `: ${notEncrypted}`, icon: 'fas fa-lock-open' },
+        { label: 'Stale (7+ days)', value: `: ${stale}`, icon: 'fas fa-clock' }
+    ];
+    project.cardFooter = nonCompliant === unavailable ? unavailable : `${nonCompliant} non-compliant devices in collection`;
+    updateMicrosoftDashboardCardTimestamp(project, data);
+    saveProjectCardToCache(project);
+    displayCurrentProject();
 }
 
 async function fetchEmailCardData() {
@@ -1718,8 +1704,9 @@ async function fetchEmailCardData() {
         const token = localStorage.getItem('authToken');
         if (!token) return;
 
-        if (!hasRealProjectMetrics(project)) {
+        if (!latestEmailCardData && !project.lastUpdate?.includes('Last updated')) {
             project.status = 'loading';
+            project.cardFooter = 'Updating…';
             displayCurrentProject();
         }
 
@@ -1732,10 +1719,17 @@ async function fetchEmailCardData() {
             }
         });
         const data = await response.json();
+        if (token !== localStorage.getItem('authToken')) return;
         if (!response.ok || !data.success) {
             throw new Error(data.message || 'Failed to fetch email metrics');
         }
 
+        if (isOlderMicrosoftDashboardData(data, latestEmailCardData)) return;
+        if (retainVerifiedEmailDashboard(latestEmailCardData, data)) {
+            project.lastUpdate = microsoftDashboardUpdateText(latestEmailCardData);
+            displayCurrentProject();
+            return;
+        }
         latestEmailCardData = normalizeSunbirdEmailData(data);
         sunbirdEmailDashboardData = latestEmailCardData;
         saveSunbirdEmailSnapshot(latestEmailCardData);
@@ -1752,7 +1746,7 @@ async function fetchEmailCardData() {
                 ? `${threats.activeThreats} active threats detected`
                 : activity || 'No active threats in collected alerts'
             : ['Threat data incomplete', activity].filter(Boolean).join(' | ');
-        project.lastUpdate = new Date().toLocaleTimeString();
+        updateMicrosoftDashboardCardTimestamp(project, data);
         saveProjectCardToCache(project);
         displayCurrentProject();
 
@@ -1761,10 +1755,15 @@ async function fetchEmailCardData() {
         }
     } catch (error) {
         console.error('[Email Card] Error:', error);
+        if (latestEmailCardData || project.lastUpdate?.includes('Last updated')) {
+            if (latestEmailCardData) project.lastUpdate = microsoftDashboardUpdateText(latestEmailCardData);
+            displayCurrentProject();
+            return;
+        }
         latestEmailCardData = null;
         project.status = 'error';
         project.cardMetrics = emailCardMetrics(getEmailThreatDisplayMetrics());
-        project.cardFooter = 'Data unavailable';
+        project.cardFooter = 'Temporarily unavailable';
         displayCurrentProject();
     }
 }
@@ -2579,15 +2578,16 @@ function openSunbirdIdentityDashboard() {
     setupSunbirdIdentityDashboard();
 
     const cached = readSunbirdIdentitySnapshot();
-    if (cached && isFreshSunbirdIdentitySnapshot(cached)) {
+    if (cached && !isOlderMicrosoftDashboardData(cached, sunbirdDashboardData)) {
         sunbirdDashboardData = normalizeSunbirdDashboardData(cached);
         microsoftUsersData = getSunbirdIdentityUsers(sunbirdDashboardData);
         microsoftRolesData = Array.isArray(sunbirdDashboardData.roleAssignments) ? sunbirdDashboardData.roleAssignments : microsoftRolesData;
         buildUserRolesMap();
         renderSunbirdIdentityDashboard();
-    } else if (getSunbirdIdentityUsers().length > 0) {
+    } else if (sunbirdDashboardData) {
         renderSunbirdIdentityDashboard();
     } else {
+        setMicrosoftDashboardUpdate('sunbird-identity-dashboard', null, true);
         const signinsEl = document.getElementById('sunbird-id-signins');
         if (signinsEl) signinsEl.innerHTML = renderSunbirdPremiumLoader('Refreshing live sign-ins');
     }
@@ -2676,7 +2676,7 @@ function renderSunbirdIdentityShell() {
 
 function readSunbirdIdentitySnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_IDENTITY_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_IDENTITY_CACHE_KEY);
         return parsed?.users ? parsed : null;
     } catch (error) {
         return null;
@@ -2721,17 +2721,12 @@ function syncNonSunbirdBlurGatedPanels() {
     });
 }
 
-function isFreshSunbirdIdentitySnapshot(snapshot, maxAgeMs = 60000) {
-    const savedAt = snapshot?.savedAt ? new Date(snapshot.savedAt).getTime() : 0;
-    return savedAt && Number.isFinite(savedAt) && Date.now() - savedAt <= maxAgeMs;
-}
-
 function saveSunbirdIdentitySnapshot(data) {
-    if (!data?.users?.length) return;
-    localStorage.setItem(SUNBIRD_IDENTITY_CACHE_KEY, JSON.stringify({
+    if (!Array.isArray(data?.users)) return;
+    writeMicrosoftDashboardCache(SUNBIRD_IDENTITY_CACHE_KEY, {
         ...data,
         savedAt: new Date().toISOString()
-    }));
+    });
 }
 
 async function fetchFreshSunbirdIdentityDashboardData() {
@@ -2773,6 +2768,11 @@ async function requestFreshSunbirdIdentityDashboardData() {
         });
 
         const responseBody = await response.text();
+        if (token !== localStorage.getItem('authToken')) {
+            const error = new Error('Identity Protection session changed');
+            error.statusCode = 401;
+            throw error;
+        }
         let result;
         try {
             result = responseBody ? JSON.parse(responseBody) : {};
@@ -2815,7 +2815,8 @@ async function requestFreshSunbirdIdentityDashboardData() {
                     signal: cacheController.signal
                 });
                 const cachedData = await cachedResponse.json().catch(() => ({}));
-                if (cachedResponse.ok && cachedData.success && Array.isArray(cachedData.users) && cachedData.users.length) {
+                if (token === localStorage.getItem('authToken') && cachedResponse.ok &&
+                    cachedData.success && Array.isArray(cachedData.users)) {
                     console.warn('[Sunbird Identity Dashboard] Live refresh unavailable; showing the latest stored evidence.');
                     return { ...cachedData, liveSource: '/api/sunbird/identity-dashboard-cached', cachedFallback: true };
                 }
@@ -2839,6 +2840,10 @@ async function loadSunbirdIdentityDashboardData() {
     try {
         const data = await fetchFreshSunbirdIdentityDashboardData();
 
+        if (isOlderMicrosoftDashboardData(data, sunbirdDashboardData)) {
+            renderSunbirdIdentityDashboard();
+            return;
+        }
         sunbirdIdentityDashboardNotice = '';
         sunbirdDashboardData = normalizeSunbirdDashboardData(data);
         microsoftUsersData = getSunbirdIdentityUsers(sunbirdDashboardData);
@@ -2849,9 +2854,10 @@ async function loadSunbirdIdentityDashboardData() {
         renderSunbirdIdentityDashboard(false);
     } catch (error) {
         console.error('[Sunbird Identity Dashboard] Failed to load:', error.message);
-        const snapshot = readSunbirdIdentitySnapshot();
-        if (snapshot?.users?.length) {
-            sunbirdIdentityDashboardNotice = `Live refresh is delayed. Showing saved identity evidence from ${formatSunbirdReportDate(snapshot.savedAt, true)}.`;
+        const saved = readSunbirdIdentitySnapshot();
+        const snapshot = isOlderMicrosoftDashboardData(saved, sunbirdDashboardData) ? sunbirdDashboardData : saved;
+        if (Array.isArray(snapshot?.users)) {
+            sunbirdIdentityDashboardNotice = microsoftDashboardUpdateText(snapshot);
             sunbirdDashboardData = normalizeSunbirdDashboardData(snapshot);
             microsoftUsersData = getSunbirdIdentityUsers(sunbirdDashboardData);
             microsoftRolesData = Array.isArray(sunbirdDashboardData.roleAssignments) ? sunbirdDashboardData.roleAssignments : microsoftRolesData;
@@ -2860,12 +2866,13 @@ async function loadSunbirdIdentityDashboardData() {
             return;
         }
 
+        setMicrosoftDashboardUpdate('sunbird-identity-dashboard', null);
         const signinsEl = document.getElementById('sunbird-id-signins');
         if (signinsEl) {
             signinsEl.innerHTML = `
                 <article class="sunbird-id-signin-card sunbird-id-refresh-state">
                     <h3>Live sign-ins are temporarily unavailable</h3>
-                    <p>${escapeIdentityText(error.message || 'The identity service did not return data.')}</p>
+                    <p>Try again shortly.</p>
                     <button type="button" class="sunbird-id-evidence-btn" onclick="window.openSunbirdIdentityDashboard()">Retry live refresh</button>
                 </article>
             `;
@@ -2912,6 +2919,7 @@ function setupSunbirdIdentityDashboard() {
 }
 
 function renderSunbirdIdentityDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-identity-dashboard', sunbirdDashboardData, false);
     const model = buildSunbirdIdentityModel();
     renderSunbirdIdentityMetrics(model);
     renderSunbirdIdentityInsights(model);
@@ -3366,16 +3374,13 @@ function openSunbirdDevicesDashboard() {
     setupSunbirdDevicesDashboard();
 
     const cached = readSunbirdDevicesSnapshot();
-    if (cached) {
+    if (cached && !isOlderMicrosoftDashboardData(cached, sunbirdDevicesDashboardData)) {
         sunbirdDevicesDashboardData = normalizeSunbirdDevicesData(cached);
-        renderSunbirdDevicesDashboard();
-    } else if (latestDevicesCardData) {
+    } else if (!sunbirdDevicesDashboardData && latestDevicesCardData) {
         sunbirdDevicesDashboardData = normalizeSunbirdDevicesData(latestDevicesCardData);
-        renderSunbirdDevicesDashboard();
-    } else {
-        sunbirdDevicesDashboardData = normalizeSunbirdDevicesData({ success: true, devices: [] });
-        renderSunbirdDevicesDashboard();
     }
+    if (sunbirdDevicesDashboardData) renderSunbirdDevicesDashboard();
+    else setMicrosoftDashboardUpdate('sunbird-devices-dashboard', null, true);
 
     loadSunbirdDevicesDashboardData();
 }
@@ -3495,7 +3500,7 @@ function setupSunbirdDevicesDashboard() {
 
 function readSunbirdDevicesSnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_DEVICES_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_DEVICES_CACHE_KEY);
         return parsed?.summary || parsed?.devices ? parsed : null;
     } catch (error) {
         return null;
@@ -3504,10 +3509,10 @@ function readSunbirdDevicesSnapshot() {
 
 function saveSunbirdDevicesSnapshot(data) {
     if (!data?.summary && !data?.devices) return;
-    localStorage.setItem(SUNBIRD_DEVICES_CACHE_KEY, JSON.stringify({
+    writeMicrosoftDashboardCache(SUNBIRD_DEVICES_CACHE_KEY, {
         ...data,
         savedAt: new Date().toISOString()
-    }));
+    });
 }
 
 function getSunbirdMetricNumber(metrics, keys, fallback = 0) {
@@ -3592,9 +3597,11 @@ async function loadSunbirdDevicesDashboardData() {
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
         });
         const metricsData = await metricsResponse.json();
-        if (metricsResponse.ok && metricsData.success) {
-            sunbirdDevicesDashboardData = normalizeSunbirdDevicesData({ ...(sunbirdDevicesDashboardData || {}), metrics: metricsData.metrics });
-            latestDevicesCardData = metricsData;
+        if (token !== localStorage.getItem('authToken')) return;
+        if (metricsResponse.ok && metricsData.success && !sunbirdDevicesDashboardData?.deviceInventoryComplete
+            && !isOlderMicrosoftDashboardData(metricsData, sunbirdDevicesDashboardData)) {
+            sunbirdDevicesDashboardData = normalizeSunbirdDevicesData(metricsData);
+            updateDevicesProjectCard(mockProjects.find(project => project.isDevicesCard), metricsData);
             renderSunbirdDevicesDashboard();
         }
     } catch (error) {
@@ -3608,12 +3615,16 @@ async function loadSunbirdDevicesDashboardData() {
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
         });
         const detailData = await detailResponse.json();
+        if (token !== localStorage.getItem('authToken')) return;
         if (!detailResponse.ok || !detailData.success) throw new Error(detailData.message || 'Device details unavailable');
-        sunbirdDevicesDashboardData = normalizeSunbirdDevicesData(detailData);
+        if (isOlderMicrosoftDashboardData(detailData, sunbirdDevicesDashboardData)) return;
+        sunbirdDevicesDashboardData = normalizeSunbirdDevicesData({ ...detailData, deviceInventoryComplete: Array.isArray(detailData.devices) });
+        updateDevicesProjectCard(mockProjects.find(project => project.isDevicesCard), detailData);
         saveSunbirdDevicesSnapshot(sunbirdDevicesDashboardData);
         renderSunbirdDevicesDashboard();
     } catch (error) {
         console.warn('[Device Dashboard] Detailed evidence unavailable:', error.message);
+        setMicrosoftDashboardUpdate('sunbird-devices-dashboard', sunbirdDevicesDashboardData);
     }
 }
 
@@ -3653,6 +3664,7 @@ function buildSunbirdDevicesModel(data = sunbirdDevicesDashboardData) {
 }
 
 function renderSunbirdDevicesDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-devices-dashboard', sunbirdDevicesDashboardData, false);
     const model = buildSunbirdDevicesModel();
     renderSunbirdDevicesMetrics(model);
     renderSunbirdDevicesInsights(model);
@@ -4195,14 +4207,14 @@ function openSunbirdEmailSecurityDashboard() {
     setupSunbirdEmailDashboard();
 
     const cached = readSunbirdEmailSnapshot();
-    if (cached) {
+    if (cached && !isOlderMicrosoftDashboardData(cached, sunbirdEmailDashboardData)
+        && !retainVerifiedEmailDashboard(sunbirdEmailDashboardData, cached)) {
         sunbirdEmailDashboardData = normalizeSunbirdEmailData(cached);
-    } else if (latestEmailCardData) {
+    } else if (!sunbirdEmailDashboardData && latestEmailCardData) {
         sunbirdEmailDashboardData = normalizeSunbirdEmailData(latestEmailCardData);
-    } else {
-        sunbirdEmailDashboardData = normalizeSunbirdEmailData({ success: true, alerts: [], incidents: [] });
     }
-    renderSunbirdEmailDashboard();
+    if (sunbirdEmailDashboardData) renderSunbirdEmailDashboard();
+    else setMicrosoftDashboardUpdate('sunbird-email-dashboard', null, true);
     loadSunbirdEmailDashboardData();
 }
 
@@ -4325,7 +4337,7 @@ function setupSunbirdEmailDashboard() {
 
 function readSunbirdEmailSnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_EMAIL_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_EMAIL_CACHE_KEY);
         return parsed?.summary || parsed?.alerts ? parsed : null;
     } catch (error) {
         return null;
@@ -4334,31 +4346,15 @@ function readSunbirdEmailSnapshot() {
 
 function saveSunbirdEmailSnapshot(data) {
     if (!data?.summary && !data?.alerts) return;
-    localStorage.setItem(SUNBIRD_EMAIL_CACHE_KEY, JSON.stringify({
+    writeMicrosoftDashboardCache(SUNBIRD_EMAIL_CACHE_KEY, {
         ...data,
         savedAt: new Date().toISOString()
-    }));
+    });
 }
 
 async function loadSunbirdEmailDashboardData() {
     const token = localStorage.getItem('authToken');
     if (!token) return;
-
-    try {
-        const metricsResponse = await fetch('/api/db/email-metrics', {
-            method: 'GET',
-            cache: 'no-store',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-        });
-        const metricsData = await metricsResponse.json();
-        if (metricsResponse.ok && metricsData.success) {
-            sunbirdEmailDashboardData = normalizeSunbirdEmailData({ ...(sunbirdEmailDashboardData || {}), metrics: metricsData.metrics });
-            latestEmailCardData = metricsData;
-            renderSunbirdEmailDashboard();
-        }
-    } catch (error) {
-        console.warn('[Email Dashboard] Cached metrics unavailable:', error.message);
-    }
 
     try {
         const cachedResponse = await fetch('/api/db/email-security', {
@@ -4368,24 +4364,14 @@ async function loadSunbirdEmailDashboardData() {
         });
         const cachedData = await cachedResponse.json();
         if (!cachedResponse.ok || !cachedData.success) throw new Error(cachedData.message || 'Cached email security unavailable');
+        if (isOlderMicrosoftDashboardData(cachedData, sunbirdEmailDashboardData)
+            || retainVerifiedEmailDashboard(sunbirdEmailDashboardData, cachedData)) return;
         sunbirdEmailDashboardData = normalizeSunbirdEmailData(cachedData);
         saveSunbirdEmailSnapshot(sunbirdEmailDashboardData);
         renderSunbirdEmailDashboard();
-    } catch (cachedError) {
-        try {
-            const liveResponse = await fetch('/api/email-security', {
-                method: 'GET',
-                cache: 'no-store',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-            });
-            const liveData = await liveResponse.json();
-            if (!liveResponse.ok || !liveData.success) throw new Error(liveData.message || 'Email security unavailable');
-            sunbirdEmailDashboardData = normalizeSunbirdEmailData(liveData);
-            saveSunbirdEmailSnapshot(sunbirdEmailDashboardData);
-            renderSunbirdEmailDashboard();
-        } catch (liveError) {
-            console.warn('[Email Dashboard] Detailed evidence unavailable:', liveError.message);
-        }
+    } catch (error) {
+        console.warn('[Email Dashboard] Detailed evidence unavailable:', error.message);
+        setMicrosoftDashboardUpdate('sunbird-email-dashboard', sunbirdEmailDashboardData);
     }
 }
 
@@ -4398,11 +4384,31 @@ function getEmailThreatDisplayMetrics(data = {}) {
     return {
         alertsAvailable,
         incidentsAvailable,
-        activeThreats: alertsAvailable ? summary.activeThreats ?? 'Unavailable' : 'Unavailable',
-        highSeverity: alertsAvailable ? summary.highSeverityAlerts ?? 'Unavailable' : 'Unavailable',
-        targetedUsers: alertsAvailable ? summary.affectedUsersCount ?? 'Unavailable' : 'Unavailable',
-        openIncidents: incidentsAvailable ? summary.activeIncidents ?? 'Unavailable' : 'Unavailable'
+        activeThreats: alertsAvailable ? summary.activeThreats ?? 'Temporarily unavailable' : 'Temporarily unavailable',
+        highSeverity: alertsAvailable ? summary.highSeverityAlerts ?? 'Temporarily unavailable' : 'Temporarily unavailable',
+        targetedUsers: alertsAvailable ? summary.affectedUsersCount ?? 'Temporarily unavailable' : 'Temporarily unavailable',
+        openIncidents: incidentsAvailable ? summary.activeIncidents ?? 'Temporarily unavailable' : 'Temporarily unavailable'
     };
+}
+
+function getSecurityDashboardMetrics(data = {}) {
+    const coverage = data.dashboardCoverage || {};
+    const summary = data.summary || {};
+    const unavailable = data.findingLoadState === 'loading' ? 'Updating…' : 'Temporarily unavailable';
+    return {
+        activeIncidents: coverage.incidents === true ? summary.activeIncidents ?? unavailable : unavailable,
+        highSeverityAlerts: coverage.alerts === true ? summary.highSeverityAlerts ?? unavailable : unavailable,
+        totalAlerts: coverage.alerts === true ? summary.totalAlerts ?? unavailable : unavailable,
+        securityScore: data.coreCoverageComplete === true && summary.securityScore != null
+            ? `${summary.securityScore}%` : unavailable
+    };
+}
+
+function canReplaceSecurityDashboard(incoming, previous) {
+    if (isOlderMicrosoftDashboardData(incoming, previous)) return false;
+    const priorCoverage = previous?.dashboardCoverage || {};
+    const nextCoverage = incoming?.dashboardCoverage || {};
+    return Object.keys(priorCoverage).every(key => priorCoverage[key] !== true || nextCoverage[key] === true);
 }
 
 function emailCardMetrics(threats) {
@@ -4509,6 +4515,7 @@ function buildSunbirdEmailModel(data = sunbirdEmailDashboardData) {
 }
 
 function renderSunbirdEmailDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-email-dashboard', sunbirdEmailDashboardData, false);
     const model = buildSunbirdEmailModel();
     renderSunbirdEmailMetrics(model);
     renderSunbirdEmailInsights(model);
@@ -4525,7 +4532,7 @@ function renderSunbirdEmailMetrics(model) {
         { key: 'active-threats', label: 'Active Threats', value: threats.activeThreats, tone: !threats.alertsAvailable ? 'neutral' : threats.activeThreats ? 'bad' : 'good', evidence: 'allAlerts' },
         { key: 'high-severity', label: 'High Severity', value: threats.highSeverity, tone: !threats.alertsAvailable ? 'neutral' : threats.highSeverity ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
         { key: 'users-targeted', label: 'Users Targeted', value: threats.targetedUsers, tone: threats.targetedUsers > 5 ? 'warn' : 'neutral', evidence: 'affectedUsers' },
-        { key: 'security-score', label: 'Email Security Score', value: threats.alertsAvailable ? `${model.summary.securityScore || 0}%` : 'Unavailable', tone: !threats.alertsAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
+        { key: 'security-score', label: 'Email Security Score', value: threats.alertsAvailable && threats.incidentsAvailable ? `${model.summary.securityScore}%` : 'Temporarily unavailable', tone: !threats.alertsAvailable || !threats.incidentsAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
     ];
     el.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
@@ -5437,7 +5444,7 @@ async function sendSunbirdWhatsAppTest({ endpoint, buttonId, statusId, loadingTe
 
 function readSunbirdSecuritySnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_SECURITY_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_SECURITY_CACHE_KEY);
         return parsed?.summary || parsed?.alerts ? parsed : null;
     } catch (error) {
         return null;
@@ -5446,7 +5453,7 @@ function readSunbirdSecuritySnapshot() {
 
 function saveSunbirdSecuritySnapshot(data) {
     if (!data?.summary && !data?.alerts) return;
-    localStorage.setItem(SUNBIRD_SECURITY_CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+    writeMicrosoftDashboardCache(SUNBIRD_SECURITY_CACHE_KEY, { ...data, savedAt: new Date().toISOString() });
 }
 
 let sunbirdSecurityFeedController = null;
@@ -5553,18 +5560,22 @@ function applySunbirdSecurityRange() {
     const since = document.getElementById('security-evidence-since')?.value;
     const until = document.getElementById('security-evidence-until')?.value;
     sunbirdSecurityRange = { since: since ? new Date(since).toISOString() : undefined, until: until ? new Date(until).toISOString() : undefined };
+    sunbirdSecurityDashboardData = normalizeSunbirdSecurityData({ findingLoadState: 'loading', success: false });
     loadSunbirdSecurityDashboardData();
 }
 let sunbirdSecurityLiveRequest = null;
 async function loadSunbirdSecurityDashboardData() {
     if (sunbirdSecurityLiveRequest) return sunbirdSecurityLiveRequest;
     clearTimeout(sunbirdSecurityRefreshTimer);
+    const range = sunbirdSecurityRange;
+    const session = microsoftDashboardSession();
     sunbirdSecurityLiveRequest = (async () => {
         let renderTimer;
         try {
             const sources = new Map((sunbirdSecurityDashboardData?.retrieval?.sources || []).map(row => [row.provider + row.endpoint, row]));
             const refresh = () => { clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderSunbirdSecurityTable(); }, 150); };
-            const data = await fetchSunbirdSecurityEventsData({ ...sunbirdSecurityRange, onEvent: event => {
+            const data = await fetchSunbirdSecurityEventsData({ ...range, onEvent: event => {
+                if (range !== sunbirdSecurityRange || session !== microsoftDashboardSession()) return;
                 if (event.type === 'start') {
                     if (sunbirdSecurityLiveCompany !== null && sunbirdSecurityLiveCompany !== event.companyId) sunbirdSecurityDashboardData = normalizeSunbirdSecurityData({ rawRecords: [] });
                     sunbirdSecurityLiveCompany = event.companyId;
@@ -5577,12 +5588,22 @@ async function loadSunbirdSecurityDashboardData() {
                 if (event.type === 'records' || event.type === 'health') refresh();
             } });
             clearTimeout(renderTimer);
+            if (range !== sunbirdSecurityRange || session !== microsoftDashboardSession()) return;
+            if (!canReplaceSecurityDashboard(data, sunbirdSecurityDashboardData)) {
+                sunbirdSecurityDashboardData.findingLoadState = 'error';
+                renderSunbirdSecurityDashboard();
+                return;
+            }
             data.rawRecords = mergeSunbirdRawRecords(sunbirdSecurityDashboardData.rawRecords, data.rawRecords);
             sunbirdSecurityDashboardData = data;
+            if (!range.since && !range.until && canReplaceSecurityDashboard(data, cachedSunbirdSecurityData)) {
+                cachedSunbirdSecurityData = data;
+            }
             renderSunbirdSecurityDashboard();
         } catch (error) {
+            if (range !== sunbirdSecurityRange || session !== microsoftDashboardSession()) return;
             sunbirdSecurityDashboardData = { ...sunbirdSecurityDashboardData, findingLoadState: 'error',
-                warnings: ['Live refresh failed: ' + error.message + '. Previously displayed evidence may be stale.'] };
+                warnings: ['Security monitoring could not refresh. Recent activity may be missing.'] };
             renderSunbirdSecurityDashboard();
         } finally {
             clearTimeout(renderTimer);
@@ -5590,7 +5611,7 @@ async function loadSunbirdSecurityDashboardData() {
             if (document.getElementById('sunbird-security-dashboard')) {
                 sunbirdSecurityRefreshTimer = setTimeout(() => {
                     if (document.getElementById('sunbird-security-dashboard')) loadSunbirdSecurityDashboardData();
-                }, 30000);
+                }, range === sunbirdSecurityRange ? 30000 : 0);
             }
         }
     })();
@@ -5755,6 +5776,7 @@ function buildSunbirdSecurityModel(data = sunbirdSecurityDashboardData) {
 }
 
 function renderSunbirdSecurityDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-security-dashboard', sunbirdSecurityDashboardData, sunbirdSecurityDashboardData?.findingLoadState === 'loading', 30000);
     const model = buildSunbirdSecurityModel();
     renderSunbirdSecurityMetrics(model);
     renderSunbirdSecurityInvestigation(model);
@@ -6079,11 +6101,12 @@ function renderSunbirdSecurityInvestigation(model) {
 function renderSunbirdSecurityMetrics(model) {
     const el = document.getElementById('sunbird-security-metrics');
     if (!el) return;
+    const values = getSecurityDashboardMetrics(model);
     const metrics = [
-        { label: 'Active Incidents', value: model.summary.activeIncidents, tone: model.summary.activeIncidents ? 'bad' : 'good', evidence: 'activeIncidents' },
-        { label: 'High Severity', value: model.summary.highSeverityAlerts, tone: model.summary.highSeverityAlerts ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
-        { label: 'Total Alerts', value: model.summary.totalAlerts, tone: model.summary.totalAlerts ? 'warn' : 'good', evidence: 'allAlerts' },
-        { label: 'Security Score', value: `${model.summary.securityScore || 0}%`, tone: model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
+        { label: 'Active Incidents', value: values.activeIncidents, tone: values.activeIncidents > 0 ? 'bad' : 'neutral', evidence: 'activeIncidents' },
+        { label: 'High Severity', value: values.highSeverityAlerts, tone: values.highSeverityAlerts > 0 ? 'bad' : 'neutral', evidence: 'highSeverityAlerts' },
+        { label: 'Total Alerts', value: values.totalAlerts, tone: values.totalAlerts > 0 ? 'warn' : 'neutral', evidence: 'allAlerts' },
+        { label: 'Security Score', value: values.securityScore, tone: 'neutral', evidence: 'recommendations' }
     ];
     el.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
@@ -6099,7 +6122,7 @@ function renderSunbirdSecurityInsights(model) {
     if (!el) return;
     const insights = [
         { title: 'Users under attack', value: model.evidence.usersUnderAttack.length, evidence: 'usersUnderAttack', tone: model.evidence.usersUnderAttack.length ? 'bad' : 'good' },
-        { title: 'Threat indicators', value: model.summary.threatIndicators, evidence: 'threatIndicators', tone: model.summary.threatIndicators ? 'warn' : 'neutral' },
+        { title: 'Threat indicators', value: model.indicatorFeedUnsupported && !model.summary.threatIndicators ? 'Not available' : model.summary.threatIndicators, evidence: 'threatIndicators', tone: model.summary.threatIndicators ? 'warn' : 'neutral' },
         { title: 'Suspicious sign-ins', value: model.evidence.suspiciousSignIns.length, evidence: 'suspiciousSignIns', tone: model.evidence.suspiciousSignIns.length ? 'bad' : 'good' },
         { title: 'Cloudflare One', value: model.evidence.cloudflareAlerts.length + model.evidence.cloudflareIncidents.length, evidence: 'cloudflareAlerts', tone: model.evidence.cloudflareIncidents.length ? 'bad' : model.evidence.cloudflareAlerts.length ? 'warn' : 'good' },
         { title: 'MITRE techniques', value: model.evidence.mitre.length, evidence: 'mitre', tone: model.evidence.mitre.length ? 'warn' : 'neutral' },
@@ -6963,8 +6986,11 @@ function openSunbirdBackupDashboard() {
     setupSunbirdBackupDashboard();
 
     const cached = readSunbirdBackupSnapshot();
-    cachedSunbirdBackupData = normalizeSunbirdBackupData(cached || cachedSunbirdBackupData || { success: true });
-    renderSunbirdBackupDashboard();
+    if (cached && !isOlderMicrosoftDashboardData(cached, cachedSunbirdBackupData)) {
+        cachedSunbirdBackupData = normalizeSunbirdBackupData(cached);
+    }
+    if (cachedSunbirdBackupData) renderSunbirdBackupDashboard();
+    else setMicrosoftDashboardUpdate('sunbird-backup-dashboard', null, true);
     loadSunbirdBackupDashboardData();
 }
 
@@ -7069,7 +7095,7 @@ function setupSunbirdBackupDashboard() {
 
 function readSunbirdBackupSnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_BACKUP_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_BACKUP_CACHE_KEY);
         return parsed?.summary || parsed?.storage ? parsed : null;
     } catch (error) {
         return null;
@@ -7078,18 +7104,20 @@ function readSunbirdBackupSnapshot() {
 
 function saveSunbirdBackupSnapshot(data) {
     if (!data?.summary && !data?.storage) return;
-    localStorage.setItem(SUNBIRD_BACKUP_CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+    writeMicrosoftDashboardCache(SUNBIRD_BACKUP_CACHE_KEY, { ...data, savedAt: new Date().toISOString() });
 }
 
 async function loadSunbirdBackupDashboardData() {
     try {
         const data = await fetchSunbirdBackupRecoveryData();
+        if (isOlderMicrosoftDashboardData(data, cachedSunbirdBackupData)) return;
         cachedSunbirdBackupData = normalizeSunbirdBackupData(data);
         saveSunbirdBackupSnapshot(cachedSunbirdBackupData);
         updateBackupProjectCardFromData(cachedSunbirdBackupData);
         renderSunbirdBackupDashboard();
     } catch (error) {
         console.warn('[Backup Dashboard] Cached/live data unavailable:', error.message);
+        setMicrosoftDashboardUpdate('sunbird-backup-dashboard', cachedSunbirdBackupData);
     }
 }
 
@@ -7171,6 +7199,7 @@ function buildSunbirdBackupModel(data = cachedSunbirdBackupData) {
 }
 
 function renderSunbirdBackupDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-backup-dashboard', cachedSunbirdBackupData, false);
     const model = buildSunbirdBackupModel();
     renderSunbirdBackupMetrics(model);
     renderSunbirdBackupInsights(model);
@@ -7695,7 +7724,7 @@ function updateBackupProjectCardFromData(data) {
         high: model.recommendations.filter(item => item.priority === 'high').length,
         medium: model.recommendations.filter(item => item.priority === 'medium').length
     };
-    project.lastUpdate = new Date().toLocaleTimeString();
+    updateMicrosoftDashboardCardTimestamp(project, data);
     saveProjectCardToCache(project);
     if (currentProject?.id === project.id) displayCurrentProject();
 }
@@ -7756,7 +7785,7 @@ function normalizeSunbirdApplicationsData(data = {}) {
 
 function readSunbirdApplicationsSnapshot() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(SUNBIRD_APPLICATIONS_CACHE_KEY) || 'null');
+        const parsed = readMicrosoftDashboardCache(SUNBIRD_APPLICATIONS_CACHE_KEY);
         return parsed?.applications ? parsed : null;
     } catch (error) {
         return null;
@@ -7765,7 +7794,7 @@ function readSunbirdApplicationsSnapshot() {
 
 function saveSunbirdApplicationsSnapshot(data) {
     if (!data?.applications) return;
-    localStorage.setItem(SUNBIRD_APPLICATIONS_CACHE_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+    writeMicrosoftDashboardCache(SUNBIRD_APPLICATIONS_CACHE_KEY, { ...data, savedAt: new Date().toISOString() });
 }
 
 function buildSunbirdApplicationsModel(data = sunbirdApplicationsPayload || readSunbirdApplicationsSnapshot() || { applications: applicationsData }) {
@@ -7823,11 +7852,12 @@ function openSunbirdApplicationsDashboard() {
     setupSunbirdApplicationsDashboard();
 
     const cached = readSunbirdApplicationsSnapshot();
-    if (cached) {
+    if (cached && !isOlderMicrosoftDashboardData(cached, sunbirdApplicationsPayload)) {
         sunbirdApplicationsPayload = normalizeSunbirdApplicationsData(cached);
         applicationsData = sunbirdApplicationsPayload.applications;
     }
-    renderSunbirdApplicationsDashboard();
+    if (sunbirdApplicationsPayload) renderSunbirdApplicationsDashboard();
+    else setMicrosoftDashboardUpdate('sunbird-applications-dashboard', null, true);
     loadSunbirdApplicationsDashboardData();
 }
 
@@ -7885,6 +7915,8 @@ async function loadSunbirdApplicationsDashboardData() {
 }
 
 function renderSunbirdApplicationsDashboard() {
+    setMicrosoftDashboardUpdate('sunbird-applications-dashboard', sunbirdApplicationsPayload, false);
+    if (!sunbirdApplicationsPayload) return;
     const model = buildSunbirdApplicationsModel();
     renderSunbirdApplicationsMetrics(model);
     renderSunbirdApplicationsInsights(model);
@@ -9243,10 +9275,16 @@ async function renderSunbirdRisksView(forceRefresh = false) {
 
         // Pull latest risk sources where available.
         if (forceRefresh || !cachedSunbirdSecurityData) {
-            try { cachedSunbirdSecurityData = await fetchSunbirdSecurityEventsData(); } catch (_) {}
+            try {
+                const incoming = await fetchSunbirdSecurityEventsData();
+                if (canReplaceSecurityDashboard(incoming, cachedSunbirdSecurityData)) cachedSunbirdSecurityData = incoming;
+            } catch (_) {}
         }
         if (forceRefresh || !cachedSunbirdBackupData) {
-            try { cachedSunbirdBackupData = await fetchSunbirdBackupRecoveryData(); } catch (_) {}
+            try {
+                const incoming = await fetchSunbirdBackupRecoveryData();
+                if (!isOlderMicrosoftDashboardData(incoming, cachedSunbirdBackupData)) cachedSunbirdBackupData = incoming;
+            } catch (_) {}
         }
         if (!sunbirdDashboardData) {
             try { await fetchIdentityAccessData(); } catch (_) {}
@@ -10448,6 +10486,73 @@ let identityDashboardUpdateInterval = null;
 let lastIdentityMetrics = null;
 const PROJECT_CARD_CACHE_KEY = 'stackopsProjectCardSnapshot';
 
+function microsoftDashboardSession() {
+    if (!isSessionValid()) return null;
+    const email = sessionStorage.getItem('userEmail').toLowerCase();
+    const signedInAt = sessionStorage.getItem('loginTime') || decodeAuthTokenPayload(localStorage.getItem('authToken'))?.iat;
+    return signedInAt ? JSON.stringify([email, signedInAt]) : null;
+}
+
+function readMicrosoftDashboardCache(key) {
+    const scope = microsoftDashboardSession();
+    if (!scope) return null;
+    try {
+        const cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+        return cached?.scope === scope ? cached.data : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function microsoftDashboardSourceTime(data) {
+    return Date.parse(data?.collectionStartedAt || data?.fetchedAt || data?.metrics?.LastUpdated || '');
+}
+
+function isOlderMicrosoftDashboardData(incoming, current) {
+    const previous = microsoftDashboardSourceTime(current);
+    const next = microsoftDashboardSourceTime(incoming);
+    return Number.isFinite(previous) && (!Number.isFinite(next) || next < previous);
+}
+
+function writeMicrosoftDashboardCache(key, data) {
+    const scope = microsoftDashboardSession();
+    if (!scope || isOlderMicrosoftDashboardData(data, readMicrosoftDashboardCache(key))) return;
+    try {
+        sessionStorage.setItem(key, JSON.stringify({ scope, data }));
+    } catch (_) {
+        // Large snapshots remain usable in memory if the browser storage quota is full.
+    }
+}
+
+function microsoftDashboardUpdateText(data, maxAgeMs = SUNBIRD_CARD_CACHE_TTL_MS) {
+    const time = Date.parse(data?.fetchedAt || data?.metrics?.LastUpdated || data?.collectionStartedAt || '');
+    if (!Number.isFinite(time)) return data?.refreshing ? 'Updating…' : 'Temporarily unavailable';
+    const timestamp = new Date(time).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    return (Date.now() - time > maxAgeMs ? 'Outdated · ' : '') + 'Last updated ' + timestamp;
+}
+
+function setMicrosoftDashboardUpdate(id, data, refreshing = false, maxAgeMs) {
+    const subtitle = document.querySelector('#' + id + ' .sunbird-id-header h2 + p');
+    if (!subtitle) return;
+    subtitle.textContent = microsoftDashboardUpdateText(data || { refreshing }, maxAgeMs);
+}
+
+function updateMicrosoftDashboardCardTimestamp(project, data) {
+    project.dashboardFetchedAt = data?.fetchedAt || data?.metrics?.LastUpdated || data?.collectionStartedAt || null;
+    project.lastUpdate = microsoftDashboardUpdateText(data);
+}
+
+function retainVerifiedEmailDashboard(previous, incoming) {
+    if (!previous) return false;
+    const prior = getEmailThreatDisplayMetrics(previous);
+    const next = getEmailThreatDisplayMetrics(incoming);
+    return (prior.alertsAvailable && !next.alertsAvailable)
+        || (prior.incidentsAvailable && !next.incidentsAvailable)
+        || (previous.sourceAudit?.mailActivityOk === true && incoming.sourceAudit?.mailActivityOk !== true);
+}
+
 function hasRealProjectMetrics(project) {
     return Array.isArray(project?.cardMetrics) && project.cardMetrics.some(metric => {
         const value = Number(String(metric.value ?? '').replace(':', '').replace('%', '').trim());
@@ -10457,7 +10562,7 @@ function hasRealProjectMetrics(project) {
 
 function readProjectCardCache() {
     try {
-        return JSON.parse(localStorage.getItem(PROJECT_CARD_CACHE_KEY) || '{}');
+        return readMicrosoftDashboardCache(PROJECT_CARD_CACHE_KEY) || {};
     } catch (error) {
         return {};
     }
@@ -10473,10 +10578,11 @@ function saveProjectCardToCache(project) {
         risks: project.risks,
         cardMetrics: project.cardMetrics,
         cardFooter: project.cardFooter,
+        dashboardFetchedAt: project.dashboardFetchedAt,
         lastUpdate: project.lastUpdate,
         savedAt: Date.now()
     };
-    localStorage.setItem(PROJECT_CARD_CACHE_KEY, JSON.stringify(snapshot));
+    writeMicrosoftDashboardCache(PROJECT_CARD_CACHE_KEY, snapshot);
 }
 
 function applyCachedProjectCards() {
@@ -10492,7 +10598,10 @@ function applyCachedProjectCards() {
         project.risks = cached.risks || project.risks;
         project.cardMetrics = cached.cardMetrics;
         project.cardFooter = cached.cardFooter || project.cardFooter;
-        project.lastUpdate = cached.lastUpdate || project.lastUpdate;
+        project.dashboardFetchedAt = cached.dashboardFetchedAt;
+        project.lastUpdate = cached.dashboardFetchedAt
+            ? microsoftDashboardUpdateText({ fetchedAt: cached.dashboardFetchedAt })
+            : cached.lastUpdate || 'Temporarily unavailable';
     });
 }
 
@@ -10557,8 +10666,8 @@ function normalizeSunbirdDashboardData(data) {
         return {
             securityScore: existing.securityScore || 75,
             identityRiskScore: existing.identityRiskScore || (riskDist.HIGH > 0 ? 50 : 30),
-            activeUsers24h: existing.activeUsers24h || users.length,
-            activeUsersPercentage: existing.activeUsersPercentage || 100,
+            activeUsers24h: existing.activeUsers24h ?? null,
+            activeUsersPercentage: existing.activeUsersPercentage ?? null,
             highRiskUsers: existing.highRiskUsers || riskDist.HIGH,
             privilegedUsersWithoutMFA: existing.privilegedUsersWithoutMFA || 0,
             identityHygieneScore: existing.identityHygieneScore || 65,
@@ -10609,10 +10718,10 @@ function updateIdentityProjectCardFromDashboard(data) {
 
     const metrics = data.metrics || {};
     const summary = data.summary || {};
-    const totalUsers = summary.totalUsers ?? metrics.totalUsers ?? 0;
-    const activeUsers = summary.activeUsers24h ?? metrics.activeUsers24h ?? 0;
-    const adminRoles = summary.adminUsers ?? metrics.adminUsers ?? 0;
-    const securityScore = summary.securityScore ?? metrics.securityScore ?? 0;
+    const totalUsers = summary.totalUsers ?? metrics.totalUsers ?? 'Temporarily unavailable';
+    const activeUsers = summary.activeUsers24h ?? metrics.activeUsers24h ?? 'Temporarily unavailable';
+    const adminRoles = summary.adminUsers ?? metrics.adminUsers ?? 'Temporarily unavailable';
+    const securityScore = summary.securityScore ?? metrics.securityScore ?? 'Temporarily unavailable';
 
     project.status = 'active';
     project.securityScore = securityScore;
@@ -10628,7 +10737,7 @@ function updateIdentityProjectCardFromDashboard(data) {
         { label: "Security Score", value: `: ${securityScore}`, icon: "fas fa-shield-alt" }
     ];
     project.cardFooter = `Users: ${totalUsers} | Active: ${activeUsers}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
-    project.lastUpdate = new Date().toLocaleTimeString();
+    updateMicrosoftDashboardCardTimestamp(project, data);
     saveProjectCardToCache(project);
 }
 
@@ -10646,6 +10755,7 @@ async function fetchIdentityAccessData() {
         
         if (isFirstLoad && identityProjectForState && !hasRealProjectMetrics(identityProjectForState)) {
             identityProjectForState.status = 'loading';
+            if (!identityProjectForState.dashboardFetchedAt) identityProjectForState.cardFooter = 'Updating…';
             displayCurrentProject();
         }
 
@@ -10671,6 +10781,7 @@ async function fetchIdentityAccessData() {
             console.log(`[Identity Access] Dashboard loaded successfully from ${sunbirdData.liveSource || 'identity endpoint'}`);
             isSunbirdDashboard = true;
             // Normalize the API response to ensure all required data structures exist
+            if (isOlderMicrosoftDashboardData(sunbirdData, sunbirdDashboardData)) return;
             sunbirdDashboardData = normalizeSunbirdDashboardData(sunbirdData);
             updateIdentityProjectCardFromDashboard(sunbirdDashboardData);
             
@@ -10733,7 +10844,10 @@ async function fetchIdentityAccessData() {
         }
         
         if (identityProjectForState) {
-            identityProjectForState.status = 'error';
+            if (!sunbirdDashboardData && !identityProjectForState.dashboardFetchedAt) {
+                identityProjectForState.status = 'error';
+                identityProjectForState.cardFooter = 'Temporarily unavailable';
+            }
             displayCurrentProject();
         }
         
@@ -10779,6 +10893,7 @@ async function fetchUpdatedIdentityData() {
     }
     try {
         const data = await fetchFreshSunbirdIdentityDashboardData();
+        if (isOlderMicrosoftDashboardData(data, sunbirdDashboardData)) return;
         sunbirdDashboardData = normalizeSunbirdDashboardData(data);
         microsoftUsersData = (sunbirdDashboardData.users || []).map(normalizeSunbirdIdentityUser);
         microsoftRolesData = Array.isArray(sunbirdDashboardData.roleAssignments) ? sunbirdDashboardData.roleAssignments : microsoftRolesData;
@@ -14339,6 +14454,7 @@ function createProjectCard(project) {
            </div>`
         : '';
     
+    const microsoftCard = [2, 3, 4, 5, 7, 8].includes(Number(project.id));
     const isSummaryCard = isSummaryProjectCard(project);
     const metrics = project.id === 9 ? [] : (isSummaryCard ? normalizeSummaryMetrics(project) : (project.cardMetrics || []));
     const statusMeta = getSummaryCardStatusMeta(project);
@@ -14360,12 +14476,15 @@ function createProjectCard(project) {
                 `;
             }
 
+            const value = toMetricValue(metric.value, microsoftCard
+                ? (project.status === 'loading' ? 'Updating…' : 'Temporarily unavailable') : 0);
+            const unavailable = microsoftCard && value === 'Temporarily unavailable';
             return `
                 <div class="project-info-item">
                     <i class="${metric.icon}"></i>
-                    <div class="metric-content-wrap">
+                    <div class="metric-content-wrap"${unavailable ? ' style="min-width:0"' : ''}>
                         <span class="metric-label-text ${project.id === 9 ? 'metric-label-no-colon' : ''}">${metric.label}</span>
-                        <span class="metric-value-text">${toMetricValue(metric.value)}</span>
+                        <span class="metric-value-text"${unavailable ? ' title="Temporarily unavailable" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"' : ''}>${value}</span>
                     </div>
                 </div>
             `;
@@ -14376,9 +14495,13 @@ function createProjectCard(project) {
     const microsoftProjectLogoHTML = showMicrosoftProjectLogo
         ? '<div class="project-card-provider-logos"><img src="Images/microsoft-transparent-microsoft-free-free-png.PNG" alt="Microsoft logo"></div>'
         : '';
+    const cardFooter = project.cardFooter || 'Risks: ' + risksCount;
+    const freshness = microsoftCard && (project.dashboardFetchedAt
+        ? microsoftDashboardUpdateText({ fetchedAt: project.dashboardFetchedAt })
+        : project.lastUpdate?.includes('Last updated') ? project.lastUpdate : '');
     const projectRisksHTML = project.id === 9 ? '' : `
         <div class="project-risks${showMicrosoftProjectLogo ? ' has-provider-logo' : ''}">
-            <span>${project.cardFooter || 'Risks: ' + risksCount}</span>
+            ${microsoftCard ? `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeIdentityText([freshness, cardFooter].filter(Boolean).join(' · '))}">${freshness ? escapeIdentityText(freshness) + ' · ' : ''}${cardFooter}</span>` : `<span>${cardFooter}</span>`}
             ${microsoftProjectLogoHTML}
         </div>
     `;
@@ -17256,13 +17379,24 @@ window.closeSunbirdDomainFindingEvidence = closeSunbirdDomainFindingEvidence;
 async function fetchBackupCardData() {
     const project = mockProjects.find(p => p.isBackupRecoveryCard);
     if (!project || !isSunbirdUser()) return;
+    if (!cachedSunbirdBackupData && !project.dashboardFetchedAt) {
+        project.status = 'loading';
+        project.cardFooter = 'Updating…';
+        displayCurrentProject();
+    }
     try {
         const data = await fetchSunbirdBackupRecoveryData();
+        if (isOlderMicrosoftDashboardData(data, cachedSunbirdBackupData)) return;
         cachedSunbirdBackupData = normalizeSunbirdBackupData(data);
         saveSunbirdBackupSnapshot(cachedSunbirdBackupData);
         updateBackupProjectCardFromData(cachedSunbirdBackupData);
     } catch (error) {
         console.warn('[Backup Card] Unable to load cached backup data:', error.message);
+        if (!cachedSunbirdBackupData && !project.dashboardFetchedAt) {
+            project.status = 'error';
+            project.cardFooter = 'Temporarily unavailable';
+            displayCurrentProject();
+        }
     }
 }
 
@@ -17675,7 +17809,7 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
     const findings = Array.isArray(data.findings) ? data.findings : [];
     const coverage = data.scenarioCoverage && typeof data.scenarioCoverage === 'object' ? data.scenarioCoverage : {};
     const coverageStates = Object.values(coverage).map(item => String(item?.status || '').toLowerCase());
-    const limitedCoverage = coverageStates.some(state => /partial|unavailable|not_assessed/.test(state));
+    const limitedCoverage = data.coreCoverageComplete === false || coverageStates.some(state => /partial|unavailable|not_assessed/.test(state));
     const integrations = getSunbirdSecurityIntegrationSources(data);
     const hasReturnedData = Boolean(data && (data.summary || data.collectionStatus || data.collection || findings.length || Object.keys(coverage).length || integrations.length));
     const plainSummary = data.dailyOverview?.summary || data.aiSummary || (!hasReturnedData
@@ -17685,7 +17819,8 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
             : limitedCoverage
                 ? 'No alert was generated, but one or more detection scenarios are limited or unavailable.'
                 : 'No evidence-backed alert was generated from the returned collection.');
-    const findingState = findings.length ? `${findings.length} to review` : 'No finding generated';
+    const findingState = findings.length ? `${findings.length} to review` : !hasReturnedData ? 'Updating…'
+        : limitedCoverage ? 'Temporarily unavailable' : '0';
     const coverageState = !Object.keys(coverage).length ? 'Not yet reported' : limitedCoverage ? 'Limited / incomplete' : 'Reported';
     const integrationState = integrations.length ? `${integrations.length} source${integrations.length === 1 ? '' : 's'} represented` : 'No source represented';
     return `<div class="sunbird-security-card-summary">
@@ -17702,7 +17837,7 @@ function renderSunbirdSecurityBillingSummary(data = {}) {
         </div>` : ''}
         <ol class="sunbird-security-card-rows">
             <li><i class="fas fa-magnifying-glass-chart" aria-hidden="true"></i><span>Findings</span><strong>${sunbirdSecurityEscape(findingState)}</strong></li>
-            <li><i class="fas fa-satellite-dish" aria-hidden="true"></i><span>Detection coverage</span><strong>${sunbirdSecurityEscape(coverageState)}</strong></li>
+            <li><i class="fas fa-satellite-dish" aria-hidden="true"></i><span>Detection coverage</span><strong title="${sunbirdSecurityEscape(microsoftDashboardUpdateText(data, 30000))}">${sunbirdSecurityEscape(coverageState)}</strong></li>
             <li><i class="fas fa-link" aria-hidden="true"></i><span>Connected evidence</span><strong>${sunbirdSecurityEscape(integrationState)}</strong></li>
         </ol>
     </div>`;
@@ -17740,7 +17875,12 @@ async function renderSunbirdSecurityAlertsView(forceRefresh = false) {
         }
 
         if (forceRefresh || !cachedSunbirdSecurityData) {
-            cachedSunbirdSecurityData = await fetchSunbirdSecurityEventsData();
+            try {
+                const incoming = await fetchSunbirdSecurityEventsData();
+                if (canReplaceSecurityDashboard(incoming, cachedSunbirdSecurityData)) cachedSunbirdSecurityData = incoming;
+            } catch (error) {
+                if (!cachedSunbirdSecurityData) throw error;
+            }
         }
 
         const data = normalizeSunbirdSecurityData(cachedSunbirdSecurityData);
@@ -17834,10 +17974,15 @@ async function renderSunbirdBackupRecoveryView(forceRefresh = false) {
 
     try {
         if (!isSunbirdBillingViewActive('backup')) return;
-        billingCard.innerHTML = renderSunbirdPremiumLoader('Loading backup and recovery');
+        if (!cachedSunbirdBackupData) billingCard.innerHTML = renderSunbirdPremiumLoader('Updating…');
 
         if (forceRefresh || !cachedSunbirdBackupData) {
-            cachedSunbirdBackupData = await fetchSunbirdBackupRecoveryData();
+            try {
+                const incoming = await fetchSunbirdBackupRecoveryData();
+                if (!isOlderMicrosoftDashboardData(incoming, cachedSunbirdBackupData)) cachedSunbirdBackupData = incoming;
+            } catch (error) {
+                if (!cachedSunbirdBackupData) throw error;
+            }
         }
 
         const data = cachedSunbirdBackupData;
@@ -17908,6 +18053,7 @@ async function renderSunbirdApplicationsView(forceRefresh = false) {
             await fetchApplicationsData();
         }
         if (!isSunbirdBillingViewActive('applications')) return;
+        if (!sunbirdApplicationsPayload) throw new Error('No verified application inventory is available');
         billingCard.innerHTML = renderSunbirdApplicationsBillingMarkup(buildSunbirdApplicationsModel());
     } catch (error) {
         console.error('[Sunbird Applications View] Error:', error);

@@ -18,20 +18,25 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     const failures = [];
     let failIdentity;
     let finishDevices;
-    const email = { summary: { activeThreats: 1, highSeverityAlerts: 2, affectedUsersCount: 3, activeIncidents: 4 } };
+    const email = {
+        summary: { activeThreats: 1, highSeverityAlerts: 2, affectedUsersCount: 3, activeIncidents: 4 },
+        sourceAudit: { alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
+    };
     const refresh = vm.runInNewContext([
         section('async function mapWithConcurrency', 'async function getMicrosoftGraphCredentials'),
-        section('function emailMetricsFromPayload', 'async function fetchEmailActivityReport'),
+        section('async function writeMicrosoftDashboardCache', 'async function writeBackupRecoveryPayloadCache'),
+        section('function hasCompleteEmailThreatCoverage', 'async function fetchEmailActivityReport'),
         section('async function upsertDashboardMetricCaches', 'let dashboardMetricRefreshRunning'),
         'upsertDashboardMetricCaches;'
     ].join('\n'), {
         pool: {
             async query(sql, parameters) {
                 if (sql.includes('SELECT')) return [[{ CompanyID: 7 }]];
-                writes.set(sql.match(/REPLACE INTO (\w+)/)[1], Array.from(parameters));
+                writes.set(sql.match(/INSERT INTO (\w+)/)[1], Array.from(parameters));
             }
         },
-        console: { error: (...args) => failures.push(args.join(' ')) },
+        console: { warn() {}, error: (...args) => failures.push(args.join(' ')) },
+        async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 7); },
         fetchIdentityMetricsFromApi() {
             starts.push('identity');
             return new Promise((resolve, reject) => { failIdentity = reject; });
@@ -58,7 +63,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     assert.equal(writes.has('IdentityMetricsCache'), false);
     assert.equal(writes.get('DeviceMetricsCache')[1], 12);
     assert.equal(starts.filter(source => source === 'email').length, 1);
-    assert.deepEqual(writes.get('EmailMetricsCache'), [7, 1, 2, 3, 4]);
+    assert.deepEqual(writes.get('EmailMetricsCache').slice(0, 5), [7, 1, 2, 3, 4]);
     assert.deepEqual(JSON.parse(writes.get('EmailSecurityPayloadCache')[1]), email);
 });
 

@@ -116,7 +116,7 @@ function createBackupEvidenceStore({ pool, logger = console, now = () => new Dat
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         const evidence = deriveBackupEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const connection = typeof pool.getConnection === 'function'
             ? await acquireConnectionWithDeadline(pool, { timeoutMs, signal, label: 'Backup evidence database connection' })
             : pool;

@@ -99,7 +99,8 @@ function deriveApplicationsEvidence(payload = {}) {
         processed: app
     }));
     const expectedRecordCount = evidenceRows.length;
-    const isComplete = Boolean(payload.success !== false && expectedRecordCount > 0);
+    const verifiedEmpty = payload.success === true && Array.isArray(payload.applications) && payload.summary?.totalApplications === 0;
+    const isComplete = payload.success !== false && (expectedRecordCount > 0 || verifiedEmpty);
     return {
         evidenceRows,
         dashboardMetrics,
@@ -123,7 +124,7 @@ function createApplicationsEvidenceStore({ pool, logger = console, now = () => n
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
         const evidence = deriveApplicationsEvidence(payload);
-        const collectedAt = now();
+        const collectedAt = payload?.collectionStartedAt ? new Date(payload.collectionStartedAt) : now();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
         const ownsConnection = connection !== pool;
         let snapshotId = null;

@@ -38,6 +38,7 @@ function emailDashboardPayload() {
         payload: {
             success: true,
             fetchedAt: NOW.toISOString(),
+            sourceAudit: { alertsComplete: true, incidentsComplete: true, mailActivityOk: true },
             summary: {
                 activeThreats: 6,
                 highSeverityAlerts: 0,
@@ -93,6 +94,14 @@ test('saved Email evidence metrics match the visible dashboard email model', () 
     assert.equal(evidence.dashboardMetrics.totalMailActivity, 11867);
     assert.equal(evidence.evidenceRows.length, 6 + 36);
     assert.equal(evidence.isComplete, true);
+});
+
+test('an incomplete threat collection is saved for diagnostics without becoming a verified Email snapshot', () => {
+    const payload = emailDashboardPayload();
+    payload.sourceAudit.alertsComplete = false;
+    const evidence = deriveEmailEvidence(payload);
+    assert.equal(evidence.isComplete, false);
+    assert.ok(evidence.evidenceRows.length > 0);
 });
 
 test('Email evidence derivation accepts object-shaped alerts payloads', () => {
