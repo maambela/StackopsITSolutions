@@ -243,11 +243,13 @@ async function validateMicrosoftGraphCredentialsAtStartup() {
 
 async function getMicrosoftGraphToken(options = {}) {
   const cacheKey = 'microsoft_graph_token';
+  const refreshMarginMs = 60000;
   const cachedToken = microsoftTokenCache.get(cacheKey);
-  if (cachedToken && cachedToken.expiresAt > Date.now()) {
+  if (cachedToken && cachedToken.expiresAt - Date.now() > refreshMarginMs) {
     console.log('[Microsoft Graph] Using cached token');
     return cachedToken.token;
   }
+  if (cachedToken) microsoftTokenCache.delete(cacheKey);
   if (microsoftGraphTokenPromise) {
     console.log('[Microsoft Graph] Reusing token request already in progress');
     return microsoftGraphTokenPromise;
@@ -259,6 +261,7 @@ async function getMicrosoftGraphToken(options = {}) {
       console.log('[Microsoft Graph] Requesting new token...');
       const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
       const controller = new AbortController();
+      const requestedAt = Date.now();
       const timeoutHandle = setTimeout(() => controller.abort(), MICROSOFT_GRAPH_TOKEN_TIMEOUT_MS);
       let response;
       try {
@@ -283,10 +286,22 @@ async function getMicrosoftGraphToken(options = {}) {
       }
 
       const data = await response.json();
-      const expiresInMs = Math.max(60, Number(data.expires_in) || 3600) * 1000;
+      const expiresInMs = typeof data.expires_in === 'number' || typeof data.expires_in === 'string'
+        ? Number(data.expires_in) * 1000
+        : NaN;
+      const expiresAt = requestedAt + expiresInMs;
+      if (!Number.isFinite(expiresAt) || expiresInMs <= 0) {
+        throw new Error('Microsoft Graph token response has an invalid expires_in value');
+      }
+      if (expiresAt - Date.now() <= refreshMarginMs) {
+        throw new Error('Microsoft Graph token expires within the 60-second refresh window');
+      }
+      if (typeof data.access_token !== 'string' || !data.access_token.trim()) {
+        throw new Error('Microsoft Graph token response is missing an access token');
+      }
       microsoftTokenCache.set(cacheKey, {
         token: data.access_token,
-        expiresAt: Date.now() + expiresInMs - 60000
+        expiresAt
       });
       console.log('[Microsoft Graph] Token obtained successfully');
       return data.access_token;
