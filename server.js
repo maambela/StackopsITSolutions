@@ -520,9 +520,14 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
     const startedAt = process.hrtime.bigint();
     const cpuStart = process.cpuUsage();
     const controller = new AbortController();
+    const deadline = performance.now() + MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS;
     const timeout = setTimeout(() => controller.abort(), MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS);
+    let dispatched = false;
     try {
         return await graphCoordinator.run(controller.signal, async queueMs => {
+            if (performance.now() >= deadline) controller.abort();
+            controller.signal.throwIfAborted();
+            dispatched = true;
             logRuntimeOperation('graph_request_start', { label, queueMs: Math.round(queueMs) });
             const response = await fetch(url, {
                 method: 'GET',
@@ -550,17 +555,22 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
             return { payload, responseBytes: Buffer.byteLength(body) };
         });
     } catch (error) {
-        const message = error.name === 'AbortError'
-            ? `${label} timed out after ${MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS}ms`
+        const aborted = error.name === 'AbortError';
+        const errorCode = aborted ? (dispatched ? 'GRAPH_REQUEST_TIMEOUT' : 'GRAPH_QUEUE_TIMEOUT') : error.code;
+        const message = aborted
+            ? (dispatched
+                ? `${label} timed out after ${MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS}ms`
+                : `${label} exceeded its request deadline before dispatch`)
             : error.message;
         logRuntimeOperation('graph_request_failed', {
             label,
             durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
             cpuUserMicros: process.cpuUsage(cpuStart).user,
+            errorCode,
             error: message
         });
         const requestError = new Error(message);
-        if (error.code === 'GRAPH_QUEUE_FULL') requestError.code = error.code;
+        if (errorCode) requestError.code = errorCode;
         if (error.status !== undefined) requestError.status = error.status;
         if (error.retryAfterMs !== undefined) requestError.retryAfterMs = error.retryAfterMs;
         throw requestError;
@@ -569,11 +579,13 @@ async function fetchMicrosoftGraphJsonAttempt(url, token, label) {
     }
 }
 
-function isRetryableGraphError(error) {
+function isRetryableGraphError(error, retryTimeouts) {
+    if (error.code === 'GRAPH_QUEUE_TIMEOUT' || error.code === 'GRAPH_QUEUE_FULL') return false;
+    if (error.code === 'GRAPH_REQUEST_TIMEOUT') return retryTimeouts;
     return /\((?:408|429|5\d\d)\)|timed out|network|fetch failed/i.test(String(error?.message || ''));
 }
 
-async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false } = {}) {
+async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false, retryTimeouts = true } = {}) {
     const key = shared ? `${crypto.createHash('sha256').update(token).digest('hex')}:${url}:${paginate}` : null;
     const cached = microsoftGraphJsonCache.get(key);
     if (shared && cached && cached.expiresAt > Date.now()) {
@@ -618,7 +630,7 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
                 return await fetchMicrosoftGraphJsonAttempt(url, token, label);
             } catch (error) {
                 lastError = error;
-                if (attempt >= retries || !isRetryableGraphError(error)) break;
+                if (attempt >= retries || !isRetryableGraphError(error, retryTimeouts)) break;
                 const retryDelayMs = error.retryAfterMs ?? (1000 + Math.random() * 250) * (2 ** attempt);
                 if (retryDelayMs > 30000) break;
                 logRuntimeOperation('graph_request_retry', { label, attempt: attempt + 1, retryDelayMs, error: error.message });
@@ -738,7 +750,7 @@ async function fetchUserAuthMethods(token, userId, retries = 2) {
       `https://graph.microsoft.com/v1.0/users/${userId}/authentication/methods`,
             token,
             `Microsoft Graph authentication methods for ${userId}`,
-            { retries }
+            { retries, retryTimeouts: false }
     );
     const methods = data.value || [];
     setCachedAuthMethods(userId, methods);
@@ -10989,7 +11001,10 @@ async function fetchApplicationsPayloadFromApi(tokenOverride = null) {
 }
 
 async function fetchEmailMetricsFromApi() {
-    const payload = await fetchEmailSecurityPayloadFromApi();
+    return emailMetricsFromPayload(await fetchEmailSecurityPayloadFromApi());
+}
+
+function emailMetricsFromPayload(payload) {
     return {
         activeThreats: payload.summary.activeThreats,
         highSeverity: payload.summary.highSeverityAlerts,
@@ -11641,75 +11656,83 @@ async function upsertDashboardMetricCaches() {
     );
     for (const row of rows) {
         const companyId = row.CompanyID;
-        try {
-            const results = await Promise.allSettled([
-                fetchIdentityMetricsFromApi(),
-                fetchIdentityDetailsFromApi(),
-                fetchDeviceMetricsFromApi(),
-                fetchApplicationMetricsFromApi(),
-                fetchApplicationsPayloadFromApi(),
-                fetchEmailMetricsFromApi(),
-                fetchEmailSecurityPayloadFromApi(),
-                fetchSecurityEventsPayloadFromApi({ companyId, tenantKey: `company:${companyId}` }),
-                fetchBackupRecoveryPayloadFromApi()
-            ]);
-            const failure = results.find(result => result.status === 'rejected');
-            if (failure) throw failure.reason;
-            const [identity, identityDetails, devices, apps, appPayload, email, emailSecurity, securityEvents, backup] =
-                results.map(result => result.value);
+        const refresh = {
+            async identity() {
+                const identity = await fetchIdentityMetricsFromApi();
+                const identityDetails = await fetchIdentityDetailsFromApi();
+                await pool.query(
+                    `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
+                     VALUES (?, ?, ?, ?, ?, NOW())`,
+                    [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore]
+                );
+                await pool.query(
+                    `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
+                     VALUES (?, ?, NOW())`,
+                    [companyId, JSON.stringify(identityDetails.users || [])]
+                );
+                await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || []);
+            },
+            async devices() {
+                const devices = await fetchDeviceMetricsFromApi();
+                await pool.query(
+                    `REPLACE INTO DeviceMetricsCache (CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices, LastUpdated)
+                     VALUES (?, ?, ?, ?, ?, NOW())`,
+                    [companyId, devices.totalDevices, devices.nonCompliant, devices.notEncrypted, devices.staleDevices]
+                );
+            },
+            async applications() {
+                const apps = await fetchApplicationMetricsFromApi();
+                const appPayload = await fetchApplicationsPayloadFromApi();
+                await pool.query(
+                    `REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated)
+                     VALUES (?, ?, ?, ?, ?, NOW())`,
+                    [companyId, apps.totalApps, apps.externalApps, apps.highRiskApps, apps.highAccessApps]
+                );
+                await pool.query(
+                    `REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated)
+                     VALUES (?, ?, NOW())`,
+                    [companyId, JSON.stringify(appPayload)]
+                );
+            },
+            async email() {
+                const emailSecurity = await fetchEmailSecurityPayloadFromApi();
+                const email = emailMetricsFromPayload(emailSecurity);
+                await pool.query(
+                    `REPLACE INTO EmailMetricsCache (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
+                     VALUES (?, ?, ?, ?, ?, NOW())`,
+                    [companyId, email.activeThreats, email.highSeverity, email.usersTargeted, email.openIncidents]
+                );
 
-            await pool.query(
-                `REPLACE INTO IdentityMetricsCache (CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore]
-            );
-            await pool.query(
-                `REPLACE INTO IdentityUserDetailsCache (CompanyID, UsersPayload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(identityDetails.users || [])]
-            );
-            await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || []);
-            await pool.query(
-                `REPLACE INTO DeviceMetricsCache (CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, devices.totalDevices, devices.nonCompliant, devices.notEncrypted, devices.staleDevices]
-            );
-            await pool.query(
-                `REPLACE INTO ApplicationMetricsCache (CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, apps.totalApps, apps.externalApps, apps.highRiskApps, apps.highAccessApps]
-            );
-            await pool.query(
-                `REPLACE INTO ApplicationPayloadCache (CompanyID, Payload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(appPayload)]
-            );
-            await pool.query(
-                `REPLACE INTO EmailMetricsCache (CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents, LastUpdated)
-                 VALUES (?, ?, ?, ?, ?, NOW())`,
-                [companyId, email.activeThreats, email.highSeverity, email.usersTargeted, email.openIncidents]
-            );
-
-            await pool.query(
-                `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(emailSecurity)]
-            );
-
-            if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
-                `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(securityEvents)]
-            );
-
-            await pool.query(
-                `REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated)
-                 VALUES (?, ?, NOW())`,
-                [companyId, JSON.stringify(backup)]
-            );
-        } catch (error) {
-            console.error(`[Cache Worker] Failed to refresh company ${companyId}:`, error.message);
-        }
+                await pool.query(
+                    `REPLACE INTO EmailSecurityPayloadCache (CompanyID, Payload, LastUpdated)
+                     VALUES (?, ?, NOW())`,
+                    [companyId, JSON.stringify(emailSecurity)]
+                );
+            },
+            async security() {
+                const securityEvents = await fetchSecurityEventsPayloadFromApi({ companyId, tenantKey: `company:${companyId}` });
+                if (SECURITY_ALERT_STORAGE_ENABLED) await pool.query(
+                    `REPLACE INTO SecurityEventsPayloadCache (CompanyID, Payload, LastUpdated)
+                     VALUES (?, ?, NOW())`,
+                    [companyId, JSON.stringify(securityEvents)]
+                );
+            },
+            async backup() {
+                const backup = await fetchBackupRecoveryPayloadFromApi();
+                await pool.query(
+                    `REPLACE INTO BackupRecoveryPayloadCache (CompanyID, Payload, LastUpdated)
+                     VALUES (?, ?, NOW())`,
+                    [companyId, JSON.stringify(backup)]
+                );
+            }
+        };
+        await mapWithConcurrency(Object.entries(refresh), 2, async ([source, collect]) => {
+            try {
+                await collect();
+            } catch (error) {
+                console.error(`[Cache Worker] Failed to refresh ${source} for company ${companyId}:`, error.message);
+            }
+        });
     }
 }
 
@@ -14415,11 +14438,6 @@ const SECURITY_INCIDENTS_FETCH_TIMEOUT_MS = Math.max(
     Number(process.env.SECURITY_INCIDENTS_FETCH_TIMEOUT_MS) || 60000
 );
 
-const THREAT_INDICATORS_FETCH_TIMEOUT_MS = Math.max(
-    10000,
-    Number(process.env.THREAT_INDICATORS_FETCH_TIMEOUT_MS) || 20000
-);
-
 const SECURITY_SIGNINS_FETCH_TIMEOUT_MS = Math.max(
     30000,
     Number(process.env.SECURITY_SIGNINS_FETCH_TIMEOUT_MS) || 60000
@@ -14536,33 +14554,20 @@ async function fetchSecurityIncidentRows(token, options = {}) {
     };
 }
 
-async function fetchSecurityThreatIndicatorRows(token, options = {}) {
-    const result = await fetchGraphJsonWithTimeout({
-        collection: options.collection,
-        url: 'https://graph.microsoft.com/v1.0/security/tiIndicators?$top=50&$orderby=createdDateTime desc',
-        token,
-        timeoutMs: THREAT_INDICATORS_FETCH_TIMEOUT_MS,
-        stage: 'threat_indicators_fetch',
-        label: 'Threat indicators',
-        optional: true,
-        expectedUnavailableStatuses: [400, 403, 404]
-    });
-
+async function fetchSecurityThreatIndicatorRows() {
+    const message = 'The legacy Microsoft Graph tiIndicators endpoint is unavailable in v1.0.';
     return {
-        ...result,
-        threats: result.value,
-        warnings: result.warnings,
-        recordsFetched: result.recordsFetched,
-        ok: result.ok,
-        status: result.status,
-        aborted: result.aborted || false,
+        value: [],
+        threats: [],
+        warnings: [message],
+        recordsFetched: 0,
+        ok: false,
+        unavailable: true,
+        status: null,
         optional: true,
-        attempts: result.attempts || 0,
-        graphRequestId: result.graphRequestId || null,
-        clientRequestId: result.clientRequestId || null,
-        retryAfterMs: result.retryAfterMs ?? null,
-        errorCode: result.errorCode || null,
-        errorDetail: result.errorDetail || null
+        attempts: 0,
+        errorCode: 'GRAPH_ENDPOINT_UNSUPPORTED',
+        errorDetail: message
     };
 }
 
@@ -14708,7 +14713,7 @@ function cleanSecurityCollectionWarnings(warnings = []) {
 function securityCollectionSourceAudit(endpoint, result = {}) {
     return {
         endpoint,
-        httpStatus: Number.isFinite(Number(result.status)) ? Number(result.status) : null,
+        httpStatus: result.status != null && Number.isFinite(Number(result.status)) ? Number(result.status) : null,
         attempts: Number(result.attempts) || 0,
         recordsFetched: Number(result.recordsFetched) || 0,
         graphRequestId: result.graphRequestId || null,
@@ -15300,7 +15305,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     const sourceSettled = await Promise.allSettled([
         fetchSecurityAlertRows(token, collectionOptions),
         fetchSecurityIncidentRows(token, collectionOptions),
-        fetchSecurityThreatIndicatorRows(token, collectionOptions),
+        fetchSecurityThreatIndicatorRows(),
         fetchSecuritySignInRows(token, collectionOptions),
         cloudflarePending.then(summary => ({
             label: 'Cloudflare security polling',
@@ -17955,14 +17960,14 @@ rawEvidenceJournal.ensureSchema().catch(error => console.error('[Raw evidence] S
 const rawEvidencePoller = createRawEvidencePoller({
     enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_RAW_POLL_ENABLED || 'true').toLowerCase()),
     intervalMs: process.env.SECURITY_RAW_POLL_INTERVAL_MS || 30000,
-    sourceIntervals: { alerts: 30000, incidents: 30000, signIns: 60000, identityRisk: 60000, directoryAudit: 120000, indicators: 300000, cloudflare: 30000 },
+    sourceIntervals: { alerts: 30000, incidents: 30000, signIns: 60000, identityRisk: 60000, directoryAudit: 120000, cloudflare: 30000 },
     discover: async () => {
         const [rows] = await pool.query(`SELECT DISTINCT company.ID AS CompanyID FROM Companies company LEFT JOIN StackCTRLClientCapabilities capability ON capability.CompanyID = company.ID AND capability.SourceKey = 'security_alerts' WHERE LOWER(company.CompanyName) LIKE '%sunbird%' OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1)`);
         return rows.map(row => Number(row.CompanyID));
     },
     sources: {
         ...Object.fromEntries(Object.entries({ alerts: fetchSecurityAlertRows, incidents: fetchSecurityIncidentRows, signIns: fetchSecuritySignInRows,
-            indicators: fetchSecurityThreatIndicatorRows, directoryAudit: fetchSecurityDirectoryAuditRows, identityRisk: (token, options) => fetchMicrosoftIdentityRiskEvidence(token, { graph: options.collection.graph }) })
+            directoryAudit: fetchSecurityDirectoryAuditRows, identityRisk: (token, options) => fetchMicrosoftIdentityRiskEvidence(token, { graph: options.collection.graph }) })
             .map(([name, collect]) => [name, async companyId => {
                 const range = securityEvidenceRange();
                 const collection = rawEvidenceJournal.collection(companyId, { range });
