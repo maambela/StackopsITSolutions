@@ -138,6 +138,47 @@ test('Graph 429 waits for Retry-After and only caches the successful retry', asy
     assert.equal(calls, 2);
 });
 
+test('explicit risky-user licensing failures are briefly reused per company and bearer', async () => {
+    let calls = 0;
+    let now = Date.parse('2026-11-24T12:00:00Z');
+    const journal = createRawEvidenceJournal({ persistenceEnabled: false, now: () => new Date(now) });
+    const options = {
+        url: 'https://graph.microsoft.com/v1.0/identityProtection/riskyUsers',
+        token: 'fixture', expectedUnavailableStatuses: [403],
+        fetchImpl: async () => {
+            calls++;
+            return { ok: false, status: 403, text: async () => 'Your tenant is not licensed for this feature.' };
+        }
+    };
+    assert.equal((await journal.collection(11).graph(options)).httpStatus, 403);
+    assert.equal((await journal.collection(11).graph(options)).ok, false);
+    assert.equal(calls, 1);
+    await journal.collection(12).graph(options);
+    await journal.collection(11).graph({ ...options, token: 'different' });
+    assert.equal(calls, 3);
+    now += 15 * 60000;
+    await journal.collection(11).graph(options);
+    assert.equal(calls, 4);
+});
+
+test('a terminal head throttle preserves the saved continuation without another Graph call', async () => {
+    const pool = fakePool();
+    const url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
+    const journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });
+    await journal.collection(11).graph({ url, token: 'fixture', fetchImpl: async requested => requested === url
+        ? graphResponse([{ id: 'first' }], url + '?next=2')
+        : { ok: false, status: 403, text: async () => 'Permission unavailable' } });
+    await journal.flush(11);
+    const calls = [];
+    const result = await journal.collection(11).graph({ url, token: 'fixture', maxAttempts: 1, fetchImpl: async requested => {
+        calls.push(requested);
+        return { ok: false, status: 429, headers: { get: () => '60' }, text: async () => 'Too Many Requests' };
+    } });
+    assert.equal(result.httpStatus, 429);
+    assert.deepEqual(calls, [url]);
+    assert.equal((await journal.health(11)).sources[0].resumable, true);
+});
+
 test('failed later page survives restart and resumes while the newest page still arrives first', async () => {
     const pool = fakePool(), url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
     let journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });

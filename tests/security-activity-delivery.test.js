@@ -8,6 +8,32 @@ const source = { provider: 'Cloudflare', endpoint: '/accounts/private/audit', st
 const raw = { id: 'fixture', createdDateTime: '2026-11-17T10:12:34Z', status: { errorCode: 0 }, userDisplayName: 'Gary', appDisplayName: 'Loop' };
 const record = rawSecurityRecord(raw, { companyId: 7, provider: 'Microsoft Graph', endpoint: '/v1.0/auditLogs/signIns', recordType: 'signin' });
 
+test('directory audit failures limit Microsoft coverage without leaking Graph diagnostics', () => {
+    const client = presentSecurityPayload({ identityRisk: { sources: { riskyUsers: {
+        status: 'unavailable', httpStatus: 403, errorDetail: 'Forbidden'
+    } } }, collection: { sources: {
+        alerts: { status: 'complete' },
+        directoryAudit: { status: 'unavailable', audit: { httpStatus: 429, errorDetail: 'Too Many Requests' } }
+    } } });
+    assert.equal(client.retrieval.coverage[0].status, 'partial');
+    assert.doesNotMatch(JSON.stringify(client), /429|Too Many Requests|403|Forbidden/);
+});
+
+test('Security Graph wrapper does not log capped successful pages as a complete collection', async () => {
+    const server = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const start = server.indexOf('async function fetchGraphJsonWithTimeout');
+    const end = server.indexOf('async function fetchSecurityAlertRows', start);
+    const messages = [];
+    const fetch = vm.runInNewContext(server.slice(start, end) + '\nfetchGraphJsonWithTimeout;', {
+        console: { log: line => messages.push(line), warn: line => messages.push(line) }
+    });
+    await fetch({ stage: 'fixture', label: 'Alerts', collection: { graph: async () => ({
+        ok: true, hasMore: true, recordsFetched: 1, httpStatus: 200, value: [{}], warnings: ['Page limit']
+    }) } });
+    assert.match(messages.join('\n'), /fixture:partial.*HTTP 200.*Page limit/);
+    assert.doesNotMatch(messages.join('\n'), /fixture:complete/);
+});
+
 test('client delivery keeps all activity and plain coverage while administrator retains diagnostics', () => {
     const payload = { rawRecords: [record], retrieval: { sources: [source], deadline: 123 }, collection: { error: 'internal failure' }, warnings: ['Internal upstream failure'], rawEvidence: { cloudflare: { status: 'partial', recordsReturned: 300 } } };
     const client = presentSecurityPayload(payload);

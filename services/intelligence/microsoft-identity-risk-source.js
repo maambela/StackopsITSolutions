@@ -15,7 +15,9 @@ async function fetchGraphCollection({
 } = {}) {
     const { fetchGraphCollectionPagesWithRetry } = require('./microsoft-graph-collection');
     const result = await (graph || fetchGraphCollectionPagesWithRetry)({ url: `${GRAPH_ROOT}${path}`, token, fetchImpl, timeoutMs, label, expectedUnavailableStatuses: [400, 403, 404] });
-    return { ...result, records: result.value, status: result.ok && !result.hasMore ? 'complete' : result.value.length ? 'partial' : 'unavailable' };
+    const status = result.ok && !result.hasMore && !result.warnings?.length && result.httpStatus !== 206
+        ? 'complete' : (result.ok && result.hasMore) || result.value.length ? 'partial' : 'unavailable';
+    return { ...result, records: result.value, status };
 
 }
 
@@ -35,18 +37,20 @@ async function fetchMicrosoftIdentityRiskEvidence(token, options = {}) {
         })
     ]);
 
+    const audit = result => ({
+        status: result.status,
+        recordsFetched: result.recordsFetched,
+        httpStatus: result.httpStatus ?? null,
+        errorCode: result.errorCode ?? null,
+        errorDetail: result.errorDetail ?? null,
+        retryAfterMs: result.retryAfterMs ?? null
+    });
     return {
         riskDetections: riskDetections.records,
         riskyUsers: riskyUsers.records,
         sources: {
-            riskDetections: {
-                status: riskDetections.status,
-                recordsFetched: riskDetections.recordsFetched
-            },
-            riskyUsers: {
-                status: riskyUsers.status,
-                recordsFetched: riskyUsers.recordsFetched
-            }
+            riskDetections: audit(riskDetections),
+            riskyUsers: audit(riskyUsers)
         },
         warnings: [...riskDetections.warnings, ...riskyUsers.warnings]
     };

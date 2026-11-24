@@ -44,7 +44,17 @@ test('identity risk collection surfaces permission or licensing failures without
     assert.equal(result.riskDetections.length, 1);
     assert.deepEqual(result.riskyUsers, []);
     assert.equal(result.sources.riskyUsers.status, 'unavailable');
+    assert.equal(result.sources.riskyUsers.httpStatus, 403);
     assert.match(result.warnings.join(' '), /Risky users unavailable.*403/);
+});
+
+test('risk source with a successful page but incomplete coverage is never complete', async () => {
+    const result = await fetchGraphCollection({
+        token: 'fixture',
+        path: IDENTITY_RISK_ENDPOINTS.riskyUsers,
+        graph: async () => ({ ok: true, value: [{ id: 'user-1' }], warnings: ['Coverage incomplete'] })
+    });
+    assert.equal(result.status, 'partial');
 });
 
 test('identity risk collection marks repeated Graph next links as partial', async () => {

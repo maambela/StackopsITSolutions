@@ -14692,12 +14692,12 @@ async function fetchGraphJsonWithTimeout({
             optional,
             label
         });
-        if (result.ok) {
+        if (result.ok && !result.hasMore && !result.warnings?.length) {
             console.log(`[security_alerts:${stage}:complete] ${label} retrieved ${result.value.length} record(s) in ${result.attempts} attempt(s).`);
         } else if (result.httpStatus === 429) {
             console.warn(`[security_alerts:${stage}:rate_limited] ${label} remained rate limited after ${result.attempts} attempt(s); retry-after ${result.retryAfterMs ?? 'not supplied'}ms.`);
         } else {
-            console.warn(`[security_alerts:${stage}:unavailable_or_failed] ${result.errorCode || 'GRAPH_REQUEST_FAILED'}: ${result.errorDetail || result.warnings?.[0] || label}`);
+            console.warn(`[security_alerts:${stage}:${result.recordsFetched || (result.ok && result.hasMore) ? 'partial' : 'unavailable_or_failed'}] HTTP ${result.httpStatus ?? 'no response'} ${result.errorCode || ''}: ${result.errorDetail || result.warnings?.[0] || label}`);
         }
         return { ...result, status: result.httpStatus };
     } catch (error) {
@@ -14796,12 +14796,12 @@ async function fetchSecuritySignInRows(token, options = {}) {
         label: 'Sign-ins fetch'
     });
 
-    if (result.ok) {
+    if (result.ok && !result.hasMore && !result.warnings?.length) {
         console.log(`[security_alerts:security_signins_fetch:complete] Sign-ins fetch retrieved ${result.recordsFetched} record(s) across ${result.pageCount} page(s) in ${result.attempts} attempt(s).`);
     } else if (result.httpStatus === 429) {
         console.warn(`[security_alerts:security_signins_fetch:rate_limited] Sign-ins fetch remained rate limited after ${result.attempts} attempt(s); retry-after ${result.retryAfterMs ?? 'not supplied'}ms.`);
     } else {
-        console.warn(`[security_alerts:security_signins_fetch:unavailable_or_failed] ${result.errorCode || 'GRAPH_REQUEST_FAILED'}: ${result.errorDetail || result.warnings?.[0] || 'Sign-ins fetch failed'}`);
+        console.warn(`[security_alerts:security_signins_fetch:${result.recordsFetched || (result.ok && result.hasMore) ? 'partial' : 'unavailable_or_failed'}] HTTP ${result.httpStatus ?? 'no response'} ${result.errorCode || ''}: ${result.errorDetail || result.warnings?.[0] || 'Sign-ins fetch failed'}`);
     }
 
     return {
@@ -14921,9 +14921,10 @@ function cleanSecurityCollectionWarnings(warnings = []) {
 }
 
 function securityCollectionSourceAudit(endpoint, result = {}) {
+    const status = result.httpStatus ?? result.status;
     return {
         endpoint,
-        httpStatus: result.status != null && Number.isFinite(Number(result.status)) ? Number(result.status) : null,
+        httpStatus: status != null && Number.isFinite(Number(status)) ? Number(status) : null,
         attempts: Number(result.attempts) || 0,
         recordsFetched: Number(result.recordsFetched) || 0,
         graphRequestId: result.graphRequestId || null,
@@ -14932,9 +14933,10 @@ function securityCollectionSourceAudit(endpoint, result = {}) {
         errorCode: result.errorCode || null,
         errorDetail: result.errorDetail || null,
         pageCount: result.pageCount || 0,
-        completed: Boolean(result.ok && !result.hasMore && !result.warnings?.length),
+        completed: Boolean(result.ok && !result.hasMore && !result.warnings?.length && Number(status) !== 206),
         unavailable: Boolean(result.unavailable),
-        partial: Boolean(result.hasMore || result.warnings?.length || Number(result.status) === 206)
+        partial: Boolean(Number(status) === 206 ||
+            (result.ok || Number(result.recordsFetched) > 0) && (result.hasMore || result.warnings?.length))
     };
 }
 
@@ -16157,6 +16159,10 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
         incidents: securityCollectionSourceAudit(null, incidentsResult).completed,
         signIns: securityCollectionSourceAudit(null, signInsResult).completed
     };
+    const sourceStatus = result => {
+        const audit = securityCollectionSourceAudit(null, result);
+        return audit.completed ? 'complete' : audit.partial ? 'partial' : 'unavailable';
+    };
     const payload = {
         success: hasPrimaryEvidence || rawRecords.length > 0 || [alertsResult, incidentsResult, signInsResult, cloudflareResult].some(result => result.ok),
         fetchedAt: new Date().toISOString(),
@@ -16174,7 +16180,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 alerts: {
                     recordsFetched: alerts.length,
                     recordsPrepared: processedAlerts.length,
-                    status: alertsResult.warnings?.length ? 'warning' : 'complete',
+                    status: sourceStatus(alertsResult),
                     audit: securityCollectionSourceAudit('/v1.0/security/alerts_v2', alertsResult),
                     sourceSchema: alertsResult.sourceSchema || 'legacy_alerts',
                     legacyAlertsAudit: alertsResult.legacyAlertsAudit || null,
@@ -16183,7 +16189,7 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 incidents: {
                     recordsFetched: incidents.length,
                     recordsPrepared: processedIncidents.length,
-                    status: incidentsResult.warnings?.length && !processedIncidents.length ? 'warning' : 'complete',
+                    status: sourceStatus(incidentsResult),
                     audit: securityCollectionSourceAudit('/v1.0/security/incidents', incidentsResult)
                 },
                 threatIndicators: {
@@ -16196,8 +16202,12 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
                 signIns: {
                     recordsFetched: signIns.length,
                     recordsPrepared: suspiciousSignIns.length,
-                    status: signInsResult.warnings?.length ? 'warning' : 'complete',
+                    status: sourceStatus(signInsResult),
                     audit: securityCollectionSourceAudit('/v1.0/auditLogs/signIns', signInsResult)
+                },
+                directoryAudit: {
+                    status: sourceStatus(directoryAuditResult),
+                    audit: securityCollectionSourceAudit('/v1.0/auditLogs/directoryAudits', directoryAuditResult)
                 },
                 identityRisk: {
                     riskDetections: {

@@ -70,17 +70,22 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         return JSON.parse(entry.serialized);
     }
     function cacheCompletedGraph(scope, endpoint, result, at) {
-        if (!result?.ok || result.hasMore || result.warnings?.length) return;
+        const unlicensed = isUnlicensedRiskyUsers(endpoint, result);
+        if (!unlicensed && (!result?.ok || result.hasMore || result.warnings?.length)) return;
         const serialized = JSON.stringify(result);
         const bytes = Buffer.byteLength(serialized);
         if (bytes > GRAPH_RESULT_CACHE_MAX_ENTRY_BYTES) return;
         removeCompletedGraph(scope);
-        const ttlMs = GRAPH_RESULT_CACHE_TTLS_MS[endpoint] || 30000;
+        const ttlMs = unlicensed ? 15 * 60000 : GRAPH_RESULT_CACHE_TTLS_MS[endpoint] || 30000;
         completedGraph.set(scope, { serialized, bytes, expiresAt: at + ttlMs });
         completedGraphBytes += bytes;
         while (completedGraph.size > GRAPH_RESULT_CACHE_MAX_ENTRIES || completedGraphBytes > GRAPH_RESULT_CACHE_MAX_BYTES) {
             removeCompletedGraph(completedGraph.keys().next().value);
         }
+    }
+    function isUnlicensedRiskyUsers(endpoint, result) {
+        return endpoint === '/v1.0/identityProtection/riskyUsers' && result?.httpStatus === 403 &&
+            /your tenant is not licensed for this feature/i.test(result.errorDetail || '');
     }
     let ready;
     function ensureSchema() {
@@ -176,10 +181,13 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const endpoint = new URL(options.url).pathname;
             if (activeGraph.has(scope)) return activeGraph.get(scope);
             const cacheable = !persistenceEnabled && !bypassGraphCache;
-            const cached = cacheable ? readCompletedGraph(scope, now().getTime()) : null;
+            const reuseLicenseFailure = !range.explicit && !bypassGraphCache && endpoint === '/v1.0/identityProtection/riskyUsers';
+            const cached = cacheable || reuseLicenseFailure ? readCompletedGraph(scope, now().getTime()) : null;
             if (cached) return Promise.resolve(cached);
             const pending = collectGraph(options).then(result => {
-                if (cacheable) cacheCompletedGraph(scope, endpoint, result, now().getTime());
+                if (cacheable || reuseLicenseFailure && isUnlicensedRiskyUsers(endpoint, result)) {
+                    cacheCompletedGraph(scope, endpoint, result, now().getTime());
+                }
                 return result;
             }).finally(() => activeGraph.delete(scope));
             activeGraph.set(scope, pending);
@@ -223,7 +231,9 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const headOverlaps = head.value?.some(row => prior?.headIds?.includes(row.id));
             const next = (resume && (!head.ok || (head.nextLink && (headOverlaps || resume === head.nextLink)))) ? resume : head.nextLink;
             let result = head;
-            if (next && (head.ok || resume)) {
+            // A continuation cannot fix denied access or bypass Retry-After.
+            const headBlocked = [401, 403, 429].includes(head.httpStatus);
+            if (!headBlocked && next && (head.ok || resume)) {
                 result = await fetchGraphCollectionPagesWithRetry({ ...options, url: next, onPage: page => {
                     publish('Microsoft Graph', endpoint, recordType, page.value, { complete: false, status: 'collecting',
                         pages: page.pageCount + 1, recordsRetrieved: page.recordsFetched + head.value.length, continuation: page.nextLink,
@@ -239,7 +249,8 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             publish('Microsoft Graph', endpoint, recordType, [], { complete, status: complete ? 'complete' : 'partial',
                 ...(complete && range.until && !range.explicit ? { completeThrough: range.until, ...(reconcile ? { lastReconciledAt: now().toISOString() } : {}) } : {}),
                 pages: result.pageCount || 0, recordsRetrieved: result.recordsFetched || 0,
-                continuation: result.nextLink || null, permissionErrors: [401, 403].includes(result.httpStatus) ? 1 : 0,
+                continuation: headBlocked ? resume : result.nextLink || null,
+                permissionErrors: [401, 403].includes(result.httpStatus) ? 1 : 0,
                 failedRequests: result.failedRequests || (result.ok ? 0 : 1), rateLimits: result.rateLimits || 0,
                 error: result.warnings?.join(' ') || null });
             return { ...result, value: combined };
