@@ -54,6 +54,7 @@ const { buildIdentityDashboardPayload } = require('./services/intelligence/ident
 const { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');
 const { identityAdapter, devicesAdapter } = require('./services/intelligence/source-adapters');
 const { createIdentityEvidenceAutomation } = require('./services/intelligence/identity-evidence-automation');
+const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, mergeBackfillUsers } = require('./services/intelligence/identity-sign-in-backfill');
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
@@ -12255,7 +12256,7 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const sourceTenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const companyId = Number(context.companyId);
         const snapshots = {};
 
@@ -12266,13 +12267,21 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
         });
         const identityUsers = identity.evidence?.find(item => item.evidenceType === 'users')?.data;
         if (identity.sourceLineage?.isComplete === true && Array.isArray(identityUsers)) {
+            const fetchedAt = identity.sourceLineage.sourceFetchedAt || identity.sourceLineage.collectedAt;
+            const signInCollection = identity.dashboardSourceMetrics?.signInCollection;
+            const history = await readIdentityBackfill(pool, companyId, sourceTenantId).catch(error => {
+                console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
+                return null;
+            });
             snapshots.identity = {
                 success: true,
                 source: 'db',
-                fetchedAt: identity.sourceLineage.sourceFetchedAt || identity.sourceLineage.collectedAt,
+                companyId, sourceTenantId, fetchedAt, signInCollection,
+                backfillUpdatedAt: history?.state?.updatedAt,
+                backfillDue: Boolean(nextBackfillRange(backfillPlan(history?.state, Date.now()), Date.now())),
                 summary: { ...identity.metrics, totalUsers: identityUsers.length },
                 metrics: identity.metrics,
-                users: identityUsers,
+                users: mergeBackfillUsers(identityUsers, history?.state, fetchedAt, signInCollection),
                 roleAssignments: identity.evidence?.find(item => item.evidenceType === 'role_assignments')?.data || []
             };
         }
@@ -17262,6 +17271,70 @@ function savedIdentityHistoryEvents(users, now) {
     });
 }
 
+app.post('/api/sunbird/identity-sign-in-backfill', authenticateToken, async (req, res) => {
+    try {
+        const context = await getAccessContextByUser(req.user);
+        if (!context?.companyId || !context.hasSunbirdAccess && context.accessType !== 'sunbird') return res.sendStatus(403);
+        const companyId = Number(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(companyId);
+        await withBackfillLock(pool, companyId, tenantId, async connection => {
+            const checkpoint = await readIdentityBackfill(connection, companyId, tenantId, true);
+            if (!checkpoint) return;
+            const state = backfillPlan(checkpoint.state, Date.now());
+            const range = nextBackfillRange(state, Date.now());
+            if (!range) return;
+            const params = new URLSearchParams({
+                $filter: `createdDateTime ge ${new Date(range.start).toISOString()} and createdDateTime lt ${new Date(range.end).toISOString()}`,
+                $orderby: 'createdDateTime desc', $top: '250',
+                $select: 'createdDateTime,userId,userPrincipalName,status,location,deviceDetail,appDisplayName'
+            });
+            let result;
+            try {
+                const token = await getMicrosoftGraphToken();
+                result = await fetchGraphCollectionPagesWithRetry({
+                    url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns?' + params,
+                    token, timeoutMs: 15000, maxPages: 4, maxAttempts: 2,
+                    label: 'Identity sign-in backfill',
+                    readJson: async response => JSON.parse(await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, 'Identity sign-in backfill'))
+                });
+            } catch (error) {
+                result = { ok: false, errorCode: error.code };
+            }
+            finishBackfillRange(state, range, result, Date.now());
+            state.updatedAt = new Date().toISOString();
+            await connection.query(
+                `UPDATE StackCTRLIdentityEvidenceSnapshots
+                 SET SourceAuditJson = JSON_SET(SourceAuditJson, '$.signInBackfill', CAST(? AS JSON))
+                 WHERE ID = ? AND CompanyID = ? AND TenantKey = 'sunbird'
+                   AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(SourceAuditJson, '$.tenantId'))) = ?`,
+                [JSON.stringify(state), checkpoint.id, companyId, tenantId.toLowerCase()]
+            );
+            console.info('[Identity Backfill] Range checkpointed', {
+                companyId, start: range.start, end: range.end, status: result.httpStatus ?? null,
+                errorCode: result.errorCode ?? null, complete: state.ranges.some(item => item.start === range.start && item.end === range.end && item.status === 'complete')
+            });
+        });
+        return res.sendStatus(204);
+    } catch (error) {
+        console.warn('[Identity Backfill] Step failed:', error.message);
+        return res.sendStatus(error.statusCode || 503);
+    }
+});
+
+async function readIdentityBackfill(connection, companyId, tenantId, allowNew = false) {
+    const [rows] = await connection.query(
+        `SELECT ID, JSON_EXTRACT(SourceAuditJson, '$.signInBackfill') AS Backfill
+         FROM StackCTRLIdentityEvidenceSnapshots
+         WHERE CompanyID = ? AND TenantKey = 'sunbird' AND IsComplete = 1
+           AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(SourceAuditJson, '$.tenantId'))) = ?
+           AND (? OR JSON_EXTRACT(SourceAuditJson, '$.signInBackfill') IS NOT NULL)
+         ORDER BY (JSON_EXTRACT(SourceAuditJson, '$.signInBackfill') IS NOT NULL) DESC, CollectedAt DESC, ID DESC
+         LIMIT 1`,
+        [companyId, tenantId.toLowerCase(), allowNew ? 1 : 0]
+    );
+    return rows[0] ? { id: rows[0].ID, state: parseReportJson(rows[0].Backfill, null) } : null;
+}
+
 async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = false } = {}) {
     const [snapshots] = await pool.query(
         `SELECT ID, TenantKey, EvidenceRecordCount, SourceAuditJson
@@ -17284,7 +17357,9 @@ async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = fa
             [snapshot.ID, companyId, snapshot.TenantKey]
         );
         if (rows.length !== Number(snapshot.EvidenceRecordCount)) continue;
-        return rows.map(row => parseReportJson(row.ProcessedEvidenceJson, null)).filter(Boolean);
+        const users = rows.map(row => parseReportJson(row.ProcessedEvidenceJson, null)).filter(Boolean);
+        const history = await readIdentityBackfill(pool, companyId, tenantId).catch(() => null);
+        return mergeBackfillUsers(users, history?.state);
     }
     return [];
 }

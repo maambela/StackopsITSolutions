@@ -8,6 +8,18 @@ const { deriveIdentityEvidence } = require('../services/intelligence/identity-ev
 
 const FIXED_NOW = new Date('2026-11-23T12:00:00.000Z');
 
+test('the client does not request full history and missing dates use a short label', () => {
+    const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
+    assert.doesNotMatch(source, /signInHistory=30d|data-identity-sign-in-history/);
+    const start = source.indexOf('function formatIdentityDate');
+    const end = source.indexOf('function getIdentityRiskRank', start);
+    const format = vm.runInNewContext(source.slice(start, end) + '\nformatIdentityDate;', {
+        getIdentityLastSignInTime: () => 0
+    });
+    assert.equal(format({ lastSignIn: { observationStatus: 'partial' } }), 'Not available');
+    assert.equal(format({ historyComplete: true }), 'No sign-in recorded in the last 30 days.');
+});
+
 function build(users, options = {}) {
     return buildIdentityDashboardPayload({
         users,
@@ -73,7 +85,7 @@ test('full sign-in history is requested only on demand', () => {
 test('saved history fallback retains verified failures and excludes out-of-window events', () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
     const start = source.indexOf('function savedIdentityHistoryEvents');
-    const end = source.indexOf('async function loadStoredIdentityUsers', start);
+    const end = source.indexOf("app.post('/api/sunbird/identity-sign-in-backfill'", start);
     const events = vm.runInNewContext(source.slice(start, end) + '\nsavedIdentityHistoryEvents;');
     const rows = events([{ id: 'user-1',
         lastSignIn: { dateTime: '2026-10-01T11:00:00Z', status: 'Success' },

@@ -2481,12 +2481,11 @@ function getIdentityDaysSinceSignIn(user) {
 function formatIdentityDate(user) {
     const time = getIdentityLastSignInTime(user);
     if (!time || time < Date.now() - 30 * 86400000) {
-        const status = user?.lastSignIn?.observationStatus;
-        if (user?.historyComplete === true) return 'No sign-in recorded in the last 30 days.';
-        if (user?.historyStatus === 'partial' || ['partial', 'no_recorded_sign_in', 'no_recent_sign_in'].includes(status) || time) {
-            return 'Sign-in history incomplete.';
+        if (user?.historyComplete === true && (!user.historyVerifiedAt ||
+            Date.now() - Date.parse(user.historyVerifiedAt) <= 30 * 60000)) {
+            return 'No sign-in recorded in the last 30 days.';
         }
-        return 'Sign-in information unavailable';
+        return 'Not available';
     }
     const date = new Date(time);
     const dateStr = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -2546,7 +2545,7 @@ function mergeIdentitySignInHistory(users, data, history, now = Date.now()) {
         const match = events.get(user);
         const useHistory = match?.latest && Date.parse(match.latest.dateTime) > (Date.parse(user.lastSignIn?.dateTime) || 0);
         const useFailure = match?.failure && Date.parse(match.failure.dateTime) > (Date.parse(user.failedSignIn?.dateTime) || 0);
-        return { ...user, historyComplete: complete, historyStatus: history.status,
+        return { ...user, historyComplete: user.historyComplete === true || complete, historyStatus: history.status,
             lastSignIn: useHistory ? match.latest : user.lastSignIn,
             failedSignIn: useFailure ? match.failure : user.failedSignIn };
     });
@@ -2695,10 +2694,6 @@ function renderSunbirdIdentityShell() {
             <div class="sunbird-id-insights" id="sunbird-id-insights"></div>
             <div class="sunbird-id-charts" id="sunbird-id-charts"></div>
             <div class="sunbird-id-signins" id="sunbird-id-signins"></div>
-            <details ontoggle="loadSunbirdIdentitySignInHistory(this)">
-                <summary>30-day sign-in history</summary>
-                <div data-identity-sign-in-history></div>
-            </details>
 
             <section class="sunbird-id-table-section">
                 <div class="sunbird-id-table-toolbar">
@@ -3231,54 +3226,11 @@ function renderSunbirdSignInTrend(users) {
 
 function identityRecentSignInState(model) {
     const complete = model.historyComplete === true;
-    const status = model.signInCollection?.status;
     return {
         cutoff: Date.now() - 30 * 86400000,
         empty: complete,
-        notice: complete ? '' : status === 'unavailable' ? 'Recent sign-in information is temporarily unavailable.'
-            : 'Sign-in history incomplete.'
+        notice: complete ? '' : 'Sign-in activity is temporarily unavailable.'
     };
-}
-
-async function loadSunbirdIdentitySignInHistory(details) {
-    if (!details.open || details.dataset.loaded) return;
-    const content = details.querySelector('[data-identity-sign-in-history]');
-    const token = localStorage.getItem('authToken');
-    if (!content || !token) return;
-    details.dataset.loaded = 'pending';
-    content.textContent = 'Updating…';
-    try {
-        const dashboard = sunbirdDashboardData;
-        let history = readMicrosoftDashboardCache(SUNBIRD_IDENTITY_HISTORY_KEY);
-        if (history?.sourceTenantId !== dashboard?.sourceTenantId || history?.companyId !== dashboard?.companyId
-            || !Array.isArray(history?.records) || Date.now() - Date.parse(history?.fetchedAt) >= 30 * 60000) {
-            const response = await fetch('/api/sunbird/identity-dashboard?signInHistory=30d', {
-                cache: 'no-store', headers: { Authorization: 'Bearer ' + token }
-            });
-            history = await response.json();
-            if (!response.ok) throw new Error('History unavailable');
-        }
-        if (token !== localStorage.getItem('authToken') || !details.isConnected) return;
-        if (!history.success || history.status === 'unavailable' || !Array.isArray(history.records)
-            || history.sourceTenantId !== sunbirdDashboardData?.sourceTenantId || history.companyId !== sunbirdDashboardData?.companyId) {
-            throw new Error('History unavailable');
-        }
-        writeMicrosoftDashboardCache(SUNBIRD_IDENTITY_HISTORY_KEY, history);
-        renderSunbirdIdentityDashboard();
-        const preview = history.records.slice(0, 100);
-        const notice = history.status !== 'complete' ? 'Some sign-in history is unavailable.' :
-            preview.length ? '' : 'No recorded sign-ins in the last 30 days.';
-        content.innerHTML = `<p>${escapeIdentityText(notice)} ${history.records.length > preview.length ? 'Showing the latest 100 returned events.' : ''}</p>
-            <ul>${preview.map(event => {
-                const code = event.status?.errorCode;
-                const status = code == null ? 'Status unavailable' : String(code) === '0' ? 'Success' : 'Failed';
-                return `<li>${escapeIdentityText([event.createdDateTime, event.userPrincipalName, event.appDisplayName, status].filter(Boolean).join(' · '))}</li>`;
-            }).join('')}</ul>`;
-        details.dataset.loaded = 'true';
-    } catch (_) {
-        content.textContent = 'Sign-in history is temporarily unavailable. Close and reopen to try again.';
-        delete details.dataset.loaded;
-    }
 }
 
 function renderSunbirdIdentitySignIns(model) {
@@ -3294,7 +3246,6 @@ function renderSunbirdIdentitySignIns(model) {
         .slice(0, 50);
     signinsEl.innerHTML = `
         ${sunbirdIdentityDashboardNotice ? `<p class="sunbird-id-stale-notice">${escapeIdentityText(sunbirdIdentityDashboardNotice)}</p>` : ''}
-        ${state.notice ? `<p class="sunbird-id-stale-notice">${escapeIdentityText(state.notice)}</p>` : ''}
         ${renderSunbirdSignInList('Latest sign-ins (30 days)', latest, false, state.empty ? 'No sign-in recorded in the last 30 days.' : state.notice)}
         ${renderSunbirdSignInList('Sign-in issues (30 days)', failed, true, state.notice || 'No sign-in issues found in the displayed activity.')}
     `;
@@ -10755,6 +10706,8 @@ function startMicrosoftDashboardAutoRefresh() {
     }
 }
 
+let identityBackfillRequest = null;
+
 async function refreshMicrosoftDashboardSnapshots() {
     if (microsoftDashboardRefreshRequest) return microsoftDashboardRefreshRequest;
     if (!isSessionValid() || !isMicrosoftDashboardViewActive()) {
@@ -10795,6 +10748,12 @@ async function refreshMicrosoftDashboardSnapshots() {
             }
             microsoftDashboardRefreshCompanyId = Number(data.companyId);
             applyMicrosoftDashboardSnapshots(data.snapshots || {});
+            if (data.snapshots?.identity?.backfillDue && !identityBackfillRequest) {
+                // The server holds this separate request open through the checkpoint write.
+                identityBackfillRequest = fetch('/api/sunbird/identity-sign-in-backfill', {
+                    method: 'POST', headers: { Authorization: `Bearer ${token}` }
+                }).catch(() => {}).finally(() => { identityBackfillRequest = null; });
+            }
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.warn('[Dashboard Refresh] Saved Microsoft snapshots could not be checked:', error.message);
@@ -10915,6 +10874,27 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
             updateIdentityProjectCardFromDashboard(sunbirdDashboardData);
             if (document.getElementById('sunbird-identity-dashboard')) renderSunbirdIdentityDashboard();
             changed = true;
+        } else if (identity?.complete && identity.backfillUpdatedAt && sunbirdDashboardData?.users &&
+            identity.companyId === sunbirdDashboardData.companyId && identity.sourceTenantId === sunbirdDashboardData.sourceTenantId &&
+            identity.backfillUpdatedAt > (sunbirdDashboardData.backfillUpdatedAt || '')) {
+            const savedUsers = new Map(identity.users.filter(user => user.id).map(user => [user.id, user]));
+            const sameSnapshot = microsoftDashboardSourceTime(identity) === microsoftDashboardSourceTime(sunbirdDashboardData);
+            sunbirdDashboardData = {
+                ...sunbirdDashboardData,
+                backfillUpdatedAt: identity.backfillUpdatedAt,
+                users: sunbirdDashboardData.users.map(user => {
+                    const saved = savedUsers.get(user.id);
+                    if (!saved) return user;
+                    const latest = (incoming, existing) => Date.parse(incoming?.dateTime) > (Date.parse(existing?.dateTime) || 0)
+                        ? incoming : existing;
+                    return { ...user, lastSignIn: latest(saved.lastSignIn, user.lastSignIn),
+                        failedSignIn: latest(saved.failedSignIn, user.failedSignIn),
+                        historyComplete: sameSnapshot && saved.historyComplete === true,
+                        historyVerifiedAt: sameSnapshot ? saved.historyVerifiedAt : null };
+                })
+            };
+            saveSunbirdIdentitySnapshot(sunbirdDashboardData);
+            if (document.getElementById('sunbird-identity-dashboard')) renderSunbirdIdentityDashboard();
         }
 
         const devices = snapshots.devices;
