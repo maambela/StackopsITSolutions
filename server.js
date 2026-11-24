@@ -13917,14 +13917,19 @@ async function verifySunbirdUser(userEmail) {
 }
 
 async function serveSavedSunbirdIdentity(req, res) {
+    const operation = beginSunbirdOperation(req, 'identity_dashboard');
+    req.once('aborted', () => operation.step('client_request_aborted'));
     try {
         const userEmail = req.user.email;
         console.log(`[Sunbird Cached Dashboard] Fetching cached data for: ${userEmail}`);
 
         // Verify this is Sunbird client only
+        operation.step('user_verification_start');
         const tenant = await verifySunbirdUser(userEmail);
+        operation.step('user_verification_complete', { authorized: Boolean(tenant && tenant.clientId === 'sunbird') });
         if (!tenant || tenant.clientId !== 'sunbird') {
             console.warn(`[Sunbird Cached Dashboard] Access denied for ${userEmail}`);
+            operation.finish('denied', { statusCode: 403 });
             return res.status(403).json({ 
                 success: false,
                 error: 'Access denied',
@@ -13935,16 +13940,25 @@ async function serveSavedSunbirdIdentity(req, res) {
         console.log('[Sunbird Cached Dashboard] User verified as Sunbird client');
 
         if (!tenant.companyId) {
+            operation.finish('denied', { statusCode: 403, reason: 'company_mapping_missing' });
             return res.status(403).json({ success: false, message: 'Access mapping not configured' });
         }
+        operation.step('shared_tenant_validation_start');
         const sourceTenantId = await assertSharedGraphTenantForCompany(tenant.companyId);
+        operation.step('shared_tenant_validation_complete');
+        operation.step('identity_snapshot_load_start');
         const snapshot = await identityAdapter({
             pool,
             companyId: tenant.companyId,
             capability: { profileKey: 'sunbird', displayName: 'Identity Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
         });
         const users = snapshot.evidence.find(item => item.evidenceType === 'users')?.data;
+        operation.step('identity_snapshot_load_complete', {
+            isComplete: Boolean(snapshot.sourceLineage?.isComplete),
+            userCount: Array.isArray(users) ? users.length : null
+        });
         if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users)) {
+            operation.finish('unavailable', { statusCode: 503, reason: 'complete_identity_snapshot_missing' });
             return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
         }
         const dashboard = buildSavedIdentityDashboard(users, snapshot.metrics, sourceTenantId);
@@ -13958,14 +13972,21 @@ async function serveSavedSunbirdIdentity(req, res) {
             mfaMissingUsers: dashboard.metrics.mfaMissing,
             privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
         };
+        operation.step('role_cache_load_start');
         const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
+        operation.step('role_cache_load_complete', {
+            roleCount: Array.isArray(cachedRoles?.roleAssignments) ? cachedRoles.roleAssignments.length : 0
+        });
         const fetchedAt = snapshot.sourceLineage.sourceFetchedAt || snapshot.freshness.lastUpdated;
         const signInCollection = snapshot.dashboardSourceMetrics?.signInCollection;
+        operation.step('backfill_load_start');
         const backfill = await readIdentityBackfill(pool, Number(tenant.companyId), sourceTenantId).catch(error => {
             console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
             return null;
         });
-        return res.json({
+        operation.step('backfill_load_complete', { found: Boolean(backfill) });
+        operation.step('response_send_start');
+        res.json({
             success: true,
             tenant: tenant.clientId,
             fetchedAt,
@@ -13981,7 +14002,9 @@ async function serveSavedSunbirdIdentity(req, res) {
             users: mergeBackfillUsers(dashboard.users, backfill?.state, fetchedAt, signInCollection),
             roleAssignments: cachedRoles?.roleAssignments || []
         });
+        operation.finish('success', { statusCode: 200, userCount: users.length });
     } catch (error) {
+        operation.finish('error', { statusCode: error.statusCode || 500, errorCode: error.code || null });
         console.error('[Sunbird Cached Dashboard] Error:', error.message);
         console.error('[Sunbird Cached Dashboard] Stack:', error.stack);
         

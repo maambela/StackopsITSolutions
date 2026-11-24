@@ -10597,6 +10597,8 @@ let lastIdentityMetrics = null;
 const PROJECT_CARD_CACHE_KEY = 'stackopsProjectCardSnapshot';
 const MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS = 30000;
 const MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const MICROSOFT_DASHBOARD_REFRESH_MAX_BACKOFF_MS = 5 * 60 * 1000;
+let microsoftDashboardRefreshFailureCount = 0;
 let microsoftDashboardRefreshTimer = null;
 let microsoftDashboardRefreshRequest = null;
 let microsoftDashboardRefreshController = null;
@@ -10647,6 +10649,7 @@ function markMicrosoftDashboardCardsForRender() {
 function stopMicrosoftDashboardAutoRefresh() {
     clearTimeout(microsoftDashboardRefreshTimer);
     microsoftDashboardRefreshTimer = null;
+    microsoftDashboardRefreshFailureCount = 0;
     microsoftDashboardRefreshController?.abort();
     microsoftDashboardRefreshController = null;
     microsoftDashboardRefreshRequest = null;
@@ -10718,6 +10721,8 @@ async function refreshMicrosoftDashboardSnapshots() {
     microsoftDashboardRefreshController = controller;
     microsoftDashboardRefreshScope = scope;
     microsoftDashboardRefreshRequest = (async () => {
+        let nextRefreshDelay = MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS;
+        let stopAfterRequest = false;
         const timeout = setTimeout(() => controller.abort(), 15000);
         try {
             const response = await fetch('/api/db/microsoft-dashboard-snapshots', {
@@ -10728,7 +10733,20 @@ async function refreshMicrosoftDashboardSnapshots() {
             });
             const data = await response.json();
             if (!response.ok || !data.success || !Number.isInteger(Number(data.companyId))) {
-                if (response.status === 401 || response.status === 403) stopMicrosoftDashboardAutoRefresh();
+                if (response.status === 401 || response.status === 403) {
+                    stopAfterRequest = true;
+                    stopMicrosoftDashboardAutoRefresh();
+                    return;
+                }
+                microsoftDashboardRefreshFailureCount = Math.min(microsoftDashboardRefreshFailureCount + 1, 4);
+                nextRefreshDelay = Math.min(
+                    MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS * (2 ** microsoftDashboardRefreshFailureCount),
+                    MICROSOFT_DASHBOARD_REFRESH_MAX_BACKOFF_MS
+                );
+                console.warn('[Dashboard Refresh] Saved Microsoft snapshots are unavailable; retrying with backoff.', {
+                    status: response.status,
+                    retryInMs: nextRefreshDelay
+                });
                 return;
             }
             if (token !== localStorage.getItem('authToken')
@@ -10740,11 +10758,20 @@ async function refreshMicrosoftDashboardSnapshots() {
                 return;
             }
             microsoftDashboardRefreshCompanyId = Number(data.companyId);
+            microsoftDashboardRefreshFailureCount = 0;
             applyMicrosoftDashboardSnapshots(data.snapshots || {});
 
         } catch (error) {
-            if (error.name !== 'AbortError') {
-                console.warn('[Dashboard Refresh] Saved Microsoft snapshots could not be checked:', error.message);
+            if (error.name !== 'AbortError' || document.visibilityState !== 'hidden') {
+                microsoftDashboardRefreshFailureCount = Math.min(microsoftDashboardRefreshFailureCount + 1, 4);
+                nextRefreshDelay = Math.min(
+                    MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS * (2 ** microsoftDashboardRefreshFailureCount),
+                    MICROSOFT_DASHBOARD_REFRESH_MAX_BACKOFF_MS
+                );
+                console.warn('[Dashboard Refresh] Saved Microsoft snapshots could not be checked; retrying with backoff.', {
+                    error: error.message,
+                    retryInMs: nextRefreshDelay
+                });
             }
         } finally {
             clearTimeout(timeout);
@@ -10753,10 +10780,10 @@ async function refreshMicrosoftDashboardSnapshots() {
                 microsoftDashboardRefreshController = null;
                 microsoftDashboardRefreshRequest = null;
             }
-            if (isSessionValid() && isMicrosoftDashboardViewActive()) {
+            if (!stopAfterRequest && isSessionValid() && isMicrosoftDashboardViewActive()) {
                 scheduleMicrosoftDashboardAutoRefresh(document.visibilityState === 'hidden'
                     ? MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS
-                    : MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS);
+                    : nextRefreshDelay);
             } else {
                 stopMicrosoftDashboardAutoRefresh();
             }

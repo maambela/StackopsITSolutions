@@ -56,6 +56,8 @@ function createRefreshContext(overrides = {}) {
         state,
         MICROSOFT_DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS: 300000,
         MICROSOFT_DASHBOARD_REFRESH_INTERVAL_MS: 30000,
+        MICROSOFT_DASHBOARD_REFRESH_MAX_BACKOFF_MS: 300000,
+        microsoftDashboardRefreshFailureCount: 0,
         microsoftDashboardRefreshController: null,
         microsoftDashboardRefreshRequest: null,
         microsoftDashboardRefreshScope: null,
@@ -151,6 +153,27 @@ test('overlapping checks share one request and failed checks preserve current da
     await failed.refreshMicrosoftDashboardSnapshots();
     assert.equal(verifiedDisplay.value, 'last verified');
     assert.equal(failed.applied.length, 0);
+});
+
+test('failed snapshot checks back off and a successful check resets the retry delay', async () => {
+    const context = createRefreshContext({
+        fetchImpl: async () => { throw new Error('offline'); }
+    });
+
+    await context.refreshMicrosoftDashboardSnapshots();
+    assert.equal(context.microsoftDashboardRefreshFailureCount, 1);
+    assert.deepEqual(context.scheduled, [60000]);
+
+    context.scheduled.length = 0;
+    await context.refreshMicrosoftDashboardSnapshots();
+    assert.equal(context.microsoftDashboardRefreshFailureCount, 2);
+    assert.deepEqual(context.scheduled, [120000]);
+
+    context.state.fetchImpl = null;
+    context.scheduled.length = 0;
+    await context.refreshMicrosoftDashboardSnapshots();
+    assert.equal(context.microsoftDashboardRefreshFailureCount, 0);
+    assert.deepEqual(context.scheduled, [30000]);
 });
 
 test('hidden and signed-out views do not make a snapshot request', async () => {

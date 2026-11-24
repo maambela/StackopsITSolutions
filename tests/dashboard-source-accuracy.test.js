@@ -86,6 +86,7 @@ test('application inventory counts direct users and rejects an incomplete assign
 test('Identity cache-only refresh serves the authenticated company snapshot, never the legacy list', async () => {
     const users = Array.from({ length: 132 }, (_, index) => ({ id: String(index), userType: index < 48 ? 'Member' : 'Guest' }));
     const queries = [];
+    const operationEvents = [];
     let complete = true;
     let snapshotTenantId = 'tenant-25';
     let handler;
@@ -117,6 +118,13 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
         set handler(value) { handler = value; },
         app: { get(path, auth, fn) { handler = fn; } },
         authenticateToken() {},
+        beginSunbirdOperation(req, operationName) {
+            assert.equal(operationName, 'identity_dashboard');
+            return {
+                step(name) { operationEvents.push(`step:${name}`); },
+                finish(status, details) { operationEvents.push(`finish:${status}:${details.statusCode}`); }
+            };
+        },
         verifySunbirdUser: async () => ({ clientId: 'sunbird', companyId: 25 }),
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 25); },
         pool, identityAdapter, buildSavedIdentityDashboard,
@@ -127,7 +135,7 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
     });
     async function request(query = { cacheOnly: '1' }) {
         const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
-        await handler({ query, user: { email: 'fixture@example.test' } }, res);
+        await handler({ query, user: { email: 'fixture@example.test' }, once(event) { assert.equal(event, 'aborted'); } }, res);
         return res;
     }
     const response = await request();
@@ -135,6 +143,10 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
     assert.equal(response.body.summary.totalUsers, 132);
     assert.equal(response.body.summary.workforceUsers, 48);
     assert.equal(response.body.fetchedAt, '2026-11-23T21:00:09.000Z');
+    assert.ok(operationEvents.includes('step:shared_tenant_validation_start'));
+    assert.ok(operationEvents.includes('step:identity_snapshot_load_complete'));
+    assert.ok(operationEvents.includes('step:backfill_load_complete'));
+    assert.ok(operationEvents.includes('finish:success:200'));
     assert.equal((await request({})).body.summary.totalUsers, 132);
     snapshotTenantId = 'different-tenant';
     const wrongTenant = await request();
