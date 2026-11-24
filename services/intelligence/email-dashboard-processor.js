@@ -55,6 +55,7 @@ function buildEmailDashboardPayload({
 }
 
 const emailSources = {
+    emailDetections: { coverage: 'emailDetectionsComplete', fields: ['emailDetections'], metrics: [] },
     alerts: { coverage: 'alertsComplete', fields: ['alerts', 'threats', 'affectedUsers', 'insights'],
         metrics: ['activeThreats', 'highSeverityAlerts', 'affectedUsersCount', 'threatResolutionRate',
             'phishingCount', 'malwareCount', 'spamCount', 'becCount', 'securityScore'] },
@@ -71,9 +72,10 @@ function hasVerifiedEmailSource(payload) {
 function mergeVerifiedEmailSources(previous, incoming, startedAt) {
     if (!hasVerifiedEmailSource(incoming)) return null;
     const merged = {
+        ...previous,
         ...incoming,
-        summary: { ...incoming.summary },
-        sourceAudit: { ...incoming.sourceAudit, sourceTimestamps: {} }
+        summary: { ...previous?.summary, ...incoming.summary },
+        sourceAudit: { ...previous?.sourceAudit, ...incoming.sourceAudit, sourceTimestamps: {} }
     };
     let updated = false;
     for (const [source, { coverage, fields, metrics }] of Object.entries(emailSources)) {
@@ -96,4 +98,14 @@ function mergeVerifiedEmailSources(previous, incoming, startedAt) {
     return merged;
 }
 
-module.exports = { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources };
+function readEmailDetectionCounts(result) {
+    if (result?.results?.length !== 1 || result.isResultLimitReached) return null;
+    const row = result.results[0];
+    const keys = ['Observed', 'Phishing', 'Malware', 'Spam', 'Impersonation'];
+    if (!row || !keys.every(key => Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= row.Observed) ||
+        row.Observed === 0) return null;
+    return { observed: row.Observed, phishing: row.Phishing, malware: row.Malware, spam: row.Spam,
+        impersonation: row.Impersonation };
+}
+
+module.exports = { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts };

@@ -5,6 +5,7 @@ const {
     GRAPH_HUNTING_ENDPOINT,
     runMicrosoftSecurityHuntingQuery
 } = require('../services/intelligence/microsoft-security-hunting');
+const { readEmailDetectionCounts, mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
 
 function graphResponse({ status = 200, body = {} } = {}) {
     return {
@@ -40,6 +41,36 @@ test('runHuntingQuery posts the supported fixed identity query and preserves sch
     assert.equal(response.recordsFetched, 1);
     assert.equal(response.results[0].AccountUpn, 'user@example.com');
     assert.equal(response.query.id, 'identityLogons30d');
+});
+
+test('email hunting publishes aggregate detections without changing alert or incident counts', async () => {
+    const row = { Observed: 30, Phishing: 4, Malware: 1, Spam: 5, Impersonation: 2 };
+    const result = await runMicrosoftSecurityHuntingQuery({
+        token: 'fixture', queryId: 'emailDetections24h',
+        fetchImpl: async (_url, request) => {
+            const body = JSON.parse(request.body);
+            assert.equal(body.Timespan, 'P1D');
+            assert.match(body.Query, /^EmailEvents/);
+            assert.match(body.Query, /by NetworkMessageId/);
+            return graphResponse({ body: { schema: [], results: [row] } });
+        }
+    });
+    const emailDetections = readEmailDetectionCounts(result);
+    assert.deepEqual(emailDetections, { observed: 30, phishing: 4, malware: 1, spam: 5, impersonation: 2 });
+    assert.equal(readEmailDetectionCounts({ ...result, results: [{ ...row, Observed: 0 }] }), null);
+    assert.equal(readEmailDetectionCounts({ ...result, results: [] }), null);
+    const prior = { success: true, fetchedAt: '2026-11-24T10:00:00Z',
+        sourceAudit: { alertsComplete: true, incidentsComplete: true },
+        summary: { activeThreats: 0, activeIncidents: 2 } };
+    const saved = mergeVerifiedEmailSources(prior, {
+        success: true, emailDetections, sourceAudit: { emailDetectionsComplete: true }
+    }, new Date('2026-11-24T11:00:00Z'));
+    assert.equal(saved.summary.activeThreats, 0);
+    assert.equal(saved.summary.activeIncidents, 2);
+    assert.equal(saved.emailDetections.phishing, 4);
+    assert.equal(saved.sourceAudit.sourceTimestamps.alerts, prior.fetchedAt);
+    const updatedAlerts = mergeVerifiedEmailSources(saved, prior, new Date('2026-11-24T11:30:00Z'));
+    assert.deepEqual(updatedAlerts.emailDetections, emailDetections);
 });
 
 test('runHuntingQuery refuses arbitrary query IDs', async () => {

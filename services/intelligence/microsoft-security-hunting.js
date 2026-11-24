@@ -14,6 +14,18 @@ const SECURITY_HUNTING_QUERIES = Object.freeze({
             '| order by Timestamp desc',
             '| take 100'
         ].join('\n')
+    }),
+    emailDetections24h: Object.freeze({
+        id: 'emailDetections24h',
+        title: 'Defender email detections',
+        description: 'Counts distinct messages with Defender email detections in the past 24 hours.',
+        timespan: 'P1D',
+        query: [
+            'EmailEvents',
+            '| where Timestamp >= ago(24h) and isnotempty(NetworkMessageId)',
+            '| summarize Phish=max(toint(ThreatTypes has "Phish")), Malware=max(toint(ThreatTypes has "Malware")), Spam=max(toint(ThreatTypes has "Spam")), Impersonation=max(toint(EmailActionPolicy contains "impersonation")) by NetworkMessageId',
+            '| summarize Observed=count(), Phishing=countif(Phish == 1), Malware=countif(Malware == 1), Spam=countif(Spam == 1), Impersonation=countif(Impersonation == 1)'
+        ].join('\n')
     })
 });
 

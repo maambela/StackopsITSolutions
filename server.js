@@ -59,7 +59,7 @@ const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, 
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
-const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources } = require('./services/intelligence/email-dashboard-processor');
+const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts } = require('./services/intelligence/email-dashboard-processor');
 const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');
 const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');
 const { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');
@@ -11253,6 +11253,7 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
 }
 
 function isEmailSecuritySignal(item = {}) {
+    if (String(item.serviceSource || '').toLowerCase() === 'microsoftdefenderforoffice365') return true;
     const text = [
         item.title,
         item.description,
@@ -11462,8 +11463,10 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
     ];
 
     const emailAlerts = alerts.filter(isEmailSecuritySignal);
+    const emailIncidentIds = new Set(emailAlerts.map(alert => String(alert.incidentId || '')).filter(Boolean));
 
     const emailIncidents = incidents.filter(incident => {
+        if (emailIncidentIds.has(String(incident.id || ''))) return true;
         const text = [
             incident.displayName,
             incident.title,
@@ -16192,7 +16195,9 @@ app.post('/api/security-events/hunting-query', authenticateToken, async (req, re
 
     const queryId = String(req.body?.queryId || '');
     try {
-        const token = await getMicrosoftGraphToken({ securityAlerts: true });
+        const token = queryId === 'emailDetections24h'
+            ? await getSecurityAlertsGraphTokenForCompany(tenant.companyId)
+            : await getMicrosoftGraphToken({ securityAlerts: true });
         const result = await runMicrosoftSecurityHuntingQuery({
             token,
             queryId
@@ -16217,7 +16222,7 @@ app.post('/api/security-events/hunting-query', authenticateToken, async (req, re
             });
         }
 
-        const status = Number(error.status) === 403 ? 403
+        const status = Number(error.status || error.statusCode) === 403 ? 403
             : error.code === 'SECURITY_HUNTING_QUERY_TIMEOUT' ? 504
                 : error.code === 'INVALID_SECURITY_HUNTING_RESPONSE' ? 502
                     : 502;
@@ -16985,6 +16990,36 @@ async function collectDeviceEvidenceForConfiguredTenants({ trigger = 'scheduled_
     return { companyCount: companies.length, results };
 }
 
+async function refreshEmailDetectionSnapshot(companyId, signal) {
+    const startedAt = new Date();
+    try {
+        const [rows] = await pool.query(
+            'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [companyId]
+        );
+        const saved = parseReportJson(rows[0]?.Payload, null);
+        const age = startedAt.getTime() - Date.parse(saved?.sourceAudit?.sourceTimestamps?.emailDetections);
+        if (age >= 0 && age < 60 * 60000) return;
+        signal?.throwIfAborted();
+        const token = await getSecurityAlertsGraphTokenForCompany(companyId);
+        signal?.throwIfAborted();
+        const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'emailDetections24h', timeoutMs: 15000 });
+        const emailDetections = readEmailDetectionCounts(result);
+        if (!emailDetections) {
+            console.warn('[Email Security] Hunting did not return verified email telemetry', { companyId });
+            return;
+        }
+        signal?.throwIfAborted();
+        await writeVerifiedEmailDashboard(companyId, {
+            success: true, emailDetections, sourceAudit: { emailDetectionsComplete: true }
+        }, startedAt);
+        console.info('[Email Security] Hunting detection counts saved', { companyId, ...emailDetections });
+    } catch (error) {
+        console.warn('[Email Security] Hunting detection collection failed', {
+            companyId, code: error.code || null, httpStatus: error.status || null, message: error.message
+        });
+    }
+}
+
 async function performEmailEvidenceCollection(companyId, collectionTrigger, collectorContext = {}) {
     if (!emailEvidenceService) throw new Error('Email evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Email Security';
@@ -17007,13 +17042,17 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
             ], collectionStartedAt, hasCompleteEmailThreatCoverage(payload)
         );
         await writeVerifiedEmailDashboard(companyId, dashboardPayload, collectionStartedAt);
-        return emailEvidenceService.persistProcessedEvidence({
+        const snapshot = await emailEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
             payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() },
             collectionTrigger,
             sourceEndpoint
         });
+        if (process.env.EMAIL_SECURITY_HUNTING_ENABLED === 'true' && !collectorContext.signal?.aborted) {
+            await refreshEmailDetectionSnapshot(companyId, collectorContext.signal);
+        }
+        return snapshot;
     } catch (error) {
         console.error(`[Email Evidence] Collection failed for CompanyID ${companyId}: ${error.message}`);
         await emailEvidenceService.recordCollectionFailure({

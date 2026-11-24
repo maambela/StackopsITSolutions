@@ -4679,8 +4679,18 @@ function renderSunbirdEmailCharts(model) {
     const threats = model.threats.byType || {};
     const severity = model.threats.bySeverity || {};
     const targeted = getSunbirdEmailTargetedUserChartItems(model);
+    const detections = model.sourceAudit?.emailDetectionsComplete === true ? model.emailDetections : null;
+    const detectionItems = detections ? [
+        { label: 'Phishing', value: detections.phishing, tone: 'bad' },
+        { label: 'Malware', value: detections.malware, tone: 'warn' },
+        { label: 'Spam', value: detections.spam, tone: 'neutral' },
+        { label: 'Impersonation (BEC indicator)', value: detections.impersonation, tone: 'warn' }
+    ] : [];
     el.innerHTML = `
-        ${renderSunbirdPieChart('Threat type distribution', [
+        ${detections ? renderSunbirdDeviceBars(
+            `Email detections (24h) · ${microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit.sourceTimestamps?.emailDetections }, 60 * 60000)}`,
+            detectionItems, Math.max(1, ...detectionItems.map(item => item.value))
+        ) : renderSunbirdPieChart('Email alert types', [
             { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },
             { label: 'Malware', value: threats.Malware || model.evidence.malwareAlerts.length, tone: 'warn' },
             { label: 'Spam', value: threats.Spam || model.evidence.spamAlerts.length, tone: 'neutral' },
@@ -10910,7 +10920,7 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
         if (isNewerVerifiedMicrosoftDashboardSnapshot(email, latestEmailCardData,
             data => data?.success === true
                 && (data.sourceAudit?.alertsComplete === true || data.sourceAudit?.incidentsComplete === true
-                    || data.sourceAudit?.mailActivityOk === true))
+                    || data.sourceAudit?.mailActivityOk === true || data.sourceAudit?.emailDetectionsComplete === true))
             && !retainVerifiedEmailDashboard(latestEmailCardData, email)) {
             latestEmailCardData = normalizeSunbirdEmailData(email);
             sunbirdEmailDashboardData = latestEmailCardData;
