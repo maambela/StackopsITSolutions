@@ -83,10 +83,13 @@ async function fetchGraphCollectionWithRetry({
         const attemptBudgetMs = Math.min(remainingMs, numberInRange(attemptTimeoutMs, 1, 300000, remainingMs));
         const attemptDeadline = now() + attemptBudgetMs;
         const timeoutHandle = setTimeout(() => controller.abort(), attemptBudgetMs);
+        let dispatched = false;
+        let attemptMetadata = null;
         try {
             const { response, payload } = await graphCoordinator.run(controller.signal, async () => {
                 if (now() >= attemptDeadline) controller.abort();
                 controller.signal.throwIfAborted();
+                dispatched = true;
                 const response = await fetchImpl(url, {
                     method: 'GET',
                     headers: {
@@ -96,6 +99,7 @@ async function fetchGraphCollectionWithRetry({
                     signal: controller.signal
                 });
                 lastMetadata = graphResponseMetadata(response);
+                attemptMetadata = lastMetadata;
                 if (!response.ok) failedRequests++;
                 if (response.status === 429) rateLimits++;
                 const payload = response.ok ? await readJson(response) : await response.text().catch(() => '');
@@ -157,7 +161,8 @@ async function fetchGraphCollectionWithRetry({
         } catch (error) {
             const aborted = error?.name === 'AbortError';
             lastErrorDetail = aborted
-                ? `${label} timed out within its ${Math.ceil(attemptBudgetMs)}ms attempt budget`
+                ? dispatched ? `${label} timed out within its ${Math.ceil(attemptBudgetMs)}ms attempt budget`
+                    : `${label} reached its deadline while waiting for dispatch`
                 : String(error?.message || error).slice(0, 600);
             const retryable = error instanceof TypeError && !controller.signal.aborted;
             const delay = retryDelayMs({ attempt, remainingMs: deadline - now(), baseDelayMs, maxRetryDelayMs }) + Math.random() * 250;
@@ -174,8 +179,10 @@ async function fetchGraphCollectionWithRetry({
                 warnings: [`${label} failed: ${lastErrorDetail}`],
                 recordsFetched: 0,
                 attempts: attempt,
-                ...lastMetadata, failedRequests, rateLimits,
-                errorCode: aborted ? 'GRAPH_REQUEST_TIMEOUT' : error?.code === 'GRAPH_QUEUE_FULL' ? error.code : 'GRAPH_REQUEST_FAILED',
+                ...(attemptMetadata || { httpStatus: null, graphRequestId: null, clientRequestId: null, retryAfterMs: null }),
+                failedRequests, rateLimits,
+                errorCode: aborted ? (dispatched ? 'GRAPH_REQUEST_TIMEOUT' : 'GRAPH_QUEUE_TIMEOUT')
+                    : error?.code === 'GRAPH_QUEUE_FULL' ? error.code : 'GRAPH_REQUEST_FAILED',
                 errorDetail: lastErrorDetail
             };
         } finally {
@@ -207,10 +214,11 @@ async function fetchGraphCollectionPagesWithRetry({
     timeoutMs = 60000,
     betweenPagesDelayMs = 0,
     now = () => performance.now(),
+    collectionDeadline = Infinity,
     ...options
 } = {}) {
     const pageLimit = maxPages === Infinity ? Infinity : numberInRange(maxPages, 1, Number.MAX_SAFE_INTEGER, Infinity);
-    const deadline = now() + numberInRange(timeoutMs, 1000, 300000, 60000);
+    const deadline = Math.min(collectionDeadline, now() + numberInRange(timeoutMs, 1000, 300000, 60000));
     const rows = [];
     const requestIds = [];
     let attempts = 0;

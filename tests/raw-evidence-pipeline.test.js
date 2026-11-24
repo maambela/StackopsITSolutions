@@ -179,6 +179,26 @@ test('a terminal head throttle preserves the saved continuation without another 
     assert.equal((await journal.health(11)).sources[0].resumable, true);
 });
 
+test('Security head page and continuation share one deadline and preserve the next link', async () => {
+    const journal = createRawEvidenceJournal({ persistenceEnabled: false });
+    const url = 'https://graph.microsoft.com/v1.0/auditLogs/signIns';
+    let elapsed = 0;
+    let calls = 0;
+    const result = await journal.collection(11).graph({
+        token: 'fixture', url, timeoutMs: 1000, now: () => elapsed,
+        fetchImpl: async () => {
+            calls++;
+            elapsed = 1000;
+            return graphResponse([{ id: 'preserved' }], url + '?next=2');
+        }
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.errorCode, 'GRAPH_COLLECTION_PAGINATION_TIMEOUT');
+    assert.equal(result.hasMore, true);
+    assert.equal(result.nextLink, url + '?next=2');
+    assert.equal(result.value[0].id, 'preserved');
+});
+
 test('failed later page survives restart and resumes while the newest page still arrives first', async () => {
     const pool = fakePool(), url = 'https://graph.microsoft.com/v1.0/security/alerts_v2';
     let journal = createRawEvidenceJournal({ persistenceEnabled: true, pool });

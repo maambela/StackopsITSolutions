@@ -194,6 +194,10 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             return pending;
         }
         async function collectGraph(options) {
+            const monotonicNow = options.now || (() => performance.now());
+            const timeoutMs = Math.min(300000, Math.max(1000, Number(options.timeoutMs) || 60000));
+            const collectionDeadline = monotonicNow() + timeoutMs;
+            options = { ...options, now: monotonicNow, collectionDeadline };
             const requestedUrl = new URL(options.url);
             const endpoint = requestedUrl.pathname;
             const previousState = states.get(key(companyId, 'Microsoft Graph', endpoint));
@@ -233,7 +237,12 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             let result = head;
             // A continuation cannot fix denied access or bypass Retry-After.
             const headBlocked = [401, 403, 429].includes(head.httpStatus);
-            if (!headBlocked && next && (head.ok || resume)) {
+            if (!headBlocked && next && (head.ok || resume) && monotonicNow() >= collectionDeadline) {
+                result = { ...head, ok: false, hasMore: true, nextLink: next,
+                    errorCode: 'GRAPH_COLLECTION_PAGINATION_TIMEOUT',
+                    errorDetail: 'The Security source deadline was reached before its next page could be fetched.',
+                    warnings: [...(head.warnings || []), 'The Security source deadline was reached before its next page could be fetched.'] };
+            } else if (!headBlocked && next && (head.ok || resume)) {
                 result = await fetchGraphCollectionPagesWithRetry({ ...options, url: next, onPage: page => {
                     publish('Microsoft Graph', endpoint, recordType, page.value, { complete: false, status: 'collecting',
                         pages: page.pageCount + 1, recordsRetrieved: page.recordsFetched + head.value.length, continuation: page.nextLink,

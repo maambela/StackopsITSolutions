@@ -19,6 +19,17 @@ function response({ status = 200, body = {}, headers = {} } = {}) {
     };
 }
 
+test('a Graph attempt that expires before dispatch records a queue timeout and no HTTP status', async () => {
+    let reads = 0;
+    const result = await fetchGraphCollectionWithRetry({
+        url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns', token: 'fixture', timeoutMs: 1000,
+        now: () => ++reads <= 3 ? 0 : 1001,
+        fetchImpl: async () => assert.fail('expired attempt reached Graph')
+    });
+    assert.equal(result.httpStatus, null);
+    assert.equal(result.errorCode, 'GRAPH_QUEUE_TIMEOUT');
+});
+
 test('parses Graph Retry-After values and bounds retry delays to the source deadline', () => {
     assert.equal(parseRetryAfterMs('4'), 4000);
     assert.equal(retryDelayMs({ retryAfterMs: 4000, attempt: 1, remainingMs: 1500 }), 1500);
