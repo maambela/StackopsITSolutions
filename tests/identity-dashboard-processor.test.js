@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
 const { buildIdentityDashboardPayload } = require('../services/intelligence/identity-dashboard-processor');
 const { deriveIdentityEvidence } = require('../services/intelligence/identity-evidence-store');
@@ -15,6 +17,41 @@ function build(users, options = {}) {
         ...options
     });
 }
+
+test('24-hour partial refresh preserves newer verified events and rejects conflicting user IDs', async () => {
+    const user = { id: 'user-1', userPrincipalName: 'user@example.com', userType: 'Member' };
+    const verifiedAt = '2026-11-23T11:45:00.000Z';
+    const payload = await build([user, { id: 'user-2', userPrincipalName: 'other@example.com' }], {
+        signInWindowDays: 1,
+        signInCollectionStatus: 'partial',
+        previousUsers: [{
+            ...user, lastSignIn: { dateTime: verifiedAt, status: 'Success' },
+            failedSignIn: { dateTime: verifiedAt, status: 'Failed' }
+        }],
+        signIns: [
+            { userId: 'user-1', createdDateTime: '2026-11-23T10:00:00Z', status: { errorCode: 50074 } },
+            { userId: 'wrong-id', userPrincipalName: user.userPrincipalName, createdDateTime: '2026-11-23T11:55:00Z' },
+            { userPrincipalName: 'OTHER@example.com', createdDateTime: '2026-11-23T11:55:00Z', status: { errorCode: 50074 } }
+        ]
+    });
+    assert.equal(payload.users[0].lastSignIn.dateTime, verifiedAt);
+    assert.equal(payload.users[0].failedSignIn.dateTime, verifiedAt);
+    assert.equal(payload.users[1].failedSignIn.status, 'Failed');
+    assert.equal(deriveIdentityEvidence(payload).dashboardMetrics.signInCollection.windowDays, 1);
+});
+
+test('the recent sign-in panel only confirms zero from a complete 24-hour result', () => {
+    const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
+    const start = source.indexOf('function identityRecentSignInState');
+    const end = source.indexOf('async function loadSunbirdIdentitySignInHistory', start);
+    const state = vm.runInNewContext(source.slice(start, end) + '\nidentityRecentSignInState;');
+    const model = { fetchedAt: FIXED_NOW.toISOString() };
+    assert.equal(state(model).empty, false);
+    assert.equal(state({ ...model, signInCollection: { windowDays: 30, status: 'complete', recordCount: 0 } }).empty, false);
+    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'partial', recordCount: 0 } }).empty, false);
+    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'complete', recordCount: 2 } }).empty, false);
+    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'complete', recordCount: 0 } }).empty, true);
+});
 
 test('sign-ins are matched by tenant user ID and absent events are not labeled never-signed-in', async () => {
     const payload = await build([

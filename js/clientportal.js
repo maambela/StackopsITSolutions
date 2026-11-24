@@ -2549,6 +2549,8 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
             multiplePrivilegedRoles: multiplePrivilegedRoles.length
         },
         signInCollectionStatus,
+        signInCollection: data?.signInCollection,
+        fetchedAt: data?.fetchedAt,
         evidence: {
             allUsers: users,
             mfaEnabledUsers,
@@ -2643,6 +2645,10 @@ function renderSunbirdIdentityShell() {
             <div class="sunbird-id-insights" id="sunbird-id-insights"></div>
             <div class="sunbird-id-charts" id="sunbird-id-charts"></div>
             <div class="sunbird-id-signins" id="sunbird-id-signins"></div>
+            <details ontoggle="loadSunbirdIdentitySignInHistory(this)">
+                <summary>30-day sign-in history</summary>
+                <div data-identity-sign-in-history></div>
+            </details>
 
             <section class="sunbird-id-table-section">
                 <div class="sunbird-id-table-toolbar">
@@ -3173,26 +3179,66 @@ function renderSunbirdSignInTrend(users) {
     })), users.length);
 }
 
+function identityRecentSignInState(model) {
+    const collection = model.signInCollection;
+    const complete = collection?.windowDays === 1 && collection.status === 'complete';
+    return {
+        cutoff: Date.parse(model.fetchedAt || '') - 86400000,
+        empty: complete && collection.recordCount === 0,
+        notice: complete ? '' : collection?.status === 'partial'
+            ? 'Some sign-in information is unavailable. Showing verified activity available for this period.'
+            : 'Recent sign-in information is temporarily unavailable.'
+    };
+}
+
+async function loadSunbirdIdentitySignInHistory(details) {
+    if (!details.open || details.dataset.loaded) return;
+    const content = details.querySelector('[data-identity-sign-in-history]');
+    const token = localStorage.getItem('authToken');
+    if (!content || !token) return;
+    details.dataset.loaded = 'pending';
+    content.textContent = 'Updating…';
+    try {
+        const response = await fetch('/api/sunbird/identity-dashboard?signInHistory=30d', {
+            cache: 'no-store', headers: { Authorization: 'Bearer ' + token }
+        });
+        const history = await response.json();
+        if (token !== localStorage.getItem('authToken') || !details.isConnected) return;
+        if (!response.ok || !history.success || history.status === 'unavailable' || !Array.isArray(history.records)) {
+            throw new Error('History unavailable');
+        }
+        const preview = history.records.slice(0, 100);
+        const notice = history.status !== 'complete' ? 'Some sign-in history is unavailable.' :
+            preview.length ? '' : 'No recorded sign-ins in the last 30 days.';
+        content.innerHTML = `<p>${escapeIdentityText(notice)} ${history.records.length > preview.length ? 'Showing the latest 100 returned events.' : ''}</p>
+            <ul>${preview.map(event => {
+                const code = event.status?.errorCode;
+                const status = code == null ? 'Status unavailable' : String(code) === '0' ? 'Success' : 'Failed';
+                return `<li>${escapeIdentityText([event.createdDateTime, event.userPrincipalName, event.appDisplayName, status].filter(Boolean).join(' · '))}</li>`;
+            }).join('')}</ul>`;
+        details.dataset.loaded = 'true';
+    } catch (_) {
+        content.textContent = 'Sign-in history is temporarily unavailable. Close and reopen to try again.';
+        delete details.dataset.loaded;
+    }
+}
+
 function renderSunbirdIdentitySignIns(model) {
     const signinsEl = document.getElementById('sunbird-id-signins');
     if (!signinsEl) return;
-    const latest = model.users.filter(user => getIdentityLastSignInTime(user) > 0)
+    const state = identityRecentSignInState(model);
+    const latest = model.users.filter(user => getIdentityLastSignInTime(user) >= state.cutoff)
         .sort((a, b) => getIdentityLastSignInTime(b) - getIdentityLastSignInTime(a))
         .slice(0, 50);
     const failed = [...model.evidence.failedSignInUsers]
+        .filter(user => getIdentityFailedSignInTime(user) >= state.cutoff)
         .sort((a, b) => getIdentityFailedSignInTime(b) - getIdentityFailedSignInTime(a))
         .slice(0, 50);
-    const signInNotice = model.signInCollectionStatus === 'complete' && latest.length === 0
-        ? 'A complete 30-day search found no sign-in events. This does not prove that these accounts have never signed in.'
-        : model.signInCollectionStatus === 'partial' || model.signInCollectionStatus === 'incomplete'
-            ? 'Sign-in collection is incomplete; only recorded events are shown.'
-            : 'Sign-in information is unavailable; user inventory remains available.';
-
     signinsEl.innerHTML = `
         ${sunbirdIdentityDashboardNotice ? `<p class="sunbird-id-stale-notice">${escapeIdentityText(sunbirdIdentityDashboardNotice)}</p>` : ''}
-        <p class="sunbird-id-stale-notice">${escapeIdentityText(signInNotice)}</p>
-        ${renderSunbirdSignInList('Latest sign-ins', latest, false, 'No recorded sign-ins.')}
-        ${renderSunbirdSignInList('Sign-in issues', failed, true, 'No failed sign-ins were recorded.')}
+        ${state.notice ? `<p class="sunbird-id-stale-notice">${escapeIdentityText(state.notice)}</p>` : ''}
+        ${renderSunbirdSignInList('Latest sign-ins (24 hours)', latest, false, state.empty ? 'No recorded sign-ins in the last 24 hours.' : state.notice || 'No sign-ins could be matched to the displayed users.')}
+        ${renderSunbirdSignInList('Sign-in issues (24 hours)', failed, true, state.notice || 'No sign-in issues found in the displayed activity.')}
     `;
 }
 

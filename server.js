@@ -13691,6 +13691,12 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const token = await getMicrosoftGraphToken();
     operation.step('graph_token_loaded');
 
+        if (req.query?.signInHistory === '30d') {
+            const history = await fetchMicrosoftSignIns(token, 30, { withStatus: true });
+            operation.finish(200, { signIns: history.records.length });
+            return res.json({ success: true, status: history.status, records: history.records });
+        }
+
         const collectionWarnings = [];
         const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
             fetchMicrosoftUsers(token),
@@ -13702,7 +13708,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                     return { assignments: [], status: 'unavailable' };
                 }
             ),
-            fetchMicrosoftSignIns(token, 30, { withStatus: true }),
+            fetchMicrosoftSignIns(token, 1, { withStatus: true }),
             loadStoredIdentityUsers(tenant.companyId, sourceTenantId).catch(error => {
                 console.warn('[Sunbird Dashboard] Previous verified sign-in data could not be loaded:', error.message);
                 collectionWarnings.push('Previous verified sign-in details could not be loaded.');
@@ -13713,7 +13719,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const signIns = signInCollection.records;
         if (signInCollection.status !== 'complete') {
             collectionWarnings.push(signInCollection.status === 'partial'
-                ? 'The 30-day sign-in collection is incomplete.'
+                ? 'The 24-hour sign-in collection is incomplete.'
                 : 'Sign-in information is unavailable.');
         }
         operation.step('graph_aggregates_loaded', {
@@ -13794,9 +13800,14 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 // Preserve the complete inventory when optional MFA enrichment is unavailable.
             }
             const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
-            const lastSignIn = latestSignInMap.get(key) || previous?.lastSignIn?.dateTime
-                ? (latestSignInMap.get(key) || previous.lastSignIn)
-                : null;
+            const currentSignIn = latestSignInMap.get(key);
+            const currentFailure = latestFailedSignInMap.get(key);
+            const priorFailure = previous?.failedSignIn;
+            const latestFailure = priorFailure?.dateTime && (!currentFailure || Date.parse(priorFailure.dateTime) > Date.parse(currentFailure.dateTime))
+                ? { ...priorFailure, observationStatus: 'stale' } : currentFailure || null;
+            const previousSignIn = previous?.lastSignIn;
+            const lastSignIn = previousSignIn?.dateTime && (!currentSignIn || Date.parse(previousSignIn.dateTime) > Date.parse(currentSignIn.dateTime))
+                ? previousSignIn : currentSignIn;
             const lastSignInDate = lastSignIn?.dateTime
                 ? new Date(lastSignIn.dateTime)
                 : lastSignIn?.createdDateTime ? new Date(lastSignIn.createdDateTime) : null;
@@ -13804,7 +13815,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             const daysSinceSignIn = hasValidSignInDate
                 ? Math.max(0, Math.floor((Date.now() - lastSignInDate.getTime()) / 86400000))
                 : null;
-            const signInStatus = latestSignInMap.has(key) ? 'observed'
+            const signInStatus = currentSignIn && lastSignIn === currentSignIn ? 'observed'
                 : previous?.lastSignIn?.dateTime
                     ? (signInCollection.status === 'complete' ? 'no_recent_sign_in' : 'stale')
                     : signInCollection.status === 'complete' ? 'no_recorded_sign_in' : signInCollection.status;
@@ -13845,12 +13856,9 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                     errorCode: lastSignIn?.errorCode ?? null,
                     failureReason: lastSignIn?.failureReason || null,
                     observationStatus: signInStatus,
-                    windowDays: 30
+                    windowDays: 1
                 },
-                failedSignIn: latestFailedSignInMap.get(key) ||
-                    (signInCollection.status === 'complete' ? null : previous?.failedSignIn
-                        ? { ...previous.failedSignIn, observationStatus: 'stale' }
-                        : null),
+                failedSignIn: latestFailure,
                 flags: {
                     adminWithoutMFA: roleStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false,
                     inactiveOver30Days: daysSinceSignIn !== null && daysSinceSignIn > 30,
@@ -14034,7 +14042,8 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             roleAssignmentsStatus: roleResult.status,
             signInCollection: {
                 status: signInCollection.status,
-                windowDays: 30,
+                windowDays: 1,
+                recordCount: signIns.length,
                 warnings: signInCollection.warnings
             },
             mfaCollection: {
@@ -14310,6 +14319,7 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
             summary,
             metrics: summary,
             stackctrlMetrics: snapshot.dashboardSourceMetrics,
+            signInCollection: snapshot.dashboardSourceMetrics?.signInCollection,
             users,
             roleAssignments: cachedRoles?.roleAssignments || []
         });
@@ -17241,7 +17251,7 @@ async function collectIdentityDashboardPayload(companyId) {
                 return { assignments: [], status: 'unavailable' };
             }
         ),
-        fetchMicrosoftSignIns(token, 30, { withStatus: true }),
+        fetchMicrosoftSignIns(token, 1, { withStatus: true }),
         loadStoredIdentityUsers(companyId, tenantId).catch(error => {
             console.warn('[Identity Evidence] Previous verified sign-in data could not be loaded:', error.message);
             warnings.push('Previous verified sign-in details could not be loaded.');
@@ -17250,7 +17260,7 @@ async function collectIdentityDashboardPayload(companyId) {
     ]);
     if (signInCollection.status !== 'complete') {
         warnings.push(signInCollection.status === 'partial'
-            ? 'The 30-day sign-in collection is incomplete.'
+            ? 'The 24-hour sign-in collection is incomplete.'
             : 'Sign-in information is unavailable.');
     }
     const payload = await buildIdentityDashboardPayload({
@@ -17261,7 +17271,8 @@ async function collectIdentityDashboardPayload(companyId) {
         roleAssignmentsStatus: roleResult.status,
         signIns: signInCollection.records,
         signInCollectionStatus: signInCollection.status,
-        signInWindowDays: 30,
+        signInWindowDays: 1,
+        signInRecordCount: signInCollection.records.length,
         previousUsers,
         collectionWarnings: warnings,
         loadAuthMethods: user => fetchUserAuthMethods(token, user.id, 2, { requireComplete: true }),

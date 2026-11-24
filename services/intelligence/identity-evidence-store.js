@@ -132,6 +132,7 @@ function deriveIdentityEvidence(payload = {}) {
     const stackctrlRiskScore = riskEngine.domainRiskScores.identity;
     const dashboardMetrics = {
         ...dashboardSource.dashboardMetrics,
+        signInCollection: payload.signInCollection,
         mediumRiskUsers,
         safeUsers: riskDistribution.safe,
         inactiveUsers,

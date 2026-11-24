@@ -25,6 +25,7 @@ async function buildIdentityDashboardPayload({
     roleAssignmentsStatus = 'complete',
     signInCollectionStatus = 'complete',
     signInWindowDays = 30,
+    signInRecordCount = signIns.length,
     collectionWarnings = [],
     loadAuthMethods,
     hasRealMfaMethod,
@@ -130,6 +131,10 @@ async function buildIdentityDashboardPayload({
         }
         const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
         const currentSignIn = latestSignInMap.get(key) || null;
+        const currentFailure = latestFailedSignInMap.get(key);
+        const priorFailure = previous?.failedSignIn;
+        const latestFailure = priorFailure?.dateTime && (!currentFailure || Date.parse(priorFailure.dateTime) > Date.parse(currentFailure.dateTime))
+            ? { ...priorFailure, observationStatus: 'stale' } : currentFailure || null;
         const previousEvent = previousLastSignIn?.dateTime
             ? {
                 dateTime: previousLastSignIn.dateTime,
@@ -143,12 +148,13 @@ async function buildIdentityDashboardPayload({
                 failureReason: previousLastSignIn.failureReason || null
             }
             : null;
-        const lastSignIn = currentSignIn || previousEvent;
+        const lastSignIn = previousEvent && (!currentSignIn || Date.parse(previousEvent.dateTime) > Date.parse(currentSignIn.dateTime))
+            ? previousEvent : currentSignIn;
         const lastSignInDate = lastSignIn?.dateTime ? new Date(lastSignIn.dateTime) : null;
         const daysSinceSignIn = lastSignInDate && !Number.isNaN(lastSignInDate.getTime())
             ? Math.max(0, Math.floor((collectedAt.getTime() - lastSignInDate.getTime()) / 86400000))
             : null;
-        const signInStatus = currentSignIn
+        const signInStatus = currentSignIn && lastSignIn === currentSignIn
             ? 'observed'
             : previousEvent
                 ? (signInCollectionStatus === 'complete' ? 'no_recent_sign_in' : 'stale')
@@ -193,10 +199,7 @@ async function buildIdentityDashboardPayload({
                 observationStatus: signInStatus,
                 windowDays: signInWindowDays
             },
-            failedSignIn: latestFailedSignInMap.get(key) ||
-                (signInCollectionStatus === 'complete' ? null : previous?.failedSignIn
-                    ? { ...previous.failedSignIn, observationStatus: 'stale' }
-                    : null),
+            failedSignIn: latestFailure,
             flags: {
                 adminWithoutMFA: rolesStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false,
                 inactiveOver30Days: daysSinceSignIn !== null && daysSinceSignIn > 30,
@@ -323,6 +326,7 @@ async function buildIdentityDashboardPayload({
         signInCollection: {
             status: signInCollectionStatus,
             windowDays: signInWindowDays,
+            recordCount: signInRecordCount,
             warnings: collectionWarnings
         },
         warnings: collectionWarnings,
