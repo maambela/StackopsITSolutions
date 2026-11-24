@@ -4630,14 +4630,14 @@ function renderSunbirdEmailInsights(model) {
         { title: 'Malware', value: model.evidence.malwareAlerts.length, evidence: 'malwareAlerts', tone: model.evidence.malwareAlerts.length ? 'bad' : 'good', filter: { threat: 'malware' } },
         { title: 'Spam', value: model.evidence.spamAlerts.length, evidence: 'spamAlerts', tone: model.evidence.spamAlerts.length ? 'warn' : 'neutral', filter: { threat: 'spam' } },
         { title: 'BEC attempts', value: model.evidence.becAlerts.length, evidence: 'becAlerts', tone: model.evidence.becAlerts.length ? 'bad' : 'neutral', filter: { threat: 'bec' } },
-        { title: 'Active mailboxes', value: model.summary.mailActivity?.activeMailboxes ?? unavailable, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
+        { title: 'Active mailboxes', value: model.summary.mailActivity?.activeMailboxes ?? unavailable, evidence: 'activeMailboxes', tone: 'neutral', filter: { threat: 'mailflow' } },
         { title: 'Mail events', value: model.summary.mailActivity?.totalMailActivity ?? unavailable, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
         { title: 'Open incidents', value: model.evidence.activeIncidents.length, evidence: 'activeIncidents', tone: model.evidence.activeIncidents.length ? 'bad' : 'good' },
         { title: 'Recommendations', value: model.recommendations.length, evidence: 'recommendations', tone: model.recommendations.some(r => r.priority === 'critical') ? 'bad' : 'warn' }
     ].map(item => {
         if (['phishingAlerts', 'malwareAlerts', 'spamAlerts', 'becAlerts'].includes(item.evidence) && !coverage.alertsAvailable ||
             item.evidence === 'activeIncidents' && !coverage.incidentsAvailable ||
-            item.evidence === 'mailActivityUsers' && model.sourceAudit?.mailActivityOk !== true) {
+            ['mailActivityUsers', 'activeMailboxes'].includes(item.evidence) && model.sourceAudit?.mailActivityOk !== true) {
             return { ...item, value: unavailable, tone: 'neutral' };
         }
         return item;
@@ -4679,6 +4679,10 @@ function renderSunbirdEmailCharts(model) {
     const threats = model.threats.byType || {};
     const severity = model.threats.bySeverity || {};
     const targeted = getSunbirdEmailTargetedUserChartItems(model);
+    const reportDate = model.evidence.mailActivityUsers.reduce((latest, user) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(user.reportRefreshDate) && user.reportRefreshDate > latest
+            ? user.reportRefreshDate : latest, '');
+    const mailFlowTitle = reportDate ? `Mail flow activity (7-day report · ${reportDate})` : 'Mail flow activity (7-day report)';
     const detections = model.sourceAudit?.emailDetectionsComplete === true ? model.emailDetections : null;
     const detectionItems = detections ? [
         { label: 'Phishing', value: detections.phishing, tone: 'bad' },
@@ -4702,11 +4706,11 @@ function renderSunbirdEmailCharts(model) {
             { label: 'Low', value: severity.low || 0, tone: 'good' }
         ], total)}
         ${renderSunbirdDeviceBars('Most targeted users', targeted, Math.max(1, ...targeted.map(item => item.value)), getEmailThreatDisplayMetrics(model).alertsAvailable ? 'No targeted users in collected alerts.' : 'Unknown')}
-        ${renderSunbirdDeviceBars('Mail flow activity', [
+        ${renderSunbirdDeviceBars(mailFlowTitle, model.sourceAudit?.mailActivityOk === true ? [
             { label: 'Sent', value: model.summary.mailActivity?.sendCount || 0, tone: 'neutral' },
             { label: 'Received', value: model.summary.mailActivity?.receiveCount || 0, tone: 'good' },
             { label: 'Read', value: model.summary.mailActivity?.readCount || 0, tone: 'warn' }
-        ], Math.max(1, model.summary.mailActivity?.sendCount || 0, model.summary.mailActivity?.receiveCount || 0, model.summary.mailActivity?.readCount || 0))}
+        ] : [], Math.max(1, model.summary.mailActivity?.sendCount || 0, model.summary.mailActivity?.receiveCount || 0, model.summary.mailActivity?.readCount || 0), 'Unknown')}
         ${renderSunbirdEmailHealthGraph(model)}
     `;
     animateSunbirdIdentityCharts();
@@ -4940,6 +4944,7 @@ function openSunbirdEmailEvidence(evidenceKey) {
         activeIncidents: 'Open Email Incidents',
         incidents: 'Incident Drilldown',
         mailActivityUsers: 'Exchange Mail Activity',
+        activeMailboxes: 'Active Mailboxes in the Exchange Report',
         recommendations: 'Security Recommendations'
     };
     const filterMap = {
@@ -5043,8 +5048,12 @@ function getSunbirdEmailEvidenceRows(evidenceKey, model = buildSunbirdEmailModel
             meta: 'Targeted mailbox evidence'
         }));
     }
-    if (evidenceKey === 'mailActivityUsers') {
-        return model.evidence.mailActivityUsers.map(user => ({
+    if (evidenceKey === 'mailActivityUsers' || evidenceKey === 'activeMailboxes') {
+        if (model.sourceAudit?.mailActivityOk !== true) return [];
+        const users = evidenceKey === 'activeMailboxes'
+            ? model.evidence.mailActivityUsers.filter(user => user.lastActivityDate)
+            : model.evidence.mailActivityUsers;
+        return users.map(user => ({
             title: user.displayName || user.userPrincipalName,
             subtitle: user.userPrincipalName,
             meta: `${user.sendCount || 0} sent | ${user.receiveCount || 0} received | ${user.readCount || 0} read | Last activity: ${user.lastActivityDate || 'N/A'}`

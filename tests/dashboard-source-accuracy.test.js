@@ -210,6 +210,33 @@ test('Email snapshots publish each verified source independently and reject late
     assert.equal(updated.summary.activeIncidents, 0);
 });
 
+test('a late download of an older Exchange report cannot replace newer mailbox activity', () => {
+    const report = (reportRefreshDate, activeMailboxes) => ({
+        success: true, sourceAudit: { mailActivityOk: true },
+        mailActivity: { users: [{ reportRefreshDate }] }, summary: { activeMailboxes }
+    });
+    const saved = mergeVerifiedEmailSources(null, report('2026-11-24', 42), new Date('2026-11-24T20:00:00Z'));
+    const incoming = { ...report('2026-11-23', 40), alerts: [],
+        sourceAudit: { mailActivityOk: true, alertsComplete: true } };
+    const merged = mergeVerifiedEmailSources(saved, incoming, new Date('2026-11-24T21:00:00Z'));
+    assert.equal(merged.summary.activeMailboxes, 42);
+    assert.equal(merged.mailActivity.users[0].reportRefreshDate, '2026-11-24');
+    assert.equal(merged.sourceAudit.sourceTimestamps.mailActivity, '2026-11-24T20:00:00.000Z');
+    assert.equal(merged.sourceAudit.alertsComplete, true);
+});
+
+test('active mailbox evidence matches the active population while mail events show all report rows', () => {
+    const evidence = vm.runInNewContext(section(client, 'function getSunbirdEmailEvidenceRows', '\nfunction ') +
+        '\ngetSunbirdEmailEvidenceRows;');
+    const model = { sourceAudit: { mailActivityOk: true }, evidence: { mailActivityUsers: [
+        { userPrincipalName: 'active@example.test', lastActivityDate: '2026-11-23' },
+        { userPrincipalName: 'inactive@example.test', lastActivityDate: '' }
+    ] } };
+    assert.equal(evidence('activeMailboxes', model).length, 1);
+    assert.equal(evidence('mailActivityUsers', model).length, 2);
+    assert.equal(evidence('mailActivityUsers', { ...model, sourceAudit: {} }).length, 0);
+});
+
 test('Email card displays zero only for covered sources and keeps mailbox activity separate', async () => {
     const project = { id: 5 };
     const calls = [];

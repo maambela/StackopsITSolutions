@@ -59,7 +59,7 @@ const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, 
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
-const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts } = require('./services/intelligence/email-dashboard-processor');
+const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts, readEmailReportRefreshDate } = require('./services/intelligence/email-dashboard-processor');
 const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');
 const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');
 const { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');
@@ -11245,6 +11245,8 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
             return acc;
         }, { activeMailboxes: 0, sendCount: 0, receiveCount: 0, readCount: 0 });
         summary.totalMailActivity = summary.sendCount + summary.receiveCount + summary.readCount;
+        const reportRefreshDate = readEmailReportRefreshDate(users);
+        console.info('[Email Security] Exchange report collected', { reportRefreshDate, rows: users.length });
         return { users, summary };
     } catch (error) {
         console.warn('[Email Security] Email activity report failed:', error.message);

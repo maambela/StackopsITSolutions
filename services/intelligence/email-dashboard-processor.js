@@ -64,6 +64,16 @@ const emailSources = {
         metrics: ['activeMailboxes', 'totalMailActivity', 'sendCount', 'receiveCount', 'readCount', 'mailActivity'] }
 };
 
+function readEmailReportRefreshDate(users = []) {
+    return users.reduce((latest, user) => {
+        const date = user.reportRefreshDate;
+        if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return latest;
+        const time = Date.parse(date);
+        return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date && date > (latest || '')
+            ? date : latest;
+    }, null);
+}
+
 function hasVerifiedEmailSource(payload) {
     return payload?.success === true && Object.values(emailSources).some(({ coverage }) =>
         payload.sourceAudit?.[coverage] === true);
@@ -81,7 +91,11 @@ function mergeVerifiedEmailSources(previous, incoming, startedAt) {
     for (const [source, { coverage, fields, metrics }] of Object.entries(emailSources)) {
         const priorTime = previous?.sourceAudit?.[coverage] === true
             ? previous.sourceAudit.sourceTimestamps?.[source] || previous.fetchedAt : null;
+        const priorReportDate = source === 'mailActivity' && priorTime
+            ? readEmailReportRefreshDate(previous.mailActivity?.users) : null;
+        const newReportDate = priorReportDate ? readEmailReportRefreshDate(incoming.mailActivity?.users) : null;
         const update = incoming.sourceAudit[coverage] === true &&
+            (!priorReportDate || (newReportDate && newReportDate >= priorReportDate)) &&
             (!Number.isFinite(Date.parse(priorTime)) || startedAt.getTime() > Date.parse(priorTime));
         const chosen = update ? incoming : Number.isFinite(Date.parse(priorTime)) ? previous : null;
         merged.sourceAudit[coverage] = Boolean(chosen);
@@ -108,4 +122,4 @@ function readEmailDetectionCounts(result) {
         impersonation: row.Impersonation };
 }
 
-module.exports = { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts };
+module.exports = { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts, readEmailReportRefreshDate };

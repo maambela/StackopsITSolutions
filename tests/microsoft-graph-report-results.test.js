@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
+const { readEmailReportRefreshDate } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 
@@ -22,8 +23,9 @@ function emailActivity(fetchGraphResponseWithDeadline, rows = []) {
         signal: null,
         collectorContext: {},
         fetchGraphResponseWithDeadline,
+        readEmailReportRefreshDate,
         parseGraphReportCSV: () => rows,
-        console: { warn() {} }
+        console: { warn() {}, info() {} }
     });
 }
 
