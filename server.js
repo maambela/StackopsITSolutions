@@ -866,6 +866,19 @@ async function fetchUserAuthMethods(token, userId, retries = 2, { requireComplet
   }
 }
 
+async function resolveIdentityDashboardMfa(token, user, savedUser, tenantId, now = Date.now()) {
+    const observedAt = Date.parse(savedUser?.mfaObservedAt || '');
+    const age = now - observedAt;
+    if (user.id && user.id === savedUser?.id && tenantId &&
+        savedUser.mfaSourceTenantId === tenantId && savedUser.mfaStatus === 'complete' &&
+        typeof savedUser.mfaEnabled === 'boolean' && Number.isInteger(savedUser.authMethodCount) &&
+        age >= 0 && age < 30 * 60000) {
+        return { enabled: savedUser.mfaEnabled, count: savedUser.authMethodCount, observedAt: savedUser.mfaObservedAt };
+    }
+    const methods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
+    return { enabled: hasRealMfaMethod(methods), count: methods.length, observedAt: new Date(now).toISOString() };
+}
+
 // ===============================
 // APPLICATIONS & SERVICE PRINCIPALS
 // ===============================
@@ -13689,15 +13702,31 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         // Get Microsoft Graph token
         const sourceTenantId = await assertSharedGraphTenantForCompany(tenant.companyId);
         const collectionStartedAt = new Date();
-        const token = await getMicrosoftGraphToken();
-    operation.step('graph_token_loaded');
 
         if (req.query?.signInHistory === '30d') {
-            const history = await fetchMicrosoftSignIns(token, 30, { withStatus: true });
+            const history = await getMicrosoftGraphToken()
+                .then(token => fetchMicrosoftSignIns(token, 30, { withStatus: true }))
+                .catch(error => {
+                    console.warn('[Identity History] Microsoft Graph unavailable:', error.message);
+                    return { status: 'unavailable', records: [] };
+                });
+            if (history.status !== 'complete') {
+                const users = await loadStoredIdentityUsers(tenant.companyId, sourceTenantId, { requireTenant: true }).catch(error => {
+                    console.warn('[Identity History] Saved evidence could not be loaded:', error.message);
+                    return [];
+                });
+                const saved = savedIdentityHistoryEvents(users, collectionStartedAt.getTime());
+                if (saved.length) {
+                    history.records = history.records.concat(saved).sort((a, b) => Date.parse(b.createdDateTime) - Date.parse(a.createdDateTime));
+                    history.status = 'partial';
+                }
+            }
             operation.finish(200, { signIns: history.records.length });
             return res.json({ success: true, companyId: Number(tenant.companyId), sourceTenantId, fetchedAt: collectionStartedAt.toISOString(), since: history.since, status: history.status, records: history.records });
         }
 
+        const token = await getMicrosoftGraphToken();
+        operation.step('graph_token_loaded');
         const collectionWarnings = [];
         const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
             fetchMicrosoftUsers(token),
@@ -13792,15 +13821,14 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 const name = String(typeof role === 'string' ? role : role?.name || '').toLowerCase();
                 return name.includes('admin') || name.includes('global');
             });
-            let authMethods = null;
-            let mfaStatus = 'unavailable';
+            let mfa = null;
             try {
-                authMethods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
-                mfaStatus = 'complete';
+                mfa = await resolveIdentityDashboardMfa(token, user, previous, sourceTenantId);
             } catch (_) {
                 // Preserve the complete inventory when optional MFA enrichment is unavailable.
             }
-            const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
+            const mfaStatus = mfa ? 'complete' : 'unavailable';
+            const hasMFA = mfa?.enabled ?? null;
             const currentSignIn = latestSignInMap.get(key);
             const currentFailure = latestFailedSignInMap.get(key);
             const priorFailure = previous?.failedSignIn;
@@ -13844,7 +13872,9 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 isWorkforce,
                 mfaEnabled: hasMFA,
                 mfaStatus,
-                authMethodCount: authMethods?.length ?? null,
+                mfaObservedAt: mfa?.observedAt ?? null,
+                mfaSourceTenantId: mfa ? sourceTenantId : null,
+                authMethodCount: mfa?.count ?? null,
                 riskLevel: riskLevel,
                 lastSignIn: {
                     dateTime: hasValidSignInDate ? lastSignInDate.toISOString() : null,
@@ -17214,7 +17244,25 @@ async function getSecret(secretName) {
     }
 }
 
-async function loadStoredIdentityUsers(companyId, tenantId) {
+function savedIdentityHistoryEvents(users, now) {
+    return users.flatMap(user => {
+        if (!user.id) return [];
+        return [user.lastSignIn, user.failedSignIn].flatMap(event => {
+            const time = Date.parse(event?.dateTime || '');
+            if (!Number.isFinite(time) || time < now - 30 * 86400000 || time > now) return [];
+            return [{
+                userId: user.id, userPrincipalName: user.userPrincipalName,
+                createdDateTime: event.dateTime, appDisplayName: event.appDisplayName,
+                location: event.location ? { city: event.location } : undefined,
+                deviceDetail: event.device ? { displayName: event.device } : undefined,
+                status: { errorCode: event.errorCode ?? (event.status === 'Success' ? 0 : event.status === 'Failed' ? 'saved_failure' : null),
+                    failureReason: event.failureReason }
+            }];
+        });
+    });
+}
+
+async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = false } = {}) {
     const [snapshots] = await pool.query(
         `SELECT ID, TenantKey, EvidenceRecordCount, SourceAuditJson
          FROM StackCTRLIdentityEvidenceSnapshots
@@ -17226,6 +17274,7 @@ async function loadStoredIdentityUsers(companyId, tenantId) {
     for (const snapshot of snapshots) {
         const sourceAudit = parseReportJson(snapshot.SourceAuditJson, {});
         const storedTenantId = String(sourceAudit.tenantId || '').trim();
+        if (requireTenant && (!storedTenantId || !tenantId)) continue;
         if (storedTenantId && storedTenantId.toLowerCase() !== String(tenantId).trim().toLowerCase()) continue;
         const [rows] = await pool.query(
             `SELECT ProcessedEvidenceJson

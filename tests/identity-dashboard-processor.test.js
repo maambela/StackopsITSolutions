@@ -66,8 +66,35 @@ test('30-day history restores older events and verifies absence only with comple
 test('full sign-in history is requested only on demand', () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
     const route = source.slice(source.indexOf("app.get('/api/sunbird/identity-dashboard'"), source.indexOf("app.get('/api/sunbird/identity-dashboard-cached'"));
-    assert.ok(route.includes("if (req.query?.signInHistory === '30d') {\n            const history = await fetchMicrosoftSignIns(token, 30"));
+    assert.match(route, /if \(req\.query\?\.signInHistory === '30d'\) \{[\s\S]*?fetchMicrosoftSignIns\(token, 30/);
     assert.ok(route.includes('fetchMicrosoftSignIns(token, 1, { withStatus: true })'));
+});
+
+test('saved history fallback retains verified failures and excludes out-of-window events', () => {
+    const source = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const start = source.indexOf('function savedIdentityHistoryEvents');
+    const end = source.indexOf('async function loadStoredIdentityUsers', start);
+    const events = vm.runInNewContext(source.slice(start, end) + '\nsavedIdentityHistoryEvents;');
+    const rows = events([{ id: 'user-1',
+        lastSignIn: { dateTime: '2026-10-01T11:00:00Z', status: 'Success' },
+        failedSignIn: { dateTime: '2026-11-21T11:00:00Z', status: 'Failed' }
+    }], FIXED_NOW.getTime());
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].userId, 'user-1');
+    assert.equal(rows[0].status.errorCode, 'saved_failure');
+});
+
+test('Identity card distinguishes verified zero, a saved count, and a missing count', () => {
+    const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
+    const start = source.indexOf('function identityCardCount');
+    const end = source.indexOf('function updateIdentityProjectCardFromDashboard', start);
+    const count = vm.runInNewContext(source.slice(start, end) + '\nidentityCardCount;', {
+        microsoftDashboardUpdateText: () => 'Last updated 24 Nov'
+    });
+    const confirmed = count(0, null, FIXED_NOW.toISOString());
+    assert.equal(confirmed.text, '0');
+    assert.equal(count(null, confirmed.verified).text, '0*');
+    assert.equal(count(null, null).title, 'Temporarily unavailable');
 });
 
 test('sign-ins are matched by tenant user ID and absent events are not labeled never-signed-in', async () => {

@@ -120,6 +120,7 @@ async function buildIdentityDashboardPayload({
             });
         let authMethods = null;
         let mfaStatus = 'unavailable';
+        const mfaCollectionStartedAt = now().toISOString();
         try {
             const methods = await loadAuthMethods(user);
             if (Array.isArray(methods)) {
@@ -183,6 +184,8 @@ async function buildIdentityDashboardPayload({
             isWorkforce,
             mfaEnabled: hasMFA,
             mfaStatus,
+            mfaObservedAt: mfaStatus === 'complete' ? mfaCollectionStartedAt : null,
+            mfaSourceTenantId: mfaStatus === 'complete' ? sourceTenantId : null,
             authMethodCount: authMethods?.length ?? null,
             riskLevel,
             accountEnabled: user.accountEnabled !== false,

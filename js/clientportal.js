@@ -11064,6 +11064,7 @@ function saveProjectCardToCache(project) {
         cardMetrics: project.cardMetrics,
         cardFooter: project.cardFooter,
         dashboardFetchedAt: project.dashboardFetchedAt,
+        identityVerifiedCounts: project.identityVerifiedCounts,
         lastUpdate: project.lastUpdate,
         savedAt: Date.now()
     };
@@ -11084,6 +11085,7 @@ function applyCachedProjectCards() {
         project.cardMetrics = cached.cardMetrics;
         project.cardFooter = cached.cardFooter || project.cardFooter;
         project.dashboardFetchedAt = cached.dashboardFetchedAt;
+        project.identityVerifiedCounts = cached.identityVerifiedCounts;
         project.lastUpdate = cached.dashboardFetchedAt
             ? microsoftDashboardUpdateText({ fetchedAt: cached.dashboardFetchedAt })
             : cached.lastUpdate || 'Temporarily unavailable';
@@ -11198,6 +11200,13 @@ function normalizeSunbirdDashboardData(data) {
     };
 }
 
+function identityCardCount(value, previous, fetchedAt) {
+    if (Number.isInteger(value) && value >= 0) return { text: String(value), verified: { value, fetchedAt } };
+    if (previous) return { text: `${previous.value}*`, verified: previous,
+        title: `Last verified count (${microsoftDashboardUpdateText({ fetchedAt: previous.fetchedAt }, Infinity)})` };
+    return { text: '—', title: 'Temporarily unavailable' };
+}
+
 function updateIdentityProjectCardFromDashboard(data) {
     const project = mockProjects.find(p => p.id === 2);
     if (!project || !data) return;
@@ -11205,8 +11214,12 @@ function updateIdentityProjectCardFromDashboard(data) {
     const metrics = data.metrics || {};
     const summary = data.summary || {};
     const totalUsers = summary.totalUsers ?? metrics.totalUsers ?? 'Temporarily unavailable';
-    const activeUsers = summary.activeUsers24h ?? metrics.activeUsers24h ?? 'Temporarily unavailable';
-    const adminRoles = summary.adminUsers ?? metrics.adminUsers ?? 'Temporarily unavailable';
+    const scope = data.companyId && data.sourceTenantId ? JSON.stringify([data.companyId, data.sourceTenantId]) : null;
+    const saved = project.identityVerifiedCounts || readProjectCardCache()[project.id]?.identityVerifiedCounts;
+    const prior = scope && saved?.scope === scope ? saved : {};
+    const active = identityCardCount(summary.activeUsers24h ?? metrics.activeUsers24h, prior.active, data.fetchedAt);
+    const admins = identityCardCount(summary.adminUsers ?? metrics.adminUsers, prior.admins, data.fetchedAt);
+    project.identityVerifiedCounts = { scope, active: active.verified, admins: admins.verified };
     const securityScore = summary.securityScore ?? metrics.securityScore ?? 'Temporarily unavailable';
 
     project.status = 'active';
@@ -11218,11 +11231,11 @@ function updateIdentityProjectCardFromDashboard(data) {
     };
     project.cardMetrics = [
         { label: "Total Users", value: `: ${totalUsers}`, icon: "fas fa-users" },
-        { label: "Active (24h)", value: `: ${activeUsers}`, icon: "fas fa-user-check" },
-        { label: "Admin Roles", value: `: ${adminRoles}`, icon: "fas fa-crown" },
+        { label: "Active (24h)", value: `: ${active.text}`, title: active.title, icon: "fas fa-user-check" },
+        { label: "Admin Roles", value: `: ${admins.text}`, title: admins.title, icon: "fas fa-crown" },
         { label: "Security Score", value: `: ${securityScore}`, icon: "fas fa-shield-alt" }
     ];
-    project.cardFooter = `Users: ${totalUsers} | Active: ${activeUsers}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
+    project.cardFooter = `Users: ${totalUsers} | Active: ${active.text}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
     updateMicrosoftDashboardCardTimestamp(project, data);
     saveProjectCardToCache(project);
 }
@@ -14937,7 +14950,7 @@ function createProjectCard(project) {
                     <i class="${metric.icon}"></i>
                     <div class="metric-content-wrap"${unavailable ? ' style="min-width:0"' : ''}>
                         <span class="metric-label-text ${project.id === 9 ? 'metric-label-no-colon' : ''}">${metric.label}</span>
-                        <span class="metric-value-text"${unavailable ? ' title="Temporarily unavailable" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"' : ''}>${value}</span>
+                        <span class="metric-value-text"${metric.title || unavailable ? ` title="${escapeIdentityText(metric.title || 'Temporarily unavailable')}"` : ''}${unavailable ? ' style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"' : ''}>${value}</span>
                     </div>
                 </div>
             `;

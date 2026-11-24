@@ -5,6 +5,27 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
+
+test('Identity dashboard reuses verified MFA evidence without Graph calls for the same tenant and user', async () => {
+    const now = Date.parse('2026-11-24T02:00:00Z');
+    let calls = 0;
+    const resolve = vm.runInNewContext(section('async function resolveIdentityDashboardMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
+        '\nresolveIdentityDashboardMfa;', {
+        fetchUserAuthMethods: async () => { calls++; return ['method']; },
+        hasRealMfaMethod: () => true
+    });
+    const saved = { id: 'user-a', mfaSourceTenantId: 'tenant-a', mfaEnabled: false, mfaStatus: 'complete',
+        authMethodCount: 0, mfaObservedAt: '2026-11-24T01:45:00Z' };
+    const reused = await resolve('fixture', { id: 'user-a' }, saved, 'tenant-a', now);
+    assert.equal(reused.enabled, false);
+    assert.equal(reused.observedAt, saved.mfaObservedAt);
+    assert.equal(calls, 0);
+    await resolve('fixture', { id: 'user-a' }, saved, 'tenant-b', now);
+    await resolve('fixture', { id: 'user-b' }, saved, 'tenant-a', now);
+    await resolve('fixture', { id: 'user-a' }, saved, 'tenant-a', now + 15 * 60000);
+    await resolve('fixture', { id: 'user-a' }, { ...saved, mfaStatus: 'unavailable' }, 'tenant-a', now);
+    assert.equal(calls, 4);
+});
 function section(start, end) {
     const from = server.indexOf(start);
     const to = server.indexOf(end, from + start.length);
