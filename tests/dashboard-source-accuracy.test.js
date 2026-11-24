@@ -166,6 +166,25 @@ test('saved Identity display restores scoped, verified MFA with its original tim
     assert.equal(buildSavedIdentityDashboard([{ ...saved, rolesStatus: 'unavailable' }], {}, 'tenant-a', now).metrics.securityScore, null);
 });
 
+test('Email targeted users never use mailbox activity and an empty alert set stays unscored', () => {
+    const element = {};
+    const ui = vm.runInNewContext([
+        section(client, 'function getEmailThreatDisplayMetrics', 'function getSecurityDashboardMetrics'),
+        section(client, 'function getSunbirdEmailTargetedUserChartItems', 'function buildSunbirdEmailRecommendations'),
+        section(client, 'function renderSunbirdEmailMetrics', 'function renderSunbirdEmailInsights'),
+        '({ chart: getSunbirdEmailTargetedUserChartItems, metrics: renderSunbirdEmailMetrics });'
+    ].join('\n'), { document: { getElementById: () => element }, escapeIdentityText: String });
+    const model = { sourceAudit: { alertsComplete: true, incidentsComplete: true }, alerts: [],
+        summary: { securityScore: 100, activeThreats: 0 },
+        evidence: { affectedUsers: [], mailActivityUsers: [{ sendCount: 1258 }] } };
+    assert.equal(ui.chart(model).length, 0);
+    ui.metrics(model);
+    assert.match(element.innerHTML, /Unknown/);
+    assert.doesNotMatch(element.innerHTML, /100%/);
+    model.evidence.affectedUsers.push({ user: 'fixture@example.test', threatCount: 2 });
+    assert.equal(ui.chart(model)[0].value, 2);
+});
+
 test('Email snapshots publish each verified source independently and reject late results', () => {
     const date = minute => new Date(`2026-11-24T17:${minute}:00Z`);
     const alerts = { success: true, sourceAudit: { alertsComplete: true },

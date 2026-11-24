@@ -10874,11 +10874,11 @@ setInterval(syncDuoData, 60 * 60 * 1000);
 //                             MICROSOFT GRAPH -  Identity Protection                                  //
 // ====================================================================================================//
 
-async function fetchIdentityMetricsFromApi(tokenOverride = null) {
+async function fetchIdentityMetricsFromApi(tokenOverride = null, inventory = null) {
     const token = tokenOverride || await getMicrosoftGraphToken();
     const [users, roleAssignments, signInCollection] = await Promise.all([
-        fetchMicrosoftUsers(token),
-        fetchMicrosoftRoleAssignments(token),
+        inventory?.users ?? fetchMicrosoftUsers(token),
+        inventory?.roles ?? fetchMicrosoftRoleAssignments(token),
         fetchMicrosoftSignIns(token, 1, { withStatus: true })
     ]);
 
@@ -11020,11 +11020,11 @@ function normalizeMicrosoftUsers(users) {
     });
 }
 
-async function fetchIdentityDetailsFromApi(tokenOverride = null) {
+async function fetchIdentityDetailsFromApi(tokenOverride = null, inventory = null) {
     const token = tokenOverride || await getMicrosoftGraphToken();
     const [users, rawRoleAssignments] = await Promise.all([
-        fetchMicrosoftUsers(token),
-        fetchMicrosoftRoleAssignments(token)
+        inventory?.users ?? fetchMicrosoftUsers(token),
+        inventory?.roles ?? fetchMicrosoftRoleAssignments(token)
     ]);
     const processedUsers = normalizeMicrosoftUsers(users);
     const roleAssignments = processMicrosoftRoleAssignments(rawRoleAssignments);
@@ -11898,8 +11898,12 @@ async function upsertDashboardMetricCaches() {
                     return;
                 }
                 identityMetricsRefreshAttempts.set(Number(companyId), Date.now());
-                const identity = await fetchIdentityMetricsFromApi();
-                const identityDetails = await fetchIdentityDetailsFromApi();
+                const token = await getMicrosoftGraphToken();
+                const inventory = { users: fetchMicrosoftUsers(token), roles: fetchMicrosoftRoleAssignments(token) };
+                const [identity, identityDetails] = await Promise.all([
+                    fetchIdentityMetricsFromApi(token, inventory),
+                    fetchIdentityDetailsFromApi(token, inventory)
+                ]);
                 const sourceFetchedAt = new Date();
                 if (identity.activeUsers !== null) {
                     await writeMicrosoftDashboardCache(pool,
@@ -16745,13 +16749,15 @@ async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = fa
     return [];
 }
 
-async function collectIdentityDashboardPayload(companyId) {
+async function collectIdentityDashboardPayload(companyId, signal = null) {
     const tenantId = await assertSharedGraphTenantForCompany(companyId);
     const collectionStartedAt = new Date();
     const token = await getMicrosoftGraphToken();
+    signal?.throwIfAborted();
+    const users = await fetchMicrosoftUsers(token);
+    signal?.throwIfAborted();
     const warnings = [];
-    const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
-        fetchMicrosoftUsers(token),
+    const [roleResult, signInCollection, previousUsers] = await Promise.all([
         fetchMicrosoftRoleAssignments(token).then(
             assignments => ({ assignments, status: 'complete' }),
             error => {
@@ -16785,7 +16791,10 @@ async function collectIdentityDashboardPayload(companyId) {
         signInRecordCount: signInCollection.records.length,
         previousUsers,
         collectionWarnings: warnings,
-        loadAuthMethods: user => resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId),
+        loadAuthMethods: user => {
+            signal?.throwIfAborted();
+            return resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId);
+        },
         hasRealMfaMethod,
         mapWithConcurrency,
         now: () => new Date(),
@@ -16794,11 +16803,12 @@ async function collectIdentityDashboardPayload(companyId) {
     return { ...payload, collectionStartedAt: collectionStartedAt.toISOString() };
 }
 
-async function performIdentityEvidenceCollection(companyId, collectionTrigger) {
+async function performIdentityEvidenceCollection(companyId, collectionTrigger, { signal } = {}) {
     if (!identityEvidenceService) throw new Error('Identity evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Identity Protection';
     try {
-        const payload = await collectIdentityDashboardPayload(companyId);
+        const payload = await collectIdentityDashboardPayload(companyId, signal);
+        signal?.throwIfAborted();
         return await identityEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',

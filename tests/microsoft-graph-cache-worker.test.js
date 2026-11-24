@@ -51,11 +51,14 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         withCollectionPublication: async (database, _company, publish) => publish(database),
         STACKCTRL_COLLECTOR_TIMEOUT_MS: 180000,
         identityMetricsRefreshAttempts: new Map(),
-        fetchIdentityMetricsFromApi() {
+        getMicrosoftGraphToken: async () => 'fixture',
+        fetchMicrosoftUsers() {
             starts.push('identity');
             return new Promise((resolve, reject) => { failIdentity = reject; });
         },
-        fetchIdentityDetailsFromApi() { assert.fail('failed identity source continued'); },
+        fetchMicrosoftRoleAssignments: async () => [],
+        async fetchIdentityMetricsFromApi(_token, inventory) { await inventory.users; },
+        async fetchIdentityDetailsFromApi(_token, inventory) { await inventory.users; },
         fetchDeviceMetricsFromApi() {
             starts.push('devices');
             return new Promise(resolve => { finishDevices = resolve; });

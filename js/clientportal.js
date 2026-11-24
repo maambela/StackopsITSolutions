@@ -3299,7 +3299,7 @@ function renderSunbirdIdentityTable(model = buildSunbirdIdentityModel()) {
     body.innerHTML = users.map(user => {
         const roles = getIdentityRoleNames(user);
         const risk = String(user.riskLevel || 'SAFE').toLowerCase();
-        const mfaStatus = user.mfaEnabled === true ? 'Yes' : user.mfaEnabled === false ? 'No' : 'Temporarily unavailable';
+        const mfaStatus = user.mfaEnabled === true ? 'Yes' : user.mfaEnabled === false ? 'No' : 'Unknown';
         return `
             <tr>
                 <td data-label="Name">${escapeIdentityText(user.displayName || 'Unknown')}</td>
@@ -4604,11 +4604,12 @@ function renderSunbirdEmailMetrics(model) {
     const el = document.getElementById('sunbird-email-metrics');
     if (!el) return;
     const threats = getEmailThreatDisplayMetrics(model);
+    const scoreAvailable = threats.alertsAvailable && model.alerts.length > 0;
     const metrics = [
         { key: 'active-threats', label: 'Active Threats', value: threats.activeThreats, tone: !threats.alertsAvailable ? 'neutral' : threats.activeThreats ? 'bad' : 'good', evidence: 'allAlerts' },
         { key: 'high-severity', label: 'High Severity', value: threats.highSeverity, tone: !threats.alertsAvailable ? 'neutral' : threats.highSeverity ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
         { key: 'users-targeted', label: 'Users Targeted', value: threats.targetedUsers, tone: threats.targetedUsers > 5 ? 'warn' : 'neutral', evidence: 'affectedUsers' },
-        { key: 'security-score', label: 'Email Security Score', value: threats.alertsAvailable && threats.incidentsAvailable ? `${model.summary.securityScore}%` : 'Temporarily unavailable', tone: !threats.alertsAvailable || !threats.incidentsAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
+        { key: 'security-score', label: 'Email Security Score', value: scoreAvailable ? `${model.summary.securityScore}%` : 'Unknown', tone: !scoreAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
     ];
     el.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
@@ -4677,6 +4678,7 @@ function renderSunbirdEmailCharts(model) {
     const total = Math.max(1, model.alerts.length);
     const threats = model.threats.byType || {};
     const severity = model.threats.bySeverity || {};
+    const targeted = getSunbirdEmailTargetedUserChartItems(model);
     el.innerHTML = `
         ${renderSunbirdPieChart('Threat type distribution', [
             { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },
@@ -4689,7 +4691,7 @@ function renderSunbirdEmailCharts(model) {
             { label: 'Medium', value: severity.medium || 0, tone: 'warn' },
             { label: 'Low', value: severity.low || 0, tone: 'good' }
         ], total)}
-        ${renderSunbirdDeviceBars('Most targeted users', getSunbirdEmailTargetedUserChartItems(model), Math.max(1, ...getSunbirdEmailTargetedUserChartItems(model).map(item => item.value)))}
+        ${renderSunbirdDeviceBars('Most targeted users', targeted, Math.max(1, ...targeted.map(item => item.value)), getEmailThreatDisplayMetrics(model).alertsAvailable ? 'No targeted users in collected alerts.' : 'Unknown')}
         ${renderSunbirdDeviceBars('Mail flow activity', [
             { label: 'Sent', value: model.summary.mailActivity?.sendCount || 0, tone: 'neutral' },
             { label: 'Received', value: model.summary.mailActivity?.receiveCount || 0, tone: 'good' },
@@ -4747,8 +4749,8 @@ function renderSunbirdEmailRiskTrendChart(model) {
 }
 
 function renderSunbirdEmailHealthGraph(model) {
-    if (!getEmailThreatDisplayMetrics(model).alertsAvailable) {
-        return '<article class="sunbird-id-chart-card sunbird-id-health-card"><h3>Email posture</h3><p>Temporarily unavailable</p></article>';
+    if (!getEmailThreatDisplayMetrics(model).alertsAvailable || !model.alerts.length) {
+        return '<article class="sunbird-id-chart-card sunbird-id-health-card"><h3>Email posture</h3><p>Unknown</p></article>';
     }
     const resolved = model.summary.threatResolutionRate || 0;
     const score = model.summary.securityScore || 0;
@@ -5175,17 +5177,7 @@ function getSunbirdEmailAffectedUserRows(data, alerts) {
 }
 
 function getSunbirdEmailTargetedUserChartItems(model) {
-    if (!model.evidence.affectedUsers.length) {
-        return model.evidence.mailActivityUsers
-            .slice()
-            .sort((a, b) => ((b.sendCount || 0) + (b.receiveCount || 0) + (b.readCount || 0)) - ((a.sendCount || 0) + (a.receiveCount || 0) + (a.readCount || 0)))
-            .slice(0, 5)
-            .map((user, index) => ({
-                label: (user.displayName || user.userPrincipalName || 'Mailbox').split('@')[0],
-                value: (user.sendCount || 0) + (user.receiveCount || 0) + (user.readCount || 0),
-                tone: index === 0 ? 'warn' : 'neutral'
-            }));
-    }
+    if (!getEmailThreatDisplayMetrics(model).alertsAvailable) return [];
     return model.evidence.affectedUsers.slice(0, 5).map((user, index) => ({
         label: user.user.split('@')[0] || user.user,
         value: user.threatCount,
@@ -12047,7 +12039,7 @@ function populateIdentityTable() {
                 ? `✅ Yes (${authMethodCount})`
                 : user.mfaEnabled === false
                     ? `❌ No (${authMethodCount})`
-                    : 'Temporarily unavailable';
+                    : 'Unknown';
             
             const riskLevel = user.riskLevel || 'SAFE';
             const riskBadgeClass = riskLevel === 'HIGH' ? 'risk-badge-high' : 
