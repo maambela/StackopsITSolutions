@@ -632,7 +632,7 @@ function isRetryableGraphError(error, retryTimeouts) {
     return /\((?:408|429|5\d\d)\)|timed out|network|fetch failed/i.test(String(error?.message || ''));
 }
 
-async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false, retryTimeouts = true, allowPartial = false } = {}) {
+async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false, retryTimeouts = true, retryCollectionTimeouts = false, allowPartial = false, preferDispatch = false } = {}) {
     const key = shared ? `${crypto.createHash('sha256').update(token).digest('hex')}:${url}:${paginate}` : null;
     const unwrapPayload = payload => {
         const collection = payload?._collection;
@@ -675,6 +675,8 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
             const result = await fetchGraphCollectionPagesWithRetry({
                 url, token, label, maxPages: 20, maxAttempts: retries + 1, timeoutMs: 60000,
                 attemptTimeoutMs: MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS,
+                preferDispatch,
+                retryTimeouts: retryCollectionTimeouts,
                 readJson: async response => {
                     const body = await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, label);
                     responseBytes += Buffer.byteLength(body);
@@ -782,7 +784,7 @@ async function fetchMicrosoftUsers(token) {
         const data = await fetchMicrosoftGraphJson(
             'https://graph.microsoft.com/v1.0/users?$top=250&$select=displayName,mail,jobTitle,mobilePhone,userPrincipalName,id,userType,accountEnabled,assignedLicenses,licenseAssignmentStates',
             token,
-            'Microsoft Graph users', { paginate: true }
+            'Microsoft Graph users', { paginate: true, preferDispatch: true, retryCollectionTimeouts: true }
         );
     return data.value || [];
   } catch (error) {

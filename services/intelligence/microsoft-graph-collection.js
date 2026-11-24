@@ -62,6 +62,8 @@ async function fetchGraphCollectionWithRetry({
     label = 'Microsoft Graph collection',
     baseDelayMs = 1000,
     maxRetryDelayMs = 30000,
+    preferDispatch = false,
+    retryTimeouts = false,
     now = () => performance.now(),
     waitImpl = wait
 } = {}) {
@@ -104,7 +106,7 @@ async function fetchGraphCollectionWithRetry({
                 if (response.status === 429) rateLimits++;
                 const payload = response.ok ? await readJson(response) : await response.text().catch(() => '');
                 return { response, payload };
-            });
+            }, { preferDispatch });
 
             if (response.ok) {
                 const data = payload;
@@ -164,9 +166,9 @@ async function fetchGraphCollectionWithRetry({
                 ? dispatched ? `${label} timed out within its ${Math.ceil(attemptBudgetMs)}ms attempt budget`
                     : `${label} reached its deadline while waiting for dispatch`
                 : String(error?.message || error).slice(0, 600);
-            const retryable = error instanceof TypeError && !controller.signal.aborted;
+            const retryable = aborted ? retryTimeouts : error instanceof TypeError && !controller.signal.aborted;
             const delay = retryDelayMs({ attempt, remainingMs: deadline - now(), baseDelayMs, maxRetryDelayMs }) + Math.random() * 250;
-            if (!aborted && retryable && attempt < attemptsAllowed && deadline - now() > delay) {
+            if (retryable && attempt < attemptsAllowed && deadline - now() > delay) {
                 clearTimeout(timeoutHandle);
                 await waitImpl(delay);
                 continue;

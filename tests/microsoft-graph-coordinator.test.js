@@ -24,6 +24,20 @@ test('bounds active requests and the queue, and never dispatches cancelled entri
     assert.equal(await next, 'next');
 });
 
+test('inventory can advance in the queue while ordinary work keeps every other contested turn', async () => {
+    const coordinator = createGraphCoordinator({ concurrency: 1 });
+    const signal = new AbortController().signal;
+    const dispatched = [];
+    let release;
+    const active = coordinator.run(signal, () => new Promise(resolve => { release = resolve; }));
+    const enqueue = (name, preferDispatch) => coordinator.run(signal, () => dispatched.push(name), { preferDispatch });
+    const waiting = [enqueue('ordinary one'), enqueue('ordinary two'), enqueue('inventory one', true), enqueue('inventory two', true)];
+    await Promise.resolve();
+    release();
+    await Promise.all([active, ...waiting]);
+    assert.deepEqual(dispatched, ['inventory one', 'ordinary one', 'inventory two', 'ordinary two']);
+});
+
 test('releases the permit after a failed operation', async () => {
     const coordinator = createGraphCoordinator({ concurrency: 1 });
     const signal = new AbortController().signal;
