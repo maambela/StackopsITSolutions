@@ -46,11 +46,12 @@ test('runHuntingQuery posts the supported fixed identity query and preserves sch
 test('email hunting publishes aggregate detections without changing alert or incident counts', async () => {
     const row = { Observed: 30, Phishing: 4, Malware: 1, Spam: 5, Impersonation: 2 };
     const result = await runMicrosoftSecurityHuntingQuery({
-        token: 'fixture', queryId: 'emailDetections24h',
+        token: 'fixture', queryId: 'emailDetections30d',
         fetchImpl: async (_url, request) => {
             const body = JSON.parse(request.body);
-            assert.equal(body.Timespan, 'P1D');
+            assert.equal(body.Timespan, 'P30D');
             assert.match(body.Query, /^EmailEvents/);
+            assert.match(body.Query, /ago\(30d\)/);
             assert.match(body.Query, /by NetworkMessageId/);
             return graphResponse({ body: { schema: [], results: [row] } });
         }

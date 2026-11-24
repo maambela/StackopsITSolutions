@@ -4692,7 +4692,7 @@ function renderSunbirdEmailCharts(model) {
     ] : [];
     el.innerHTML = `
         ${detections ? renderSunbirdDeviceBars(
-            `Email detections (24h) · ${microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit.sourceTimestamps?.emailDetections }, 60 * 60000)}`,
+            `Email detections (${detections.windowDays === 30 ? '30 days' : '24 hours'}) · ${microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit.sourceTimestamps?.emailDetections }, 60 * 60000)}`,
             detectionItems, Math.max(1, ...detectionItems.map(item => item.value))
         ) : renderSunbirdPieChart('Email alert types', [
             { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },

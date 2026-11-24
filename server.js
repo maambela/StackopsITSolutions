@@ -16197,7 +16197,7 @@ app.post('/api/security-events/hunting-query', authenticateToken, async (req, re
 
     const queryId = String(req.body?.queryId || '');
     try {
-        const token = queryId === 'emailDetections24h'
+        const token = ['emailDetections24h', 'emailDetections30d'].includes(queryId)
             ? await getSecurityAlertsGraphTokenForCompany(tenant.companyId)
             : await getMicrosoftGraphToken({ securityAlerts: true });
         const result = await runMicrosoftSecurityHuntingQuery({
@@ -17000,11 +17000,11 @@ async function refreshEmailDetectionSnapshot(companyId, signal) {
         );
         const saved = parseReportJson(rows[0]?.Payload, null);
         const age = startedAt.getTime() - Date.parse(saved?.sourceAudit?.sourceTimestamps?.emailDetections);
-        if (age >= 0 && age < 60 * 60000) return;
+        if (saved?.emailDetections?.windowDays === 30 && age >= 0 && age < 60 * 60000) return;
         signal?.throwIfAborted();
         const token = await getSecurityAlertsGraphTokenForCompany(companyId);
         signal?.throwIfAborted();
-        const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'emailDetections24h', timeoutMs: 15000 });
+        const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'emailDetections30d', timeoutMs: 15000 });
         const emailDetections = readEmailDetectionCounts(result);
         if (!emailDetections) {
             console.warn('[Email Security] Hunting did not return verified email telemetry', { companyId });
@@ -17012,7 +17012,7 @@ async function refreshEmailDetectionSnapshot(companyId, signal) {
         }
         signal?.throwIfAborted();
         await writeVerifiedEmailDashboard(companyId, {
-            success: true, emailDetections, sourceAudit: { emailDetectionsComplete: true }
+            success: true, emailDetections: { ...emailDetections, windowDays: 30 }, sourceAudit: { emailDetectionsComplete: true }
         }, startedAt);
         console.info('[Email Security] Hunting detection counts saved', { companyId, ...emailDetections });
     } catch (error) {

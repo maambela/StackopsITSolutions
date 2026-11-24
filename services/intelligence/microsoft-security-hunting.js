@@ -1,6 +1,21 @@
 const { graphCoordinator } = require('./microsoft-graph-coordinator');
 const GRAPH_HUNTING_ENDPOINT = 'https://graph.microsoft.com/v1.0/security/runHuntingQuery';
 
+function emailDetectionQuery(id, days) {
+    return Object.freeze({
+        id,
+        title: 'Defender email detections',
+        description: `Counts distinct messages with Defender email detections in the past ${days} day(s).`,
+        timespan: `P${days}D`,
+        query: [
+            'EmailEvents',
+            `| where Timestamp >= ago(${days}d) and isnotempty(NetworkMessageId)`,
+            '| summarize Phish=max(toint(ThreatTypes has "Phish")), Malware=max(toint(ThreatTypes has "Malware")), Spam=max(toint(ThreatTypes has "Spam")), Impersonation=max(toint(EmailActionPolicy contains "impersonation")) by NetworkMessageId',
+            '| summarize Observed=count(), Phishing=countif(Phish == 1), Malware=countif(Malware == 1), Spam=countif(Spam == 1), Impersonation=countif(Impersonation == 1)'
+        ].join('\n')
+    });
+}
+
 const SECURITY_HUNTING_QUERIES = Object.freeze({
     identityLogons30d: Object.freeze({
         id: 'identityLogons30d',
@@ -15,18 +30,8 @@ const SECURITY_HUNTING_QUERIES = Object.freeze({
             '| take 100'
         ].join('\n')
     }),
-    emailDetections24h: Object.freeze({
-        id: 'emailDetections24h',
-        title: 'Defender email detections',
-        description: 'Counts distinct messages with Defender email detections in the past 24 hours.',
-        timespan: 'P1D',
-        query: [
-            'EmailEvents',
-            '| where Timestamp >= ago(24h) and isnotempty(NetworkMessageId)',
-            '| summarize Phish=max(toint(ThreatTypes has "Phish")), Malware=max(toint(ThreatTypes has "Malware")), Spam=max(toint(ThreatTypes has "Spam")), Impersonation=max(toint(EmailActionPolicy contains "impersonation")) by NetworkMessageId',
-            '| summarize Observed=count(), Phishing=countif(Phish == 1), Malware=countif(Malware == 1), Spam=countif(Spam == 1), Impersonation=countif(Impersonation == 1)'
-        ].join('\n')
-    })
+    emailDetections24h: emailDetectionQuery('emailDetections24h', 1),
+    emailDetections30d: emailDetectionQuery('emailDetections30d', 30)
 });
 
 function buildHuntingErrorMessage(status, body) {
