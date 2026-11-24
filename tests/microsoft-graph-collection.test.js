@@ -19,6 +19,27 @@ function response({ status = 200, body = {}, headers = {} } = {}) {
     };
 }
 
+test('an opted-in collection retries a timed-out attempt within its existing budget', async () => {
+    const options = {
+        url: 'https://graph.microsoft.com/v1.0/users',
+        token: 'fixture', timeoutMs: 60000, maxAttempts: 2,
+        waitImpl: async () => {}, now: () => 0
+    };
+    let calls = 0;
+    const fetchImpl = async () => {
+        if (++calls === 1) throw new DOMException('Request timed out', 'AbortError');
+        return response({ body: { value: [{ id: 'user' }] } });
+    };
+    const before = await fetchGraphCollectionWithRetry({ ...options, fetchImpl });
+    assert.equal(before.errorCode, 'GRAPH_REQUEST_TIMEOUT');
+    assert.equal(calls, 1);
+    calls = 0;
+    const after = await fetchGraphCollectionWithRetry({ ...options, fetchImpl, retryTimeouts: true });
+    assert.equal(after.ok, true);
+    assert.equal(after.attempts, 2);
+    assert.equal(calls, 2);
+});
+
 test('a Graph attempt that expires before dispatch records a queue timeout and no HTTP status', async () => {
     let reads = 0;
     const result = await fetchGraphCollectionWithRetry({
