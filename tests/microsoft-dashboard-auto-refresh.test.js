@@ -125,7 +125,8 @@ test('saved snapshot route is authenticated, company-scoped, and never invokes G
     assert.match(route, /authenticateToken/);
     assert.match(route, /CompanyID = \?/);
     assert.match(route, /refreshMode: 'stored_only'/);
-    assert.match(route, /complete: true/);
+    assert.match(route, /complete: key !== 'email' \|\| \(hasCompleteEmailThreatCoverage\(snapshot\)/);
+    assert.match(route, /hasVerifiedEmailSource\(payload\)/);
     assert.doesNotMatch(route, /fetch[A-Za-z]*FromApi|fetchGraph/);
 });
 

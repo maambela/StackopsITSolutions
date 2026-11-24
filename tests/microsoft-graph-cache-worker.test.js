@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
+const { hasVerifiedEmailSource, mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 function section(start, end) {
@@ -19,6 +20,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     let failIdentity;
     let finishDevices;
     const email = {
+        success: true,
         summary: { activeThreats: 1, highSeverityAlerts: 2, affectedUsersCount: 3, activeIncidents: 4 },
         sourceAudit: { alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
     };
@@ -33,9 +35,16 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         pool: {
             async query(sql, parameters) {
                 if (sql.includes('SELECT')) return [[{ CompanyID: 7 }]];
+                if (sql.startsWith('UPDATE EmailSecurityPayloadCache')) {
+                    writes.set('EmailSecurityPayloadCache', JSON.parse(parameters[0]));
+                    return;
+                }
                 writes.set(sql.match(/INSERT INTO (\w+)/)[1], Array.from(parameters));
             }
         },
+        hasVerifiedEmailSource,
+        mergeVerifiedEmailSources,
+        parseReportJson: (value, fallback) => value ? JSON.parse(value) : fallback,
         console: { warn() {}, error: (...args) => failures.push(args.join(' ')) },
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 7); return 'tenant-fixture'; },
         runWithCollectionOwnership: async (_pool, _scope, collect) => collect(),
@@ -69,7 +78,9 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     assert.equal(writes.get('DeviceMetricsCache')[1], 12);
     assert.equal(starts.filter(source => source === 'email').length, 1);
     assert.deepEqual(writes.get('EmailMetricsCache').slice(0, 5), [7, 1, 2, 3, 4]);
-    assert.deepEqual(JSON.parse(writes.get('EmailSecurityPayloadCache')[1]), email);
+    const savedEmail = writes.get('EmailSecurityPayloadCache');
+    assert.deepEqual(savedEmail.summary, email.summary);
+    assert.ok(savedEmail.sourceAudit.sourceTimestamps.alerts);
 });
 
 test('retired threat feed reports unavailable without an HTTP status or Graph request', async () => {
