@@ -8,6 +8,24 @@ const source = { provider: 'Cloudflare', endpoint: '/accounts/private/audit', st
 const raw = { id: 'fixture', createdDateTime: '2026-11-17T10:12:34Z', status: { errorCode: 0 }, userDisplayName: 'Gary', appDisplayName: 'Loop' };
 const record = rawSecurityRecord(raw, { companyId: 7, provider: 'Microsoft Graph', endpoint: '/v1.0/auditLogs/signIns', recordType: 'signin' });
 
+test('one failed Graph authentication skips all dependent Security sources and a later bearer recovers', async () => {
+    const server = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const start = server.indexOf('function runSecurityGraphSource');
+    const end = server.indexOf('async function buildSecurityEventsPayloadFromApi', start);
+    const run = vm.runInNewContext(server.slice(start, end) + '\nrunSecurityGraphSource;');
+    const failure = { code: 'GRAPH_TOKEN_TIMEOUT', message: 'Microsoft Graph token request timed out after 12000ms' };
+    const sources = ['alerts', 'incidents', 'signIns', 'directoryAudit', 'identityRisk'];
+    let dispatches = 0;
+    const collect = bearer => { dispatches++; assert.equal(bearer, 'recovered'); return { ok: true }; };
+    const skipped = await Promise.all(sources.map(source => run(null, failure, collect, { [source]: [] })));
+    assert.equal(dispatches, 0);
+    assert.equal(new Set(skipped.flatMap(source => source.warnings)).size, 1);
+    assert.ok(skipped.every(source => !source.ok && source.unavailable && source.httpStatus === null &&
+        source.errorCode === failure.code && source.errorDetail === failure.message));
+    await Promise.all(sources.map(source => run('recovered', null, collect, { [source]: [] })));
+    assert.equal(dispatches, sources.length);
+});
+
 test('directory audit failures limit Microsoft coverage without leaking Graph diagnostics', () => {
     const client = presentSecurityPayload({ identityRisk: { sources: { riskyUsers: {
         status: 'unavailable', httpStatus: 403, errorDetail: 'Forbidden'

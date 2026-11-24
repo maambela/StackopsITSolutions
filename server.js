@@ -15456,6 +15456,16 @@ function buildCloudflarePollingSecurityAlerts(summary = {}) {
     }));
 }
 
+function runSecurityGraphSource(token, authFailure, collect, empty) {
+    if (token) return collect(token);
+    return {
+        ...empty, ok: false, unavailable: true, httpStatus: null, recordsFetched: 0, attempts: 0,
+        warnings: ['Microsoft security data could not refresh because authentication was unavailable.'],
+        errorCode: authFailure?.code || 'GRAPH_AUTH_UNAVAILABLE',
+        errorDetail: authFailure?.message || 'Microsoft Graph access token is unavailable.'
+    };
+}
+
 async function buildSecurityEventsPayloadFromApi(options = {}) {
     const collectionStartedAt = new Date();
     console.log('[security_alerts:start] Security Alerts domain processing starting');
@@ -15492,15 +15502,20 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     // Attach a handler immediately while Graph authentication is still pending.
     cloudflarePending.catch(() => {});
     let token;
+    let graphAuthFailure;
 
     try {
         token = options.token || await getSecurityAlertsGraphTokenForCompany(companyId);
+        if (typeof token !== 'string' || !token.trim()) {
+            throw Object.assign(new Error('Microsoft Graph access token is unavailable.'), { code: 'GRAPH_AUTH_UNAVAILABLE' });
+        }
         stages.push({
             stage: 'graph_credentials:complete_or_failed',
             status: 'complete',
             at: new Date().toISOString()
         });
     } catch (error) {
+        graphAuthFailure = error;
         stages.push({
             stage: 'graph_credentials:complete_or_failed',
             status: 'failed_terminal',
@@ -15516,10 +15531,10 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
     console.log('[security_alerts:prepare_fetch:start] Preparing Microsoft Graph and Cloudflare API security sources');
 
     const sourceSettled = await Promise.allSettled([
-        fetchSecurityAlertRows(token, collectionOptions),
-        fetchSecurityIncidentRows(token, collectionOptions),
+        runSecurityGraphSource(token, graphAuthFailure, bearer => fetchSecurityAlertRows(bearer, collectionOptions), { alerts: [] }),
+        runSecurityGraphSource(token, graphAuthFailure, bearer => fetchSecurityIncidentRows(bearer, collectionOptions), { incidents: [] }),
         fetchSecurityThreatIndicatorRows(),
-        fetchSecuritySignInRows(token, collectionOptions),
+        runSecurityGraphSource(token, graphAuthFailure, bearer => fetchSecuritySignInRows(bearer, collectionOptions), { signIns: [] }),
         cloudflarePending.then(summary => ({
             label: 'Cloudflare security polling',
             summary,
@@ -15527,8 +15542,14 @@ async function buildSecurityEventsPayloadFromApi(options = {}) {
             recordsFetched: summary.rawSecurityRecords?.length || 0,
             ok: true
         })),
-        fetchMicrosoftIdentityRiskEvidence(token, { graph: collection?.graph }),
-        fetchSecurityDirectoryAuditRows(token, collectionOptions)
+        runSecurityGraphSource(token, graphAuthFailure, bearer => fetchMicrosoftIdentityRiskEvidence(bearer, { graph: collection?.graph }), {
+            riskDetections: [], riskyUsers: [],
+            sources: Object.fromEntries(['riskDetections', 'riskyUsers'].map(name => [name, {
+                status: 'unavailable', recordsFetched: 0, httpStatus: null,
+                errorCode: graphAuthFailure?.code || 'GRAPH_AUTH_UNAVAILABLE'
+            }]))
+        }),
+        runSecurityGraphSource(token, graphAuthFailure, bearer => fetchSecurityDirectoryAuditRows(bearer, collectionOptions), { value: [] })
     ]);
 
     function resolvedSource(index, fallback) {
