@@ -1,3 +1,4 @@
+const { assertCollectionOwner } = require('./graph-collection-ownership');
 const crypto = require('crypto');
 const { buildBackupDashboardSource } = require('./backup-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
@@ -125,6 +126,7 @@ function createBackupEvidenceStore({ pool, logger = console, now = () => new Dat
         let snapshotId = null;
         try {
             if (typeof connection.beginTransaction === 'function') await db(() => connection.beginTransaction(), 'Backup evidence transaction begin');
+            await assertCollectionOwner(connection, companyId);
             const metrics = evidence.dashboardMetrics;
             const [snapshotResult] = await db(() => connection.query(
                 `INSERT INTO StackCTRLBackupEvidenceSnapshots
@@ -159,6 +161,7 @@ function createBackupEvidenceStore({ pool, logger = console, now = () => new Dat
                     [snapshotId, numericCompanyId, tenantKey, row.kind, row.sourceId, row.title, row.serviceName, row.storageGB, row.activityAgeDays, JSON.stringify(row.processed), mysqlDateTime(collectedAt)]
                 ), 'Backup evidence row insert');
             }
+            await assertCollectionOwner(connection, companyId);
             if (typeof connection.commit === 'function') await db(() => connection.commit(), 'Backup evidence transaction commit');
         } catch (error) {
             if (error?.code !== 'STACKCTRL_OPERATION_TIMEOUT' && typeof connection.rollback === 'function') await db(() => connection.rollback(), 'Backup evidence transaction rollback').catch(() => {});

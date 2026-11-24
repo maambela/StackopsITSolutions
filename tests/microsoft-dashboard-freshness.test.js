@@ -16,7 +16,10 @@ function section(source, start, end) {
 test('dashboard cache writes keep the newest complete company snapshot and its original fetch timestamp', async () => {
     const write = vm.runInNewContext(
         section(server, 'async function writeMicrosoftDashboardCache', 'async function writeBackupRecoveryPayloadCache') +
-        '\nwriteMicrosoftDashboardCache;', { console: { warn() {} } }
+        '\nwriteMicrosoftDashboardCache;', {
+            console: { warn() {} },
+            withCollectionPublication: (database, _company, publish) => publish(database)
+        }
     );
     const rows = new Map();
     const connection = {

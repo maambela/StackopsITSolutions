@@ -75,11 +75,14 @@ test('30-day history restores older events and verifies absence only with comple
     assert.equal(merge(users, scope, { ...history, companyId: 8 }, FIXED_NOW.getTime()), users);
 });
 
-test('full sign-in history is requested only on demand', () => {
+test('Identity dashboard and legacy history route read saved evidence, while scheduled collection refreshes 24 hours', () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
-    const route = source.slice(source.indexOf("app.get('/api/sunbird/identity-dashboard'"), source.indexOf("app.get('/api/sunbird/identity-dashboard-cached'"));
-    assert.match(route, /if \(req\.query\?\.signInHistory === '30d'\) \{[\s\S]*?fetchMicrosoftSignIns\(token, 30/);
-    assert.ok(route.includes('fetchMicrosoftSignIns(token, 1, { withStatus: true })'));
+    const routeStart = source.indexOf("app.get('/api/sunbird/identity-dashboard'");
+    const route = source.slice(routeStart, source.indexOf('\n});', routeStart));
+    assert.match(route, /serveSavedSunbirdIdentity|loadStoredIdentityUsers/);
+    assert.doesNotMatch(route, /fetchMicrosoftSignIns|getMicrosoftGraphToken/);
+    const scheduled = source.slice(source.indexOf('async function collectIdentityDashboardPayload'), source.indexOf('async function performIdentityEvidenceCollection'));
+    assert.ok(scheduled.includes('fetchMicrosoftSignIns(token, 1, { withStatus: true })'));
 });
 
 test('saved history fallback retains verified failures and excludes out-of-window events', () => {

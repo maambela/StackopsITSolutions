@@ -13,6 +13,24 @@ function section(source, start, end) {
     return source.slice(from, to);
 }
 
+test('direct Microsoft dashboards read saved evidence, and browser fallback reads are cache-only', () => {
+    const routes = {
+        '/api/sunbird/identity-dashboard': /serveSavedSunbirdIdentity/,
+        '/api/microsoft-devices': /readSavedDeviceDashboard/,
+        '/api/email-security': /serveSavedMicrosoftPayload/,
+        '/api/microsoft-applications': /serveSavedMicrosoftPayload/,
+        '/api/backup-recovery': /serveSavedMicrosoftPayload/
+    };
+    for (const [route, savedReader] of Object.entries(routes)) {
+        const handler = section(server, `app.get('${route}',`, '\n});');
+        assert.match(handler, savedReader);
+        assert.doesNotMatch(handler, /fetch\(|getMicrosoftGraphToken|runOwnedDashboardCacheMiss/);
+    }
+    for (const match of client.matchAll(/fetch\('\/api\/db\/(?:identity-(?:details|metrics)|device-metrics|email-security|applications|backup-recovery)[^']*'/g)) {
+        assert.match(match[0], /\?cacheOnly=1'/);
+    }
+});
+
 test('dashboard snapshots reject an older collection and a previous signed-in session', () => {
     const storage = new Map([['userEmail', 'first@example.test'], ['loginTime', '100']]);
     const api = vm.runInNewContext(section(client, 'function microsoftDashboardSession()', 'function hasRealProjectMetrics(') +
@@ -92,12 +110,16 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
             assert.fail('unexpected cache lookup');
         }
     };
-    vm.runInNewContext(section(server, "app.get('/api/sunbird/identity-dashboard-cached'", '\napp.get('), {
+    vm.runInNewContext(section(server, 'async function serveSavedSunbirdIdentity', '\napp.get(') +
+        '\nhandler = serveSavedSunbirdIdentity;', {
+        set handler(value) { handler = value; },
         app: { get(path, auth, fn) { handler = fn; } },
         authenticateToken() {},
         verifySunbirdUser: async () => ({ clientId: 'sunbird', companyId: 25 }),
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 25); },
         pool, identityAdapter,
+        readIdentityBackfill: async () => null,
+        mergeBackfillUsers: rows => rows,
         async getCachedRoleAssignments(companyId) { assert.equal(companyId, 25); return { roleAssignments: [] }; },
         console: { log() {}, warn() {}, error() {} }
     });
@@ -174,5 +196,5 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     payload = null;
     await card();
     assert.deepEqual(values(), Array(4).fill(': 0'));
-    assert.deepEqual(calls, Array(4).fill('/api/db/email-security'));
+    assert.deepEqual(calls, Array(4).fill('/api/db/email-security?cacheOnly=1'));
 });

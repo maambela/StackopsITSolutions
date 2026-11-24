@@ -1,3 +1,4 @@
+const { assertCollectionOwner } = require('./graph-collection-ownership');
 const crypto = require('crypto');
 const { buildIdentityDashboardSource } = require('./identity-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
@@ -199,6 +200,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
         let snapshotId = null;
         try {
             if (typeof connection.beginTransaction === 'function') await connection.beginTransaction();
+            await assertCollectionOwner(connection, companyId);
             const metrics = evidence.dashboardMetrics;
             const [snapshotResult] = await connection.query(
                 `INSERT INTO StackCTRLIdentityEvidenceSnapshots
@@ -258,6 +260,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
                     ]
                 );
             }
+            await assertCollectionOwner(connection, companyId);
             if (typeof connection.commit === 'function') await connection.commit();
         } catch (error) {
             if (typeof connection.rollback === 'function') await connection.rollback();

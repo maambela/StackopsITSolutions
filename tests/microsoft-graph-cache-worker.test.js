@@ -26,6 +26,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         section('async function mapWithConcurrency', 'async function getMicrosoftGraphCredentials'),
         section('async function writeMicrosoftDashboardCache', 'async function writeBackupRecoveryPayloadCache'),
         section('function hasCompleteEmailThreatCoverage', 'async function fetchEmailActivityReport'),
+        section('async function runOwnedDashboardCollection', 'async function upsertDashboardMetricCaches'),
         section('async function upsertDashboardMetricCaches', 'let dashboardMetricRefreshRunning'),
         'upsertDashboardMetricCaches;'
     ].join('\n'), {
@@ -36,7 +37,10 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
             }
         },
         console: { warn() {}, error: (...args) => failures.push(args.join(' ')) },
-        async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 7); },
+        async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 7); return 'tenant-fixture'; },
+        runWithCollectionOwnership: async (_pool, _scope, collect) => collect(),
+        withCollectionPublication: async (database, _company, publish) => publish(database),
+        STACKCTRL_COLLECTOR_TIMEOUT_MS: 180000,
         identityMetricsRefreshAttempts: new Map(),
         fetchIdentityMetricsFromApi() {
             starts.push('identity');

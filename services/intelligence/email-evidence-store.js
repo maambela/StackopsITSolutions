@@ -1,3 +1,4 @@
+const { assertCollectionOwner } = require('./graph-collection-ownership');
 const crypto = require('crypto');
 const { buildEmailDashboardSource, getEmailThreatType } = require('./email-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
@@ -190,6 +191,7 @@ function createEmailEvidenceStore({ pool, logger = console, now = () => new Date
         let snapshotId = null;
         try {
             if (typeof connection.beginTransaction === 'function') await connection.beginTransaction();
+            await assertCollectionOwner(connection, companyId);
             const metrics = evidence.dashboardMetrics;
             const [snapshotResult] = await connection.query(
                 `INSERT INTO StackCTRLEmailEvidenceSnapshots
@@ -239,6 +241,7 @@ function createEmailEvidenceStore({ pool, logger = console, now = () => new Date
                     ]
                 );
             }
+            await assertCollectionOwner(connection, companyId);
             if (typeof connection.commit === 'function') await connection.commit();
         } catch (error) {
             if (typeof connection.rollback === 'function') await connection.rollback();

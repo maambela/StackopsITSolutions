@@ -841,7 +841,7 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
         const where = companyId ? 'WHERE CompanyID = ?' : '';
         if (companyId) params.push(companyId);
         const [recentRuns, failedRuns, snapshotRows, analysisRows] = await Promise.all([
-            pool.query(`SELECT * FROM StackCTRLIntelligenceScheduleRuns ${where} ORDER BY StartedAt DESC LIMIT 100`, params),
+            pool.query(`SELECT * FROM StackCTRLIntelligenceScheduleRuns ${where || 'WHERE 1=1'} AND RunType <> 'graph_collection_claim' ORDER BY StartedAt DESC LIMIT 100`, params),
             pool.query(`SELECT * FROM StackCTRLIntelligenceScheduleRuns ${where}${where ? ' AND' : ' WHERE'} Status = 'failed' ORDER BY StartedAt DESC LIMIT 50`, params),
             pool.query(`SELECT CompanyID, MAX(CreatedAt) AS LastSnapshotAt FROM StackCTRLTenantEvidenceSnapshots ${where} GROUP BY CompanyID`, params),
             pool.query(`SELECT CompanyID, MAX(CreatedAt) AS LastAnalysisAt FROM StackCTRLTenantAIOutputs ${where} GROUP BY CompanyID`, params)

@@ -1,3 +1,4 @@
+const { assertCollectionOwner } = require('./graph-collection-ownership');
 const crypto = require('crypto');
 const { buildSecurityDashboardSource } = require('./security-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
@@ -254,6 +255,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
         let snapshotId = null;
         try {
             if (typeof connection.beginTransaction === 'function') await connection.beginTransaction();
+            await assertCollectionOwner(connection, companyId);
             const metrics = evidence.dashboardMetrics;
             const [snapshotResult] = await connection.query(
                 `INSERT INTO StackCTRLSecurityEvidenceSnapshots
@@ -286,6 +288,7 @@ function createSecurityEvidenceStore({ pool, logger = console, now = () => new D
                     [snapshotId, numericCompanyId, tenantKey, row.kind, row.sourceId, row.title, row.severity, row.status, JSON.stringify(row.processed), mysqlDateTime(collectedAt)]
                 );
             }
+            await assertCollectionOwner(connection, companyId);
             if (typeof connection.commit === 'function') await connection.commit();
         } catch (error) {
             if (typeof connection.rollback === 'function') await connection.rollback();

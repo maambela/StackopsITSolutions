@@ -108,6 +108,26 @@ test('memory-only Graph result cache expires and refreshes the provider source',
     assert.equal(refreshed.value[0].id, 'signin-2');
 });
 
+test('Security polling skips a busy Graph source and webhook publication bypasses claims', async () => {
+    let claims = 0;
+    const journal = createRawEvidenceJournal({
+        persistenceEnabled: false, withGraphOwnership: async () => {
+            claims++;
+            return { status: 'already_running' };
+        }
+    });
+    const collection = journal.collection(11);
+    const result = await collection.graph({
+        token: 'fixture', url: 'https://graph.microsoft.com/v1.0/security/alerts_v2',
+        fetchImpl: async () => assert.fail('busy poll sent a Graph request')
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.unavailable, true);
+    const published = collection.publish('Microsoft Graph', '/v1.0/security/alerts_v2', 'alert', [{ id: 'webhook-alert' }]);
+    assert.equal(published.length, 1);
+    assert.equal(claims, 1);
+});
+
 test('Graph 429 waits for Retry-After and only caches the successful retry', async () => {
     const journal = createRawEvidenceJournal({ persistenceEnabled: false });
     const waits = [];

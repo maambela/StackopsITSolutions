@@ -53,6 +53,7 @@ const { buildIdentityDashboardSource } = require('./services/intelligence/identi
 const { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');
 const { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');
 const { identityAdapter, devicesAdapter } = require('./services/intelligence/source-adapters');
+const { runWithCollectionOwnership, withCollectionPublication, assertCollectionOwner } = require('./services/intelligence/graph-collection-ownership');
 const { createIdentityEvidenceAutomation } = require('./services/intelligence/identity-evidence-automation');
 const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, mergeBackfillUsers } = require('./services/intelligence/identity-sign-in-backfill');
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
@@ -505,15 +506,15 @@ async function writeMicrosoftDashboardCache(connection, table, columnList, value
     if (table.endsWith('MetricsCache')) {
         // Metrics tables have no unique CompanyID key. Readers select the newest
         // timestamp for the company, so concurrent appends cannot regress it.
-        return connection.query(`${insert} VALUES (${placeholders})`, [...values, timestamp]);
+        return withCollectionPublication(connection, values[0], writer => writer.query(`${insert} VALUES (${placeholders})`, [...values, timestamp]));
     }
     const updates = columns.slice(1).concat('LastUpdated').map(column =>
         `${column} = IF(LastUpdated IS NULL OR VALUES(LastUpdated) > LastUpdated, VALUES(${column}), ${column})`
     );
-    return connection.query(
+    return withCollectionPublication(connection, values[0], writer => writer.query(
         `${insert} VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updates.join(', ')}`,
         [...values, timestamp]
-    );
+    ));
 }
 
 async function writeBackupRecoveryPayloadCache(companyId, payload, { collectionStartedAt, signal = null, collectorContext = {} } = {}) {
@@ -11828,6 +11829,21 @@ async function fetchBackupRecoveryPayloadFromApi(tokenOverride = null, { signal 
     };
 }
 
+async function runOwnedDashboardCollection(companyId, source, signal, timeoutMs, collect, tenantId) {
+    const scopedTenant = tenantId || await assertSharedGraphTenantForCompany(companyId);
+    return runWithCollectionOwnership(pool, {
+        companyId, tenantId: scopedTenant, source, signal, maxMs: timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS
+    }, collect);
+}
+
+async function runOwnedDashboardCacheMiss(res, companyId, source, tenantId, collect) {
+    const result = await runOwnedDashboardCollection(companyId, source, null, null, collect, tenantId);
+    if (result?.status === 'already_running') {
+        return res.status(503).json({ success: false, status: 'updating', message: 'Updating' });
+    }
+    return result;
+}
+
 async function upsertDashboardMetricCaches() {
     if (!pool) return;
     const [rows] = await pool.query(
@@ -11837,8 +11853,9 @@ async function upsertDashboardMetricCaches() {
     );
     for (const row of rows) {
         const companyId = row.CompanyID;
+        let tenantId;
         try {
-            await assertSharedGraphTenantForCompany(companyId);
+            tenantId = await assertSharedGraphTenantForCompany(companyId);
         } catch (error) {
             console.warn(`[Cache Worker] Skipping Microsoft Graph refresh for company ${companyId}:`, error.message);
             continue;
@@ -11956,7 +11973,8 @@ async function upsertDashboardMetricCaches() {
         };
         await mapWithConcurrency(Object.entries(refresh), 2, async ([source, collect]) => {
             try {
-                await collect();
+                const sourceKey = { email: 'email_security', security: 'security_alerts' }[source] || source;
+                await runOwnedDashboardCollection(companyId, sourceKey, null, null, collect, tenantId);
             } catch (error) {
                 console.error(`[Cache Worker] Failed to refresh ${source} for company ${companyId}:`, error.message);
             }
@@ -11984,19 +12002,22 @@ app.get('/api/db/identity-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const [rows] = await pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
 
-        const api = await fetchIdentityMetricsFromApi();
-        const fetchedAt = new Date();
-        if (api.activeUsers !== null) {
-            await writeMicrosoftDashboardCache(pool,
-                'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
-                [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore], fetchedAt
-            );
-        }
-        return res.json({ success: true, source: 'api-fallback', fetchedAt: fetchedAt.toISOString(), metrics: api });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'identity', tenantId, async () => {
+            const api = await fetchIdentityMetricsFromApi();
+            const fetchedAt = new Date();
+            if (api.activeUsers !== null) {
+                await writeMicrosoftDashboardCache(pool,
+                    'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+                    [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore], fetchedAt
+                );
+            }
+            return res.json({ success: true, source: 'api-fallback', fetchedAt: fetchedAt.toISOString(), metrics: api });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12007,7 +12028,7 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT UsersPayload, LastUpdated FROM IdentityUserDetailsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -12023,10 +12044,11 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
             }
             if (Array.isArray(users) && users.length > 0) {
                 let cachedRoles = await getCachedRoleAssignments(context.companyId);
-                if (!cachedRoles || cachedRoles.roleAssignments.length === 0) {
+                if (req.query?.cacheOnly !== '1' && (!cachedRoles || cachedRoles.roleAssignments.length === 0)) {
                     try {
-                        const liveRoles = await fetchRoleAssignmentsFromApi(context.companyId);
-                        cachedRoles = { roleAssignments: liveRoles, fetchedAt: new Date().toISOString() };
+                        const liveRoles = await runOwnedDashboardCollection(context.companyId, 'identity', null, null,
+                            () => fetchRoleAssignmentsFromApi(context.companyId), tenantId);
+                        if (Array.isArray(liveRoles)) cachedRoles = { roleAssignments: liveRoles, fetchedAt: new Date().toISOString() };
                     } catch (roleError) {
                         console.warn('[Identity Details] Failed to refresh role cache:', roleError.message);
                     }
@@ -12046,17 +12068,20 @@ app.get('/api/db/identity-details', authenticateToken, async (req, res) => {
             }
         }
 
-        const collectionStartedAt = new Date();
-        const api = await fetchIdentityDetailsFromApi();
-        await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [context.companyId, JSON.stringify(api.users || [])], collectionStartedAt);
-        await upsertRoleAssignmentsCache(context.companyId, api.roleAssignments || [], collectionStartedAt);
-        return res.json({
-            success: true,
-            source: 'api-fallback',
-            totalUsers: api.totalUsers,
-            users: api.users,
-            roleAssignments: api.roleAssignments || [],
-            fetchedAt: new Date().toISOString()
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'identity', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchIdentityDetailsFromApi();
+            await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [context.companyId, JSON.stringify(api.users || [])], collectionStartedAt);
+            await upsertRoleAssignmentsCache(context.companyId, api.roleAssignments || [], collectionStartedAt);
+            return res.json({
+                success: true,
+                source: 'api-fallback',
+                totalUsers: api.totalUsers,
+                users: api.users,
+                roleAssignments: api.roleAssignments || [],
+                fetchedAt: new Date().toISOString()
+            });
         });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
@@ -12068,16 +12093,19 @@ app.get('/api/db/device-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const [rows] = await pool.query('SELECT * FROM DeviceMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
-        const collectionStartedAt = new Date();
-        const api = await fetchDeviceMetricsFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'DeviceMetricsCache', 'CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices',
-            [context.companyId, api.totalDevices, api.nonCompliant, api.notEncrypted, api.staleDevices], collectionStartedAt
-        );
-        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'devices', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchDeviceMetricsFromApi();
+            await writeMicrosoftDashboardCache(pool,
+                'DeviceMetricsCache', 'CompanyID, TotalDevices, NonCompliant, NotEncrypted, StaleDevices',
+                [context.companyId, api.totalDevices, api.nonCompliant, api.notEncrypted, api.staleDevices], collectionStartedAt
+            );
+            return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12088,7 +12116,7 @@ app.get('/api/db/email-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const [rows] = await pool.query('SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [context.companyId]);
         if (rows.length > 0 && rows[0].Payload) {
             const payload = JSON.parse(rows[0].Payload);
@@ -12096,13 +12124,16 @@ app.get('/api/db/email-metrics', authenticateToken, async (req, res) => {
                 return res.json({ success: true, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, metrics: emailMetricsFromPayload(payload) });
             }
         }
-        const collectionStartedAt = new Date();
-        const api = await fetchEmailMetricsFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
-            [context.companyId, api.activeThreats, api.highSeverity, api.usersTargeted, api.openIncidents], collectionStartedAt
-        );
-        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchEmailMetricsFromApi();
+            await writeMicrosoftDashboardCache(pool,
+                'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
+                [context.companyId, api.activeThreats, api.highSeverity, api.usersTargeted, api.openIncidents], collectionStartedAt
+            );
+            return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12113,7 +12144,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -12135,7 +12166,10 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         Number(summary.activeIncidents || 0) +
                         Number(summary.mailActivity?.totalMailActivity || 0) > 0;
                     const verifiedThreatCoverage = payload.sourceAudit?.alertsComplete === true && payload.sourceAudit?.incidentsComplete === true;
-                    if ((hasSignals || verifiedThreatCoverage) && hasMailActivityShape) {
+                    const canServeSavedEmail = req.query?.cacheOnly === '1'
+                        ? hasCompleteEmailDashboard(payload)
+                        : (hasSignals || verifiedThreatCoverage) && hasMailActivityShape;
+                    if (canServeSavedEmail) {
                         return res.json({
                             ...payload,
                             source: 'db',
@@ -12146,13 +12180,16 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
             } catch (_) {}
         }
 
-        const collectionStartedAt = new Date();
-        const api = await fetchEmailSecurityPayloadFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'EmailSecurityPayloadCache', 'CompanyID, Payload',
-            [context.companyId, JSON.stringify(api)], collectionStartedAt, hasCompleteEmailDashboard(api)
-        );
-        return res.json({ ...api, source: 'api-fallback' });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchEmailSecurityPayloadFromApi();
+            await writeMicrosoftDashboardCache(pool,
+                'EmailSecurityPayloadCache', 'CompanyID, Payload',
+                [context.companyId, JSON.stringify(api)], collectionStartedAt, hasCompleteEmailDashboard(api)
+            );
+            return res.json({ ...api, source: 'api-fallback' });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12163,16 +12200,19 @@ app.get('/api/db/application-metrics', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const [rows] = await pool.query('SELECT * FROM ApplicationMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
-        const collectionStartedAt = new Date();
-        const api = await fetchApplicationMetricsFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps',
-            [context.companyId, api.totalApps, api.externalApps, api.highRiskApps, api.highAccessApps], collectionStartedAt
-        );
-        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'applications', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchApplicationMetricsFromApi();
+            await writeMicrosoftDashboardCache(pool,
+                'ApplicationMetricsCache', 'CompanyID, TotalApps, ExternalApps, HighRiskApps, HighAccessApps',
+                [context.companyId, api.totalApps, api.externalApps, api.highRiskApps, api.highAccessApps], collectionStartedAt
+            );
+            return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12183,7 +12223,7 @@ app.get('/api/db/applications', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM ApplicationPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -12199,13 +12239,16 @@ app.get('/api/db/applications', authenticateToken, async (req, res) => {
             } catch (_) {}
         }
 
-        const collectionStartedAt = new Date();
-        const api = await fetchApplicationsPayloadFromApi(null, { companyId: context.companyId, tenantKey: `company:${context.companyId}` });
-        await writeMicrosoftDashboardCache(pool,
-            'ApplicationPayloadCache', 'CompanyID, Payload',
-            [context.companyId, JSON.stringify(api)], collectionStartedAt
-        );
-        return res.json({ ...api, source: 'api-fallback' });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'applications', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchApplicationsPayloadFromApi(null, { companyId: context.companyId, tenantKey: `company:${context.companyId}` });
+            await writeMicrosoftDashboardCache(pool,
+                'ApplicationPayloadCache', 'CompanyID, Payload',
+                [context.companyId, JSON.stringify(api)], collectionStartedAt
+            );
+            return res.json({ ...api, source: 'api-fallback' });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -12224,7 +12267,7 @@ app.get('/api/db/backup-recovery', authenticateToken, async (req, res) => {
     try {
         const context = await getAccessContextByUser(req.user);
         if (!context?.companyId) return res.status(403).json({ success: false, message: 'Access mapping not configured' });
-        await assertSharedGraphTenantForCompany(context.companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
 
         const [rows] = await pool.query(
             'SELECT Payload, LastUpdated FROM BackupRecoveryPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
@@ -12245,18 +12288,59 @@ app.get('/api/db/backup-recovery', authenticateToken, async (req, res) => {
             } catch (_) {}
         }
 
-        const collectionStartedAt = new Date();
-        const api = await fetchBackupRecoveryPayloadFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'BackupRecoveryPayloadCache', 'CompanyID, Payload',
-            [context.companyId, JSON.stringify(api)], collectionStartedAt
-        );
-        return res.json({ ...api, source: 'api-fallback' });
+        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        return await runOwnedDashboardCacheMiss(res, context.companyId, 'backup', tenantId, async () => {
+            const collectionStartedAt = new Date();
+            const api = await fetchBackupRecoveryPayloadFromApi();
+            await writeMicrosoftDashboardCache(pool,
+                'BackupRecoveryPayloadCache', 'CompanyID, Payload',
+                [context.companyId, JSON.stringify(api)], collectionStartedAt
+            );
+            return res.json({ ...api, source: 'api-fallback' });
+        });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
+
+async function serveSavedMicrosoftPayload(res, companyId, table, validate, tenant) {
+    try {
+        await assertSharedGraphTenantForCompany(companyId);
+        const [rows] = await pool.query(
+            `SELECT Payload, LastUpdated FROM ${table} WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1`, [companyId]
+        );
+        const payload = parseReportJson(rows[0]?.Payload, null);
+        if (!validate(payload)) return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        res.set('Cache-Control', 'no-store');
+        return res.json({ ...payload, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, ...(tenant ? { tenant } : {}) });
+    } catch (error) {
+        console.warn('[Dashboard] Saved Microsoft data unavailable:', error.message);
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
+    }
+}
+
+async function readSavedDeviceDashboard(companyId) {
+    const devices = await devicesAdapter({
+        pool,
+        companyId,
+        capability: { profileKey: 'sunbird', displayName: 'Device Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
+    });
+    const deviceRows = devices.evidence?.find(item => item.evidenceType === 'devices')?.data;
+    if (devices.sourceLineage?.isComplete === true && Array.isArray(deviceRows)) {
+        return {
+            success: true,
+            source: 'db',
+            fetchedAt: devices.sourceLineage.sourceFetchedAt || devices.sourceLineage.collectedAt,
+            summary: devices.metrics,
+            metrics: devices.metrics,
+            devices: deviceRows,
+            deviceInventoryComplete: true,
+            warnings: devices.warnings || []
+        };
+    }
+    return null;
+}
 
 app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, res) => {
     try {
@@ -12291,24 +12375,8 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
             };
         }
 
-        const devices = await devicesAdapter({
-            pool,
-            companyId,
-            capability: { profileKey: 'sunbird', displayName: 'Device Protection', isExpected: true, isEnabled: true, refreshMode: 'stored_only' }
-        });
-        const deviceRows = devices.evidence?.find(item => item.evidenceType === 'devices')?.data;
-        if (devices.sourceLineage?.isComplete === true && Array.isArray(deviceRows)) {
-            snapshots.devices = {
-                success: true,
-                source: 'db',
-                fetchedAt: devices.sourceLineage.sourceFetchedAt || devices.sourceLineage.collectedAt,
-                summary: devices.metrics,
-                metrics: devices.metrics,
-                devices: deviceRows,
-                deviceInventoryComplete: true,
-                warnings: devices.warnings || []
-            };
-        }
+        const devices = await readSavedDeviceDashboard(companyId);
+        if (devices) snapshots.devices = devices;
 
         const cacheSpecs = [
             ['security', 'SecurityEventsPayloadCache', async payload => {
@@ -12489,32 +12557,10 @@ app.get('/api/microsoft-roles', authenticateToken, async (req, res) => {
  * Returns: List of applications and service principals from Microsoft Graph
  */
 app.get('/api/microsoft-applications', authenticateToken, async (req, res) => {
-    try {
-        const userEmail = req.user.email;
-        const tenant = getTenantByEmail(userEmail);
-        
-        if (!tenant) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-
-        await assertSharedGraphTenantForCompany(tenant.companyId);
-        const payload = await fetchApplicationsPayloadFromApi(null, { companyId: tenant.companyId, tenantKey: tenant.clientId || `company:${tenant.companyId}` });
-        const dashboardPayload = buildApplicationsDashboardPayload({ tenantKey: tenant.clientId || 'sunbird', payload });
-        if (applicationsEvidenceService && tenant.companyId) {
-            applicationsEvidenceService.persistProcessedEvidence({
-                companyId: tenant.companyId,
-                tenantKey: tenant.clientId || 'sunbird',
-                payload: dashboardPayload,
-                collectionTrigger: 'dashboard_request',
-                sourceEndpoint: '/api/microsoft-applications'
-            }).catch(error => console.warn('[Applications Evidence] Dashboard response could not be stored:', error.message));
-        }
-        res.json({ ...dashboardPayload, tenant: tenant.clientId, source: 'api' });
-
-    } catch (error) {
-        console.error('[Microsoft Graph] Error fetching applications:', error);
-        res.status(500).json({ error: 'Failed to fetch Microsoft Graph applications' });
-    }
+    const tenant = getTenantByEmail(req.user.email);
+    if (!tenant?.companyId) return res.sendStatus(403);
+    return serveSavedMicrosoftPayload(res, tenant.companyId, 'ApplicationPayloadCache',
+        payload => payload?.success === true && Array.isArray(payload.applications), tenant.clientId);
 });
 
 /**
@@ -13693,496 +13739,21 @@ app.get('/api/sunbird/operations', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) => {
-    const operation = beginSunbirdOperation(req, 'identity-dashboard');
+    if (req.query?.signInHistory !== '30d') return serveSavedSunbirdIdentity(req, res);
     try {
-        const userEmail = req.user.email;
-        console.log(`[Sunbird Dashboard] Fetching dashboard data for: ${userEmail}`);
-
-        // Verify this is Sunbird client only (checks cache first, then database)
-        const tenant = await verifySunbirdUser(userEmail);
-        if (!tenant || tenant.clientId !== 'sunbird') {
-            console.warn(`[Sunbird Dashboard] Access denied for ${userEmail}`);
-            operation.finish(403, { reason: 'access_denied' });
-            return res.status(403).json({ 
-                success: false,
-                error: 'Access denied',
-                message: 'This feature is only available for Sunbird client'
-            });
-        }
-
-        console.log('[Sunbird Dashboard] User verified as Sunbird client');
-    operation.step('tenant_verified', { companyId: tenant.companyId || null });
-
-        // Get Microsoft Graph token
-        const sourceTenantId = await assertSharedGraphTenantForCompany(tenant.companyId);
-        const collectionStartedAt = new Date();
-
-        if (req.query?.signInHistory === '30d') {
-            const history = await getMicrosoftGraphToken()
-                .then(token => fetchMicrosoftSignIns(token, 30, { withStatus: true }))
-                .catch(error => {
-                    console.warn('[Identity History] Microsoft Graph unavailable:', error.message);
-                    return { status: 'unavailable', records: [] };
-                });
-            if (history.status !== 'complete') {
-                const users = await loadStoredIdentityUsers(tenant.companyId, sourceTenantId, { requireTenant: true }).catch(error => {
-                    console.warn('[Identity History] Saved evidence could not be loaded:', error.message);
-                    return [];
-                });
-                const saved = savedIdentityHistoryEvents(users, collectionStartedAt.getTime());
-                if (saved.length) {
-                    history.records = history.records.concat(saved).sort((a, b) => Date.parse(b.createdDateTime) - Date.parse(a.createdDateTime));
-                    history.status = 'partial';
-                }
-            }
-            operation.finish(200, { signIns: history.records.length });
-            return res.json({ success: true, companyId: Number(tenant.companyId), sourceTenantId, fetchedAt: collectionStartedAt.toISOString(), since: history.since, status: history.status, records: history.records });
-        }
-
-        const token = await getMicrosoftGraphToken();
-        operation.step('graph_token_loaded');
-        const collectionWarnings = [];
-        const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
-            fetchMicrosoftUsers(token),
-            fetchMicrosoftRoleAssignments(token).then(
-                assignments => ({ assignments, status: 'complete' }),
-                error => {
-                    console.warn('[Sunbird Dashboard] Role assignment enrichment unavailable:', error.message);
-                    collectionWarnings.push('Administrator role assignments are unavailable.');
-                    return { assignments: [], status: 'unavailable' };
-                }
-            ),
-            fetchMicrosoftSignIns(token, 1, { withStatus: true }),
-            loadStoredIdentityUsers(tenant.companyId, sourceTenantId).catch(error => {
-                console.warn('[Sunbird Dashboard] Previous verified sign-in data could not be loaded:', error.message);
-                collectionWarnings.push('Previous verified sign-in details could not be loaded.');
-                return [];
-            })
-        ]);
-        const roleAssignments = roleResult.assignments;
-        const signIns = signInCollection.records;
-        if (signInCollection.status !== 'complete') {
-            collectionWarnings.push(signInCollection.status === 'partial'
-                ? 'The 24-hour sign-in collection is incomplete.'
-                : 'Sign-in information is unavailable.');
-        }
-        operation.step('graph_aggregates_loaded', {
-            users: users.length,
-            roleAssignments: roleAssignments.length,
-            signIns: signIns.length,
-            signInCollectionStatus: signInCollection.status
-        });
-
-        console.log(`[Sunbird Dashboard] Fetched ${users.length} users, ${roleAssignments.length} role assignments, ${signIns.length} sign-ins`);
-
-        // Build user-role map
-        const userRoleMap = {};
-        roleAssignments.forEach(assignment => {
-            const principalId = assignment.principalId;
-            if (!userRoleMap[principalId]) {
-                userRoleMap[principalId] = [];
-            }
-            userRoleMap[principalId].push({
-                id: assignment.roleDefinition?.id,
-                name: assignment.roleDefinition?.displayName || 'Unknown Role'
-            });
-        });
-
-        const usersById = new Map(users.filter(user => user.id).map(user => [String(user.id), user]));
-        const usersByUpn = new Map(users.filter(user => user.userPrincipalName)
-            .map(user => [String(user.userPrincipalName).trim().toLowerCase(), user]));
-        const latestSignInMap = new Map();
-        const latestFailedSignInMap = new Map();
-        signIns.forEach(signin => {
-            const user = signin.userId
-                ? usersById.get(String(signin.userId))
-                : usersByUpn.get(String(signin.userPrincipalName || '').trim().toLowerCase());
-            const date = signin.createdDateTime ? new Date(signin.createdDateTime) : null;
-            if (!user || !date || Number.isNaN(date.getTime())) return;
-            const key = String(user.id || user.userPrincipalName);
-            const errorCode = signin.status?.errorCode;
-            const event = {
-                dateTime: date.toISOString(),
-                appDisplayName: signin.appDisplayName || null,
-                clientAppUsed: signin.clientAppUsed || null,
-                ipAddress: signin.ipAddress || null,
-                location: [signin.location?.city, signin.location?.countryOrRegion].filter(Boolean).join(', ') || null,
-                device: signin.deviceDetail?.displayName || null,
-                status: errorCode === 0 || errorCode === '0' ? 'Success'
-                    : errorCode === null || errorCode === undefined ? 'Unknown' : 'Failed',
-                errorCode: errorCode ?? null,
-                failureReason: signin.status?.failureReason || null
-            };
-            const latest = latestSignInMap.get(key);
-            if (!latest || date.getTime() > Date.parse(latest.dateTime)) latestSignInMap.set(key, event);
-            if (event.status === 'Failed') {
-                const failed = latestFailedSignInMap.get(key);
-                if (!failed || date.getTime() > Date.parse(failed.dateTime)) latestFailedSignInMap.set(key, event);
-            }
-        });
-        const previousUsersById = new Map(previousUsers.filter(user => user.id).map(user => [String(user.id), user]));
-        const previousUsersByUpn = new Map(previousUsers.filter(user => user.userPrincipalName)
-            .map(user => [String(user.userPrincipalName).trim().toLowerCase(), user]));
-
-        const enrichedUsers = await mapWithConcurrency(users, 8, async (user) => {
-            const key = String(user.id || user.userPrincipalName);
-            const previous = (user.id && previousUsersById.get(String(user.id))) ||
-                previousUsersByUpn.get(String(user.userPrincipalName || '').trim().toLowerCase());
-            const roleStatus = roleResult.status === 'complete' ? 'complete'
-                : Array.isArray(previous?.roles) ? 'stale' : 'unavailable';
-            const userRoles = roleStatus === 'complete' ? userRoleMap[user.id] || [] : previous?.roles || [];
-            const hasAdminRole = roleStatus === 'unavailable' ? null : userRoles.some(role => {
-                const name = String(typeof role === 'string' ? role : role?.name || '').toLowerCase();
-                return name.includes('admin') || name.includes('global');
-            });
-            let mfa = null;
-            try {
-                mfa = await resolveIdentityDashboardMfa(token, user, previous, sourceTenantId);
-            } catch (_) {
-                // Preserve the complete inventory when optional MFA enrichment is unavailable.
-            }
-            const mfaStatus = typeof mfa?.enabled === 'boolean' ? 'complete' : 'unavailable';
-            const hasMFA = mfa?.enabled ?? null;
-            const currentSignIn = latestSignInMap.get(key);
-            const currentFailure = latestFailedSignInMap.get(key);
-            const priorFailure = previous?.failedSignIn;
-            const latestFailure = priorFailure?.dateTime && (!currentFailure || Date.parse(priorFailure.dateTime) > Date.parse(currentFailure.dateTime))
-                ? { ...priorFailure, observationStatus: 'stale' } : currentFailure || null;
-            const previousSignIn = previous?.lastSignIn;
-            const lastSignIn = previousSignIn?.dateTime && (!currentSignIn || Date.parse(previousSignIn.dateTime) > Date.parse(currentSignIn.dateTime))
-                ? previousSignIn : currentSignIn;
-            const lastSignInDate = lastSignIn?.dateTime
-                ? new Date(lastSignIn.dateTime)
-                : lastSignIn?.createdDateTime ? new Date(lastSignIn.createdDateTime) : null;
-            const hasValidSignInDate = lastSignInDate && !Number.isNaN(lastSignInDate.getTime());
-            const daysSinceSignIn = hasValidSignInDate
-                ? Math.max(0, Math.floor((Date.now() - lastSignInDate.getTime()) / 86400000))
-                : null;
-            const signInStatus = currentSignIn && lastSignIn === currentSignIn ? 'observed'
-                : previous?.lastSignIn?.dateTime
-                    ? (signInCollection.status === 'complete' ? 'no_recent_sign_in' : 'stale')
-                    : signInCollection.status === 'complete' ? 'no_recorded_sign_in' : signInCollection.status;
-            let riskLevel = 'SAFE';
-            if (roleStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false) {
-                riskLevel = 'HIGH';
-            } else if (daysSinceSignIn !== null && daysSinceSignIn > 30) {
-                riskLevel = 'MEDIUM';
-            }
-            const isGuest = isGuestMicrosoftUser(user);
-            const isWorkforce = isWorkforceMicrosoftUser(user);
-
-            return {
-                id: user.id,
-                displayName: user.displayName || 'Unknown User',
-                mail: user.mail,
-                userPrincipalName: user.userPrincipalName,
-                userType: isGuest ? 'Guest' : isWorkforce ? 'Member' : 'Unknown',
-                jobTitle: user.jobTitle || 'No Title',
-                mobilePhone: user.mobilePhone || 'N/A',
-                roles: userRoles,
-                hasAdminRole,
-                rolesStatus: roleStatus,
-                isExternal: isGuest,
-                isWorkforce,
-                mfaEnabled: hasMFA,
-                mfaStatus,
-                mfaObservedAt: mfa?.observedAt ?? null,
-                mfaSourceTenantId: mfaStatus === 'complete' ? sourceTenantId : null,
-                lastVerifiedMfa: mfa?.lastVerifiedMfa,
-                authMethodCount: mfa?.count ?? null,
-                riskLevel: riskLevel,
-                lastSignIn: {
-                    dateTime: hasValidSignInDate ? lastSignInDate.toISOString() : null,
-                    daysSince: daysSinceSignIn,
-                    location: lastSignIn?.location || null,
-                    device: lastSignIn?.device || lastSignIn?.deviceDetail?.displayName || null,
-                    appDisplayName: lastSignIn?.appDisplayName || null,
-                    clientAppUsed: lastSignIn?.clientAppUsed || null,
-                    status: lastSignIn?.status || null,
-                    errorCode: lastSignIn?.errorCode ?? null,
-                    failureReason: lastSignIn?.failureReason || null,
-                    observationStatus: signInStatus,
-                    windowDays: 1
-                },
-                failedSignIn: latestFailure,
-                flags: {
-                    adminWithoutMFA: roleStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false,
-                    inactiveOver30Days: daysSinceSignIn !== null && daysSinceSignIn > 30,
-                    newLocationLogin: false
-                }
-            };
-        });
-        operation.step('users_enriched', { users: enrichedUsers.length });
-
-        // Calculate dashboard metrics using native Entra workforce scope.
-        const totalUsers = enrichedUsers.length;
-        const workforceUsers = enrichedUsers.filter(u => u.isWorkforce === true);
-        const externalUsers = enrichedUsers.filter(u => u.isExternal === true);
-        const unknownUserTypes = enrichedUsers.filter(u => !u.isWorkforce && !u.isExternal).length;
-        const adminUsers = workforceUsers.filter(u => u.hasAdminRole).length;
-        const mfaEnabledUsers = workforceUsers.filter(u => u.mfaEnabled).length;
-        const mfaMissingUsers = workforceUsers.filter(u => u.mfaEnabled === false).length;
-        const mfaUnknownUsers = workforceUsers.length - mfaEnabledUsers - mfaMissingUsers;
-        const mfaAssessmentStatus = mfaUnknownUsers || unknownUserTypes ? 'incomplete' : 'complete';
-        const mfaPercentage = workforceUsers.length && mfaAssessmentStatus === 'complete'
-            ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1)
-            : null;
-        const highRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'HIGH').length;
-        const mediumRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'MEDIUM').length;
-        const activeUsers24h = signInCollection.status === 'complete'
-            ? enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 1).length
-            : null;
-        const usersWithCompleteProfile = enrichedUsers.filter(u => 
-            u.jobTitle !== 'No Title' && u.mobilePhone !== 'N/A'
-        ).length;
-
-        // 🎯 NEW: A. Privileged Risk - Admins without MFA
-        const privilegedUsersWithoutMFA = workforceUsers.filter(u => u.flags.adminWithoutMFA).length;
-
-        // 🎯 NEW: B. Identity Risk Score (calculated, not random)
-        let identityRiskScore = 0;
-        enrichedUsers.forEach(user => {
-            if (user.flags.adminWithoutMFA) identityRiskScore += 40;
-            if (user.authMethodCount === 0) identityRiskScore += 20;
-            if (user.isExternal) identityRiskScore += 15;
-            if (user.riskLevel === 'MEDIUM') identityRiskScore += 10;
-            if (user.riskLevel === 'HIGH') identityRiskScore += 30;
-        });
-        identityRiskScore = totalUsers
-            ? Math.min(100, Math.round((identityRiskScore / (totalUsers * 40)) * 100))
-            : null;
-
-        // 🎯 NEW: C. Inactive Users Breakdown
-        const inactiveBreakdown = {
-            '0-7days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 7).length,
-            '7-30days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 7 && u.lastSignIn.daysSince <= 30).length,
-            '30-90days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 30 && u.lastSignIn.daysSince <= 90).length,
-            '90+days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 90).length
-        };
-
-        // 🎯 NEW: E. Device Trust Analysis
-        const deviceTrustAnalysis = {
-            managed: 0,
-            unmanaged: 0,
-            unknown: 0
-        };
-        enrichedUsers.forEach(user => {
-            if (!user.lastSignIn.dateTime) return;
-            if (user.lastSignIn && user.lastSignIn.device) {
-                const device = user.lastSignIn.device.toLowerCase();
-                if (device.includes('unknown') || device === 'unknown') {
-                    deviceTrustAnalysis.unknown++;
-                } else if (device.includes('managed') || device.includes('iphone') || device.includes('ipad') || device.includes('android')) {
-                    deviceTrustAnalysis.managed++;
-                } else {
-                    deviceTrustAnalysis.unmanaged++;
-                }
-            } else deviceTrustAnalysis.unknown++;
-        });
-
-        // 🎯 NEW: F. Authentication Strength
-        const authenticationStrength = {
-            passwordOnly: 0,
-            basicMFA: 0,
-            strongMFA: 0 // FIDO2, Authenticator app
-        };
-        enrichedUsers.forEach(user => {
-            if (user.mfaStatus !== 'complete') return;
-            if (user.authMethodCount === 0 || user.authMethodCount === 1) {
-                authenticationStrength.passwordOnly++;
-            } else if (user.mfaEnabled && user.authMethodCount >= 2) {
-                authenticationStrength.basicMFA++;
-                // Note: would need detailed auth method data to differentiate strongMFA
-            }
-        });
-        authenticationStrength.strongMFA = Math.round(enrichedUsers.filter(u => u.mfaStatus === 'complete' && u.authMethodCount > 2).length);
-
-        // 🎯 NEW: G. Role Distribution (Top roles)
-        const roleDistribution = {};
-        enrichedUsers.forEach(user => {
-            user.roles.forEach(role => {
-                const name = typeof role === 'string' ? role : role?.name;
-                if (name) roleDistribution[name] = (roleDistribution[name] || 0) + 1;
-            });
-        });
-        const topRoles = Object.entries(roleDistribution)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8)
-            .map(([role, count]) => ({ role, count }));
-
-        // 🎯 NEW: H. Identity Hygiene Score
-        const profileCompleteness = totalUsers
-            ? Math.round((enrichedUsers.filter(u => u.jobTitle !== 'No Title').length / totalUsers) * 100)
-            : 0;
-        const workforceBase = Math.max(1, workforceUsers.length);
-        const authCompleteness = mfaAssessmentStatus === 'complete' ? Math.round((mfaEnabledUsers / workforceBase) * 100) : null;
-        const activityCompleteness = signInCollection.status === 'complete'
-            ? Math.round((workforceUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 90).length / workforceBase) * 100)
-            : null;
-        const identityHygieneScore = authCompleteness === null || activityCompleteness === null
-            ? null
-            : Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
-
-        const systemHealth = {
-            performance: signInCollection.status === 'complete'
-                ? Math.round((workforceUsers.filter(u => u.lastSignIn.status === 'Success').length / workforceBase) * 100)
-                : null,
-            availability: activeUsers24h === null ? null : Math.round((activeUsers24h / workforceBase) * 100),
-            security: authCompleteness,
-            compliance: Math.round((workforceUsers.filter(u => u.jobTitle !== 'No Title' && u.mobilePhone !== 'N/A').length / workforceBase) * 100) || 0,
-            backup: mfaAssessmentStatus === 'complete'
-                ? Math.round((workforceUsers.filter(u => u.authMethodCount > 1).length / workforceBase) * 100)
-                : null
-        };
-
-        // Smart insights
-        const toInsightEvidence = user => ({
-            id: user.id,
-            displayName: user.displayName,
-            userPrincipalName: user.userPrincipalName,
-            riskLevel: user.riskLevel
-        });
-        const insights = {
-            adminsWithoutMFA: enrichedUsers.filter(u => u.flags.adminWithoutMFA).slice(0, 20).map(toInsightEvidence),
-            inactiveUsers: enrichedUsers.filter(u => u.flags.inactiveOver30Days).slice(0, 20).map(toInsightEvidence),
-            failedSignInUsers: enrichedUsers.filter(u => u.failedSignIn?.status === 'Failed').slice(0, 20).map(toInsightEvidence)
-        };
-
-        // Device breakdown
-        const deviceBreakdown = {};
-        enrichedUsers.forEach(user => {
-            if (user.lastSignIn.dateTime && user.lastSignIn.device) {
-                const device = user.lastSignIn.device.toLowerCase();
-                deviceBreakdown[device] = (deviceBreakdown[device] || 0) + 1;
-            }
-        });
-
-        // Top locations
-        const locationBreakdown = {};
-        enrichedUsers.forEach(user => {
-            if (user.lastSignIn.dateTime && user.lastSignIn.location) {
-                locationBreakdown[user.lastSignIn.location] = (locationBreakdown[user.lastSignIn.location] || 0) + 1;
-            }
-        });
-
-        const topLocations = Object.entries(locationBreakdown)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(([location, count]) => ({ location, count }));
-
-        // Calculate security score (0-100)
-        const securityScore = mfaPercentage === null ? null : Math.round(
-            (mfaPercentage * 0.4) +  // MFA is 40% of score
-            ((100 - (highRiskUsers / totalUsers * 100)) * 0.3) +  // Low risk is 30%
-            ((adminUsers <= 5 ? 100 : 50) * 0.3)  // Admin count is 30%
-        );
-
-        console.log('[Sunbird Dashboard] Dashboard data compiled successfully');
-
-        const dashboardPayload = {
-            success: true,
-            tenant: tenant.clientId,
-            sourceTenantId,
-            companyId: Number(tenant.companyId),
-            collectionStartedAt: collectionStartedAt.toISOString(),
-            fetchedAt: new Date().toISOString(),
-            roleAssignmentsStatus: roleResult.status,
-            signInCollection: {
-                status: signInCollection.status,
-                windowDays: 1,
-                recordCount: signIns.length,
-                warnings: signInCollection.warnings
-            },
-            mfaCollection: {
-                status: mfaAssessmentStatus,
-                failedUserCount: enrichedUsers.filter(user => user.mfaStatus !== 'complete').length
-            },
-            warnings: collectionWarnings,
-            summary: {
-                totalUsers,
-                workforceUsers: workforceUsers.length,
-                externalUsers: externalUsers.length,
-                unknownUserTypes,
-                activeUsers24h,
-                activeUsers24hStatus: signInCollection.status,
-                activeUsersPercentage: activeUsers24h === null || !totalUsers ? null : Math.round((activeUsers24h / totalUsers) * 100),
-                adminUsers,
-                mfaEnabledPercentage: mfaPercentage,
-                mfaAssessmentStatus,
-                mfaEnabledUsers,
-                mfaMissingUsers,
-                highRiskUsers,
-                highRiskBreakdown: {
-                    adminWithoutMFA: privilegedUsersWithoutMFA,
-                    noRecordedSignIn: enrichedUsers.filter(u => u.lastSignIn.observationStatus === 'no_recorded_sign_in').length,
-                    externalUser: externalUsers.length
-                },
-                securityScore,
-                identityRiskScore,
-                identityHygieneScore,
-                mediumRiskUsers,
-                privilegedUsersWithoutMFA
-            },
-            systemHealth,
-            users: enrichedUsers,
-            riskDistribution: {
-                HIGH: highRiskUsers,
-                MEDIUM: mediumRiskUsers,
-                SAFE: totalUsers - highRiskUsers - mediumRiskUsers
-            },
-            insights,
-            inactiveBreakdown,
-            deviceTrustAnalysis,
-            authenticationStrength,
-            topRoles,
-            hygieneLevels: {
-                profileCompleteness,
-                authCompleteness,
-                activityCompleteness
-            },
-            signInPatterns: {
-                topLocations,
-                deviceBreakdown,
-                avgSignInsPerUser: signInCollection.status === 'complete' && totalUsers ? signIns.length / totalUsers : null,
-                failedSignInCount: signIns.filter(signIn => signIn.status?.errorCode !== null
-                    && signIn.status?.errorCode !== undefined
-                    && signIn.status.errorCode !== 0
-                    && signIn.status.errorCode !== '0').length
-            },
-            roleInsights: {
-                globalAdmins: enrichedUsers.filter(u => u.roles.some(role =>
-                    String(typeof role === 'string' ? role : role?.name || '').toLowerCase().includes('global')
-                )).length,
-                privilegedUsers: enrichedUsers.filter(u => u.roles.length > 0).length,
-                usersWithMultipleRoles: enrichedUsers.filter(u => u.roles.length > 1).length,
-                roleDistribution: topRoles
-            }
-        };
-
-        if (identityEvidenceService && tenant.companyId) {
-            operation.step('evidence_persist_scheduled');
-            identityEvidenceService.persistProcessedEvidence({
-                companyId: tenant.companyId,
-                tenantKey: tenant.clientId,
-                payload: dashboardPayload,
-                collectionTrigger: 'dashboard_request',
-                sourceEndpoint: '/api/sunbird/identity-dashboard'
-            }).catch(error => {
-                console.warn('[Identity Evidence] Dashboard response could not be stored:', error.message);
-            });
-        }
-
-        sendSunbirdJson(res, dashboardPayload, operation);
-        operation.finish(200, { users: enrichedUsers.length, signIns: signIns.length });
-
+        const tenant = await verifySunbirdUser(req.user.email);
+        if (tenant?.clientId !== 'sunbird' || !tenant.companyId) return res.sendStatus(403);
+        const companyId = Number(tenant.companyId);
+        const sourceTenantId = await assertSharedGraphTenantForCompany(companyId);
+        const checkpoint = await readIdentityBackfill(pool, companyId, sourceTenantId);
+        const users = await loadStoredIdentityUsers(companyId, sourceTenantId, { requireTenant: true });
+        const records = savedIdentityHistoryEvents(users, Date.now());
+        return res.json({ success: true, companyId, sourceTenantId,
+            fetchedAt: checkpoint?.state?.updatedAt || null,
+            status: records.length ? 'partial' : 'unavailable', records });
     } catch (error) {
-        console.error('[Sunbird Dashboard] Error:', error.message);
-        operation.finish(500, { error: error.message });
-        
-        res.status(500).json({ 
-            error: 'Failed to fetch dashboard data',
-            message: error.message
-        });
+        console.warn('[Identity History] Saved data unavailable:', error.message);
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -14316,7 +13887,7 @@ async function verifySunbirdUser(userEmail) {
     }
 }
 
-app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req, res) => {
+async function serveSavedSunbirdIdentity(req, res) {
     try {
         const userEmail = req.user.email;
         console.log(`[Sunbird Cached Dashboard] Fetching cached data for: ${userEmail}`);
@@ -14358,18 +13929,26 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
             privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
         };
         const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
+        const fetchedAt = snapshot.sourceLineage.sourceFetchedAt || snapshot.freshness.lastUpdated;
+        const signInCollection = snapshot.dashboardSourceMetrics?.signInCollection;
+        const backfill = await readIdentityBackfill(pool, Number(tenant.companyId), sourceTenantId).catch(error => {
+            console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
+            return null;
+        });
         return res.json({
             success: true,
             tenant: tenant.clientId,
-            fetchedAt: snapshot.freshness.lastUpdated,
+            fetchedAt,
+            cachedFallback: true,
+            backfillUpdatedAt: backfill?.state?.updatedAt,
             source: 'identity_evidence_snapshot',
             companyId: Number(tenant.companyId),
             sourceTenantId,
             summary,
             metrics: summary,
             stackctrlMetrics: snapshot.dashboardSourceMetrics,
-            signInCollection: snapshot.dashboardSourceMetrics?.signInCollection,
-            users,
+            signInCollection,
+            users: mergeBackfillUsers(users, backfill?.state, fetchedAt, signInCollection),
             roleAssignments: cachedRoles?.roleAssignments || []
         });
     } catch (error) {
@@ -14384,7 +13963,9 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
             timestamp: new Date().toISOString()
         });
     }
-});
+}
+
+app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, serveSavedSunbirdIdentity);
 
 // ====================================================================================================//
 //                        MICROSOFT GRAPH - DEVICES & SECURITY                                        //
@@ -14446,191 +14027,16 @@ async function fetchSecurityAlerts(token, { withCoverage = false } = {}) {
  */
 app.get('/api/microsoft-devices', authenticateToken, async (req, res) => {
     try {
-        const userEmail = req.user.email;
-        console.log(`[Devices Dashboard] Fetching device data for: ${userEmail}`);
-
-        // Get the tenant for this user
-        const tenant = getTenantByEmail(userEmail);
-        if (!tenant) {
-            console.warn(`[Devices Dashboard] User ${userEmail} does not belong to any configured tenant`);
-            return res.status(403).json({ 
-                error: 'User does not have access to device data',
-                message: 'Your email is not associated with any tenant'
-            });
-        }
-
-        // Get Microsoft Graph token
+        const tenant = getTenantByEmail(req.user.email);
+        if (!tenant?.companyId) return res.sendStatus(403);
         await assertSharedGraphTenantForCompany(tenant.companyId);
-        const collectionStartedAt = new Date();
-        const token = await getMicrosoftGraphToken();
-
-        // Fetch all required data in parallel
-        const [devices, policies, alerts] = await Promise.all([
-            fetchMicrosoftDevices(token),
-            fetchCompliancePolicies(token),
-            fetchSecurityAlerts(token, { withCoverage: true })
-        ]);
-
-        // Process devices data
-        const normalizeCompliance = value => String(value || 'unknown').toLowerCase().replace(/[_\s-]/g, '');
-        const processedDevices = devices.map(device => ({
-            id: device.id,
-            deviceName: device.deviceName || 'Unknown Device',
-            userPrincipalName: device.userPrincipalName || 'N/A',
-            operatingSystem: device.operatingSystem || 'Unknown',
-            osVersion: device.osVersion || 'N/A',
-            complianceState: normalizeCompliance(device.complianceState),
-            isEncrypted: device.isEncrypted || false,
-            encryptionStatus: device.isEncrypted ? 'Encrypted' : 'Not Encrypted',
-            managementAgent: device.managementAgent || 'Unknown',
-            lastSyncDateTime: device.lastSyncDateTime ? new Date(device.lastSyncDateTime) : null,
-            azureADRegistered: device.azureADRegistered || false,
-            deviceEnrollmentType: device.deviceEnrollmentType || 'Unknown',
-            deviceType: device.deviceType || 'Unknown',
-            activationLockEnabled: device.activationLockEnabled || false,
-            serialNumber: device.serialNumber || 'N/A',
-            physicalIds: device.physicalIds || [],
-            hasPendingActions: device.hasPendingActions || false,
-            complianceGracePeriodExpirationDateTime: device.complianceGracePeriodExpirationDateTime || null
-        }));
-
-        // Calculate device metrics
-        const totalDevices = processedDevices.length;
-        const compliantDevices = processedDevices.filter(d => d.complianceState === 'compliant').length;
-        const encryptedDevices = processedDevices.filter(d => d.isEncrypted).length;
-        const registeredDevices = processedDevices.filter(d => d.azureADRegistered).length;
-        const staleDevices = processedDevices.filter(d => {
-            if (!d.lastSyncDateTime) return true;
-            const daysSinceSync = (Date.now() - new Date(d.lastSyncDateTime).getTime()) / (1000 * 60 * 60 * 24);
-            return daysSinceSync > 7;
-        }).length;
-
-        // Device breakdown by OS
-        const osDistribution = {};
-        processedDevices.forEach(device => {
-            const os = device.operatingSystem || 'Unknown';
-            osDistribution[os] = (osDistribution[os] || 0) + 1;
-        });
-
-        // Device breakdown by management status
-        const managementStatus = {
-            managed: processedDevices.filter(d => d.managementAgent && d.managementAgent !== 'unknown').length,
-            unmanaged: processedDevices.filter(d => !d.managementAgent || d.managementAgent === 'unknown').length,
-            aadRegistered: registeredDevices
-        };
-
-        // Compliance breakdown
-        const complianceBreakdown = {
-            compliant: compliantDevices,
-            nonCompliant: processedDevices.filter(d => d.complianceState === 'noncompliant').length,
-            unknown: processedDevices.filter(d => d.complianceState === 'unknown').length
-        };
-
-        // High risk devices (not encrypted OR non-compliant OR stale)
-        const highRiskDevices = processedDevices.filter(d => 
-            !d.isEncrypted || d.complianceState !== 'compliant' || 
-            (d.lastSyncDateTime && (Date.now() - new Date(d.lastSyncDateTime).getTime()) / (1000 * 60 * 60 * 24) > 7)
-        );
-
-        // Activity breakdown
-        const activityBreakdown = {
-            active24h: processedDevices.filter(d => {
-                if (!d.lastSyncDateTime) return false;
-                const daysSinceSync = (Date.now() - new Date(d.lastSyncDateTime).getTime()) / (1000 * 60 * 60 * 24);
-                return daysSinceSync <= 1;
-            }).length,
-            stale7days: processedDevices.filter(d => {
-                if (!d.lastSyncDateTime) return false;
-                const daysSinceSync = (Date.now() - new Date(d.lastSyncDateTime).getTime()) / (1000 * 60 * 60 * 24);
-                return daysSinceSync > 7 && daysSinceSync <= 30;
-            }).length,
-            dead30days: processedDevices.filter(d => {
-                if (!d.lastSyncDateTime) return true;
-                const daysSinceSync = (Date.now() - new Date(d.lastSyncDateTime).getTime()) / (1000 * 60 * 60 * 24);
-                return daysSinceSync > 30;
-            }).length
-        };
-
-        // Device security score (0-100)
-        const encryptionPercent = totalDevices > 0 ? (encryptedDevices / totalDevices) * 100 : 0;
-        const compliancePercent = totalDevices > 0 ? (compliantDevices / totalDevices) * 100 : 0;
-        const activePercent = totalDevices > 0 ? (activityBreakdown.active24h / totalDevices) * 100 : 0;
-        const registeredPercent = totalDevices > 0 ? (registeredDevices / totalDevices) * 100 : 0;
-
-        const deviceSecurityScore = Math.round(
-            (encryptionPercent * 0.25) +
-            (compliancePercent * 0.25) +
-            (activePercent * 0.25) +
-            (registeredPercent * 0.25)
-        );
-
-        // Process optional security alerts (limit to 20). Alerts support device context but must not block device refresh.
-        const normalizedAlertPayload = normalizeDeviceAlertsPayload(alerts, { logger: console });
-        const processedAlerts = normalizedAlertPayload.alerts.slice(0, 20).map(alert => ({
-            id: alert.id,
-            title: alert.title || 'Unknown Alert',
-            description: alert.description || '',
-            severity: alert.severity || 'medium',
-            status: alert.status || 'newAlert',
-            createdDateTime: alert.createdDateTime || new Date().toISOString(),
-            eventDateTime: alert.eventDateTime || new Date().toISOString(),
-            sourceMaterials: alert.sourceMaterials || [],
-            vendorInformation: alert.vendorInformation?.provider || 'Unknown'
-        }));
-
-        console.log(`[Devices Dashboard] Successfully compiled device data: ${totalDevices} devices, ${processedAlerts.length} alerts`);
-
-        const dashboardPayload = {
-            success: true,
-            tenant: tenant.clientId,
-            collectionStartedAt: collectionStartedAt.toISOString(),
-            fetchedAt: new Date().toISOString(),
-            summary: {
-                totalDevices,
-                nonCompliantDevices: processedDevices.filter(d => d.complianceState === 'noncompliant').length,
-                notEncryptedDevices: totalDevices - encryptedDevices,
-                compliantDevices,
-                encryptedDevices,
-                registeredDevices,
-                staleDevices,
-                highRiskDevices: highRiskDevices.length,
-                compliancePercentage: totalDevices > 0 ? Math.round((compliantDevices / totalDevices) * 100) : 0,
-                encryptionPercentage: totalDevices > 0 ? Math.round((encryptedDevices / totalDevices) * 100) : 0,
-                deviceSecurityScore,
-                securityAlerts: alerts.complete === true ? processedAlerts.length : null
-            },
-            devices: processedDevices,
-            compliance: complianceBreakdown,
-            osDistribution,
-            managementStatus,
-            activityBreakdown,
-            highRiskDevices: highRiskDevices.slice(0, 10),
-            alerts: processedAlerts,
-            policies: policies.slice(0, 10),
-            warnings: [...new Set(normalizedAlertPayload.warnings)]
-        };
-
-        if (deviceEvidenceService && tenant.companyId && alerts.complete === true) {
-            deviceEvidenceService.persistProcessedEvidence({
-                companyId: tenant.companyId,
-                tenantKey: tenant.clientId,
-                payload: dashboardPayload,
-                collectionTrigger: 'dashboard_request',
-                sourceEndpoint: '/api/microsoft-devices'
-            }).catch(error => {
-                console.warn('[Device Evidence] Dashboard response could not be stored:', error.message);
-            });
-        }
-
-        res.json(dashboardPayload);
-
+        const saved = await readSavedDeviceDashboard(Number(tenant.companyId));
+        if (!saved) return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        res.set('Cache-Control', 'no-store');
+        return res.json({ ...saved, tenant: tenant.clientId });
     } catch (error) {
-        console.error('[Devices Dashboard] Error:', error.message);
-        
-        res.status(500).json({ 
-            error: 'Failed to fetch devices dashboard data',
-            message: error.message
-        });
+        console.warn('[Devices Dashboard] Saved data unavailable:', error.message);
+        return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
 
@@ -17048,53 +16454,10 @@ app.post('/api/security-events/whatsapp-alerts', authenticateToken, async (req, 
  * Email Security dashboard aggregating email-specific alerts and incidents
  */
 app.get('/api/email-security', authenticateToken, async (req, res) => {
-    try {
-        const userEmail = req.user.email;
-        console.log(`[Email Security] Fetching dashboard data for: ${userEmail}`);
-
-        const tenant = getTenantByEmail(userEmail);
-        if (!tenant || tenant.clientId !== 'sunbird') {
-            console.warn(`[Email Security] Access denied for ${userEmail}`);
-            return res.status(403).json({ 
-                error: 'Access denied',
-                message: 'This feature is only available for Sunbird client'
-            });
-        }
-
-        await assertSharedGraphTenantForCompany(tenant.companyId);
-        const payload = await fetchEmailSecurityPayloadFromApi();
-        console.log(`[Email Security] Compiled: ${payload.alerts.length} email alerts, ${payload.incidents.length} incidents, ${payload.summary.affectedUsersCount} affected users`);
-
-        if (emailEvidenceService && tenant.companyId) {
-            const dashboardPayload = buildEmailDashboardPayload({
-                tenantKey: tenant.clientId || 'sunbird',
-                payload
-            });
-            emailEvidenceService.persistProcessedEvidence({
-                companyId: tenant.companyId,
-                tenantKey: tenant.clientId || 'sunbird',
-                payload: dashboardPayload,
-                collectionTrigger: 'dashboard_request',
-                sourceEndpoint: '/api/email-security'
-            }).catch(error => {
-                console.warn('[Email Evidence] Dashboard response could not be stored:', error.message);
-            });
-        }
-
-        res.json({
-            ...payload,
-            tenant: tenant.clientId,
-            source: 'api'
-        });
-
-    } catch (error) {
-        console.error('[Email Security] Error:', error.message);
-        
-        res.status(500).json({ 
-            error: 'Failed to fetch email security data',
-            message: error.message
-        });
-    }
+    const tenant = getTenantByEmail(req.user.email);
+    if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
+    return serveSavedMicrosoftPayload(res, tenant.companyId, 'EmailSecurityPayloadCache',
+        payload => payload?.success && hasCompleteEmailDashboard(payload), tenant.clientId);
 });
 
 /**
@@ -17192,35 +16555,9 @@ function parseGraphReportCSV(csvText, reportType = 'unknown', requiredHeaders = 
  * Uses: OneDrive, SharePoint, Exchange storage reports
  */
 app.get('/api/backup-recovery', authenticateToken, async (req, res) => {
-    try {
-        const context = await getAccessContextByUser(req.user);
-        await assertSharedGraphTenantForCompany(context?.companyId);
-        const collectionStartedAt = new Date();
-        const payload = await fetchBackupRecoveryPayloadFromApi();
-        if (context?.companyId) {
-            const dashboardPayload = buildBackupDashboardPayload({ tenantKey: 'sunbird', payload });
-            await writeMicrosoftDashboardCache(pool, 'BackupRecoveryPayloadCache', 'CompanyID, Payload', [context.companyId, JSON.stringify(dashboardPayload)], collectionStartedAt);
-            if (backupEvidenceService) {
-                backupEvidenceService.persistProcessedEvidence({
-                    companyId: context.companyId,
-                    tenantKey: 'sunbird',
-                    payload: { ...dashboardPayload, collectionStartedAt: collectionStartedAt.toISOString() },
-                    collectionTrigger: 'dashboard_request',
-                    sourceEndpoint: '/api/backup-recovery'
-                }).catch(error => console.warn('[Backup Evidence] Dashboard response could not be stored:', error.message));
-            }
-            return res.json(dashboardPayload);
-        }
-        res.json(payload);
-
-    } catch (error) {
-        console.error('[Backup Recovery] Error:', error.message);
-        
-        res.status(500).json({ 
-            error: 'Failed to fetch backup recovery data',
-            message: error.message
-        });
-    }
+    const context = await getAccessContextByUser(req.user);
+    if (!context?.companyId) return res.sendStatus(403);
+    return serveSavedMicrosoftPayload(res, context.companyId, 'BackupRecoveryPayloadCache', isBackupRecoveryPayloadComplete);
 });
 
 const secretClient = new SecretManagerServiceClient();
@@ -17470,7 +16807,7 @@ async function performIdentityEvidenceCollection(companyId, collectionTrigger) {
 }
 
 async function collectAndPersistIdentityEvidence(companyId, collectionTrigger = 'scheduled_30_minute', collectorContext = {}) {
-    return identityEvidenceCollectors.run({ companyId, sourceKey: 'identity', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performIdentityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return identityEvidenceCollectors.run({ companyId, sourceKey: 'identity', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "identity", signal, collectorContext.timeoutMs, () => performIdentityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function getIdentityEvidenceCompanies() {
@@ -17565,7 +16902,7 @@ async function performDeviceEvidenceCollection(companyId, collectionTrigger) {
 }
 
 async function collectAndPersistDeviceEvidence(companyId, collectionTrigger = 'scheduled_30_minute', collectorContext = {}) {
-    return deviceEvidenceCollectors.run({ companyId, sourceKey: 'devices', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performDeviceEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return deviceEvidenceCollectors.run({ companyId, sourceKey: 'devices', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "devices", signal, collectorContext.timeoutMs, () => performDeviceEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function collectDeviceEvidenceForConfiguredTenants({ trigger = 'scheduled_30_minute' } = {}) {
@@ -17638,7 +16975,7 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
 }
 
 async function collectAndPersistEmailEvidence(companyId, collectionTrigger = 'scheduled_hourly', collectorContext = {}) {
-    return emailEvidenceCollectors.run({ companyId, sourceKey: 'email_security', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performEmailEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return emailEvidenceCollectors.run({ companyId, sourceKey: 'email_security', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "email_security", signal, collectorContext.timeoutMs, () => performEmailEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function collectEmailEvidenceForConfiguredTenants({ trigger = 'scheduled_hourly' } = {}) {
@@ -17737,7 +17074,7 @@ async function performBackupEvidenceCollection(companyId, collectionTrigger, col
 }
 
 async function collectAndPersistBackupEvidence(companyId, collectionTrigger = 'scheduled_6_hour', collectorContext = {}) {
-    return backupEvidenceCollectors.run({ companyId, sourceKey: 'backup', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performBackupEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return backupEvidenceCollectors.run({ companyId, sourceKey: 'backup', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "backup", signal, collectorContext.timeoutMs, () => performBackupEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function collectBackupEvidenceForConfiguredTenants({ trigger = 'scheduled_6_hour' } = {}) {
@@ -17768,7 +17105,7 @@ async function performApplicationsEvidenceCollection(companyId, collectionTrigge
 }
 
 async function collectAndPersistApplicationsEvidence(companyId, collectionTrigger = 'scheduled_hourly', collectorContext = {}) {
-    return applicationsEvidenceCollectors.run({ companyId, sourceKey: 'applications', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performApplicationsEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return applicationsEvidenceCollectors.run({ companyId, sourceKey: 'applications', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "applications", signal, collectorContext.timeoutMs, () => performApplicationsEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function collectApplicationsEvidenceForConfiguredTenants({ trigger = 'scheduled_hourly' } = {}) {
@@ -17815,7 +17152,7 @@ async function performSecurityEvidenceCollection(companyId, collectionTrigger, c
 
 async function collectAndPersistSecurityEvidence(companyId, collectionTrigger = 'scheduled_hourly', collectorContext = {}) {
     if (!SECURITY_ALERT_STORAGE_ENABLED) return { companyId, status: 'persistence_disabled', storageMode: 'memory_only' };
-    return securityEvidenceCollectors.run({ companyId, sourceKey: 'security_alerts', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performSecurityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    return securityEvidenceCollectors.run({ companyId, sourceKey: 'security_alerts', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "security_alerts", signal, collectorContext.timeoutMs, () => performSecurityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
 }
 
 async function collectSecurityEvidenceForConfiguredTenants({ trigger = 'scheduled_hourly' } = {}) {
@@ -18376,7 +17713,13 @@ const applicationsEvidenceAutomation = createApplicationsEvidenceAutomation({
     intervalMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_INTERVAL_MS || (60 * 60 * 1000),
     startupDelayMs: process.env.APPLICATIONS_EVIDENCE_COLLECTION_STARTUP_DELAY_MS || (15 * 60 * 1000)
 });
-rawEvidenceJournal = createRawEvidenceJournal({ pool, persistenceEnabled: SECURITY_ALERT_STORAGE_ENABLED });
+rawEvidenceJournal = createRawEvidenceJournal({
+    pool, persistenceEnabled: SECURITY_ALERT_STORAGE_ENABLED,
+    withGraphOwnership: (companyId, endpoint, collect) => runOwnedDashboardCollection(
+        companyId, `security_graph:${endpoint}`, null, null, collect
+    ),
+    assertGraphOwner: assertCollectionOwner
+});
 rawEvidenceJournal.ensureSchema().catch(error => console.error('[Raw evidence] Schema unavailable:', error.message));
 const rawEvidencePoller = createRawEvidencePoller({
     enabled: !['false', '0', 'no'].includes(String(process.env.SECURITY_RAW_POLL_ENABLED || 'true').toLowerCase()),

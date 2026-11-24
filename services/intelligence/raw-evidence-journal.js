@@ -30,7 +30,8 @@ const SCHEMA = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 ];
 
-function createRawEvidenceJournal({ pool, now = () => new Date(), logger = console, persistenceEnabled = SECURITY_ALERT_STORAGE_ENABLED } = {}) {
+function createRawEvidenceJournal({ pool, now = () => new Date(), logger = console, persistenceEnabled = SECURITY_ALERT_STORAGE_ENABLED,
+    withGraphOwnership, assertGraphOwner } = {}) {
     const listeners = new Map();
     const storageFailures = new Set();
     const restored = new Map();
@@ -123,6 +124,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const connection = await pool.getConnection();
             try {
                 await connection.beginTransaction();
+                if (assertGraphOwner && state?.provider === 'Microsoft Graph') await assertGraphOwner(connection, companyId);
                 const changed = records.map(record => ({ record, digest: hash(JSON.stringify(record.rawPayload)), prior: persisted.get(record.uid) }))
                     .filter(item => item.digest !== item.prior?.digest || now().getTime() - item.prior.at >= 300000);
                 for (let offset = 0; offset < changed.length; offset += 100) {
@@ -137,6 +139,7 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
                 if (state) await connection.query(
                     `INSERT INTO StackCTRLRawSecuritySync (CompanyID, SourceKey, StateJson) VALUES (?, ?, ?)
                      ON DUPLICATE KEY UPDATE StateJson = VALUES(StateJson)`, [companyId, hash(`${state.provider}:${state.endpoint}`), JSON.stringify({ ...state, storageStatus: 'stored' })]);
+                if (assertGraphOwner && state?.provider === 'Microsoft Graph') await assertGraphOwner(connection, companyId);
                 await connection.commit();
                 for (const { record, digest } of changed) { persisted.delete(record.uid); persisted.set(record.uid, { digest, at: now().getTime() }); }
                 while (persisted.size > 10000) persisted.delete(persisted.keys().next().value);
@@ -184,7 +187,17 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             const reuseLicenseFailure = !range.explicit && !bypassGraphCache && endpoint === '/v1.0/identityProtection/riskyUsers';
             const cached = cacheable || reuseLicenseFailure ? readCompletedGraph(scope, now().getTime()) : null;
             if (cached) return Promise.resolve(cached);
-            const pending = collectGraph(options).then(result => {
+            const collect = async () => {
+                const result = await collectGraph(options);
+                if (withGraphOwnership && persistenceEnabled) await queues.get(companyId);
+                return result;
+            };
+            const pending = Promise.resolve().then(() => withGraphOwnership
+                ? withGraphOwnership(companyId, endpoint, collect) : collect()).then(result => {
+                if (result?.status === 'already_running') {
+                    return { ok: false, unavailable: true, value: [], recordsFetched: 0, attempts: 0, httpStatus: null,
+                        errorCode: 'GRAPH_COLLECTION_ALREADY_RUNNING', warnings: ['This Security source is updating.'] };
+                }
                 if (cacheable || reuseLicenseFailure && isUnlicensedRiskyUsers(endpoint, result)) {
                     cacheCompletedGraph(scope, endpoint, result, now().getTime());
                 }

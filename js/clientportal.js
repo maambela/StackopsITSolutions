@@ -1236,7 +1236,7 @@ async function fetchMicrosoftUsersForCard() {
             return;
         }
         
-        const response = await fetch('/api/db/identity-details', {
+        const response = await fetch('/api/db/identity-details?cacheOnly=1', {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${authToken}`,
@@ -1355,7 +1355,7 @@ async function fetchApplicationsData() {
         
         console.log('[Applications] Fetching applications data...');
 
-        const payloadResponse = await fetch('/api/db/applications', {
+        const payloadResponse = await fetch('/api/db/applications?cacheOnly=1', {
             method: 'GET',
             cache: 'no-store',
             headers: {
@@ -1648,7 +1648,7 @@ async function fetchDevicesCardData() {
             displayCurrentProject();
         }
 
-        const response = await fetch('/api/db/device-metrics', {
+        const response = await fetch('/api/db/device-metrics?cacheOnly=1', {
             method: 'GET',
             cache: 'no-store',
             headers: {
@@ -1712,7 +1712,7 @@ async function fetchEmailCardData() {
             displayCurrentProject();
         }
 
-        const response = await fetch('/api/db/email-security', {
+        const response = await fetch('/api/db/email-security?cacheOnly=1', {
             method: 'GET',
             cache: 'no-store',
             headers: {
@@ -2872,40 +2872,6 @@ async function requestFreshSunbirdIdentityDashboardData() {
             throw error;
         }
         throw new Error(result.message || `Identity Dashboard endpoint failed (${response.status})`);
-    } catch (error) {
-        // Keep the dashboard usable when a live Microsoft Graph refresh is slow.
-        // The cache-only query is intentionally prevented from triggering Graph again.
-        if (error?.statusCode !== 401 && error?.statusCode !== 403) {
-            const cacheController = new AbortController();
-            const cacheTimeout = setTimeout(() => cacheController.abort(), 8000);
-            try {
-                const cachedResponse = await fetch('/api/sunbird/identity-dashboard-cached?cacheOnly=1', {
-                    method: 'GET',
-                    cache: 'no-store',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                        'Cache-Control': 'no-cache, no-store, must-revalidate'
-                    },
-                    signal: cacheController.signal
-                });
-                const cachedData = await cachedResponse.json().catch(() => ({}));
-                if (token === localStorage.getItem('authToken') && cachedResponse.ok &&
-                    cachedData.success && Array.isArray(cachedData.users)) {
-                    console.warn('[Sunbird Identity Dashboard] Live refresh unavailable; showing the latest stored evidence.');
-                    return { ...cachedData, liveSource: '/api/sunbird/identity-dashboard-cached', cachedFallback: true };
-                }
-            } catch (cacheError) {
-                console.warn('[Sunbird Identity Dashboard] Cached fallback failed:', cacheError.message);
-            } finally {
-                clearTimeout(cacheTimeout);
-            }
-        }
-        const message = error.name === 'AbortError'
-            ? 'Live identity refresh took too long.'
-            : error.message;
-        console.error('[Sunbird Identity Dashboard] Fetch error:', message);
-        throw new Error(message);
     } finally {
         clearTimeout(timeout);
     }
@@ -3695,7 +3661,7 @@ async function loadSunbirdDevicesDashboardData() {
     if (!token) return;
 
     try {
-        const metricsResponse = await fetch('/api/db/device-metrics', {
+        const metricsResponse = await fetch('/api/db/device-metrics?cacheOnly=1', {
             method: 'GET',
             cache: 'no-store',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -4462,7 +4428,7 @@ async function loadSunbirdEmailDashboardData() {
     if (!token) return;
 
     try {
-        const cachedResponse = await fetch('/api/db/email-security', {
+        const cachedResponse = await fetch('/api/db/email-security?cacheOnly=1', {
             method: 'GET',
             cache: 'no-store',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -15266,7 +15232,7 @@ async function fetchIdentityData(project) {
         console.log('[Identity] Fetching cached identity metrics...');
         const authToken = localStorage.getItem('authToken');
         
-        const response = await fetch('/api/db/identity-metrics', {
+        const response = await fetch('/api/db/identity-metrics?cacheOnly=1', {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${authToken}`,
@@ -16048,7 +16014,7 @@ async function fetchSunbirdBackupRecoveryData() {
     const token = localStorage.getItem('authToken');
     if (!token) throw new Error('Authentication required');
 
-    const response = await fetch('/api/db/backup-recovery', {
+    const response = await fetch('/api/db/backup-recovery?cacheOnly=1', {
         cache: 'no-store',
         headers: {
             'Authorization': `Bearer ${token}`,
@@ -19445,7 +19411,7 @@ async function fetchMicrosoftUsersData() {
         
         console.log('[Identity Details] Fetching users...');
         
-        const response = await fetch('/api/db/identity-details', {
+        const response = await fetch('/api/db/identity-details?cacheOnly=1', {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
