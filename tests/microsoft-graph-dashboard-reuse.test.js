@@ -9,7 +9,7 @@ const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 test('Identity dashboard reuses verified MFA evidence without Graph calls for the same tenant and user', async () => {
     const now = Date.parse('2026-11-24T02:00:00Z');
     let calls = 0;
-    const resolve = vm.runInNewContext(section('async function resolveIdentityDashboardMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
+    const resolve = vm.runInNewContext(section('function readVerifiedIdentityMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
         '\nresolveIdentityDashboardMfa;', {
         fetchUserAuthMethods: async () => { calls++; return ['method']; },
         hasRealMfaMethod: () => true
@@ -29,7 +29,7 @@ test('Identity dashboard reuses verified MFA evidence without Graph calls for th
 
 test('failed MFA refresh retains expired verified evidence without promoting it to current data', async () => {
     const now = Date.parse('2026-11-24T02:00:00Z');
-    const resolve = vm.runInNewContext(section('async function resolveIdentityDashboardMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
+    const resolve = vm.runInNewContext(section('function readVerifiedIdentityMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
         '\nresolveIdentityDashboardMfa;', {
         fetchUserAuthMethods: async () => { throw new Error('Graph timeout'); }
     });

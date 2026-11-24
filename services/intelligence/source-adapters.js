@@ -480,7 +480,7 @@ const definitions = {
                         sourceLayer: 'StackCTRLIdentityEvidenceSnapshots + StackCTRLIdentityUserEvidence',
                         evidenceSnapshotId: snapshot.ID,
                         collectedAt: snapshot.CollectedAt,
-                        sourceFetchedAt: snapshot.SourceFetchedAt,
+                        sourceFetchedAt: snapshot.SourceAuditJson?.dashboardFetchedAt || snapshot.SourceFetchedAt,
                         sourceEndpoint: snapshot.SourceEndpoint,
                         collectionTrigger: snapshot.CollectionTrigger,
                         collectionStatus: snapshot.CollectionStatus,

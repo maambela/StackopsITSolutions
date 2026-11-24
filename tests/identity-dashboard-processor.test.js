@@ -8,6 +8,53 @@ const { deriveIdentityEvidence } = require('../services/intelligence/identity-ev
 
 const FIXED_NOW = new Date('2026-11-23T12:00:00.000Z');
 
+test('Identity saves verified inventory before checking MFA and can retry after a failed users request', async () => {
+    const source = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const start = source.indexOf('async function collectIdentityDashboardPayload');
+    const end = source.indexOf('async function collectAndPersistIdentityEvidence', start);
+    const calls = [];
+    let failUsers = true;
+    let refreshMfa = false;
+    const collect = vm.runInNewContext(source.slice(start, end) + '\nperformIdentityEvidenceCollection;', {
+        assertSharedGraphTenantForCompany: async () => 'tenant-fixture',
+        getMicrosoftGraphToken: async () => 'fixture',
+        fetchMicrosoftUsers: async () => {
+            calls.push('users');
+            if (failUsers) throw new Error('users timeout');
+            return [{ id: 'user', userType: 'Member' }];
+        },
+        fetchMicrosoftRoleAssignments: async () => [],
+        fetchMicrosoftSignIns: async () => ({ status: 'complete', records: [] }),
+        loadStoredIdentityUsers: async () => [],
+        readVerifiedIdentityMfa: () => null,
+        resolveIdentityDashboardMfa: async () => {
+            calls.push('mfa');
+            if (!refreshMfa) throw new Error('MFA timeout');
+            return { enabled: true, count: 1, observedAt: FIXED_NOW.toISOString() };
+        },
+        identityEvidenceService: {
+            recordCollectionFailure: async () => calls.push('failed'),
+            persistProcessedEvidence: async ({ payload }) => {
+                calls.push(payload.users[0].mfaEnabled === true ? 'saved MFA' : 'saved inventory');
+                return payload;
+            }
+        },
+        buildIdentityDashboardPayload,
+        hasRealMfaMethod: () => true,
+        mapWithConcurrency: (items, _limit, worker) => Promise.all(items.map(worker)),
+        console,
+        process
+    });
+    await assert.rejects(collect(1, 'test'), /users timeout/);
+    failUsers = false;
+    await collect(1, 'test');
+    assert.deepEqual(calls, ['users', 'failed', 'users', 'saved inventory', 'mfa']);
+    refreshMfa = true;
+    calls.length = 0;
+    await collect(1, 'test');
+    assert.deepEqual(calls, ['users', 'saved inventory', 'mfa', 'saved MFA']);
+});
+
 test('the client does not request full history and missing dates use a short label', () => {
     const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
     assert.doesNotMatch(source, /signInHistory=30d|data-identity-sign-in-history/);

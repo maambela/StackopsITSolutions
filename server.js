@@ -868,7 +868,7 @@ async function fetchUserAuthMethods(token, userId, retries = 2, { requireComplet
   }
 }
 
-async function resolveIdentityDashboardMfa(token, user, savedUser, tenantId, now = Date.now()) {
+function readVerifiedIdentityMfa(user, savedUser, tenantId, now) {
     const saved = savedUser?.mfaStatus === 'complete'
         ? { enabled: savedUser.mfaEnabled, count: savedUser.authMethodCount,
             observedAt: savedUser.mfaObservedAt, tenantId: savedUser.mfaSourceTenantId }
@@ -877,12 +877,17 @@ async function resolveIdentityDashboardMfa(token, user, savedUser, tenantId, now
     const verified = user.id && user.id === savedUser?.id && tenantId &&
         saved?.tenantId === tenantId && typeof saved.enabled === 'boolean' &&
         Number.isInteger(saved.count) && saved.count >= 0 && age >= 0;
-    if (verified && age < 30 * 60000) return saved;
+    return verified ? saved : null;
+}
+
+async function resolveIdentityDashboardMfa(token, user, savedUser, tenantId, now = Date.now()) {
+    const saved = readVerifiedIdentityMfa(user, savedUser, tenantId, now);
+    if (saved && now - Date.parse(saved.observedAt) < 30 * 60000) return saved;
     try {
         const methods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
         return { enabled: hasRealMfaMethod(methods), count: methods.length, observedAt: new Date(now).toISOString() };
     } catch (error) {
-        if (!verified) throw error;
+        if (!saved) throw error;
         return { enabled: null, count: null, observedAt: null, lastVerifiedMfa: saved };
     }
 }
@@ -16749,7 +16754,7 @@ async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = fa
     return [];
 }
 
-async function collectIdentityDashboardPayload(companyId, signal = null) {
+async function collectIdentityDashboardPayload(companyId, signal = null, publish = null) {
     const tenantId = await assertSharedGraphTenantForCompany(companyId);
     const collectionStartedAt = new Date();
     const token = await getMicrosoftGraphToken();
@@ -16779,43 +16784,70 @@ async function collectIdentityDashboardPayload(companyId, signal = null) {
             : 'Sign-in information is unavailable.');
     }
     const savedMfaUsers = new Map(previousUsers.filter(user => user.id).map(user => [String(user.id), user]));
-    const payload = await buildIdentityDashboardPayload({
-        tenantKey: 'sunbird',
-        sourceTenantId: tenantId,
-        users,
-        roleAssignments: roleResult.assignments,
-        roleAssignmentsStatus: roleResult.status,
-        signIns: signInCollection.records,
-        signInCollectionStatus: signInCollection.status,
-        signInWindowDays: 1,
-        signInRecordCount: signInCollection.records.length,
-        previousUsers,
-        collectionWarnings: warnings,
-        loadAuthMethods: user => {
-            signal?.throwIfAborted();
-            return resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId);
-        },
-        hasRealMfaMethod,
-        mapWithConcurrency,
-        now: () => new Date(),
-        concurrency: Number(process.env.IDENTITY_EVIDENCE_AUTH_CONCURRENCY || 4)
+    const buildPayload = async loadAuthMethods => ({
+        ...await buildIdentityDashboardPayload({
+            tenantKey: 'sunbird',
+            sourceTenantId: tenantId,
+            users,
+            roleAssignments: roleResult.assignments,
+            roleAssignmentsStatus: roleResult.status,
+            signIns: signInCollection.records,
+            signInCollectionStatus: signInCollection.status,
+            signInWindowDays: 1,
+            signInRecordCount: signInCollection.records.length,
+            previousUsers,
+            collectionWarnings: warnings,
+            loadAuthMethods,
+            hasRealMfaMethod,
+            mapWithConcurrency,
+            now: () => new Date(),
+            concurrency: Number(process.env.IDENTITY_EVIDENCE_AUTH_CONCURRENCY || 4)
+        }),
+        collectionStartedAt: collectionStartedAt.toISOString()
     });
-    return { ...payload, collectionStartedAt: collectionStartedAt.toISOString() };
+    const checkedAt = Date.now();
+    const pendingMfa = users.some(user => {
+        const saved = readVerifiedIdentityMfa(user, savedMfaUsers.get(String(user.id)), tenantId, checkedAt);
+        return !saved || checkedAt - Date.parse(saved.observedAt) >= 30 * 60000;
+    });
+    let checkpoint;
+    if (publish && pendingMfa) {
+        checkpoint = await buildPayload(user => {
+            const saved = readVerifiedIdentityMfa(user, savedMfaUsers.get(String(user.id)), tenantId, checkedAt);
+            return saved && checkedAt - Date.parse(saved.observedAt) < 30 * 60000
+                ? saved : { lastVerifiedMfa: saved };
+        });
+        signal?.throwIfAborted();
+        await publish(checkpoint);
+    }
+    const payload = await buildPayload(user => {
+        signal?.throwIfAborted();
+        return resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId);
+    });
+    signal?.throwIfAborted();
+    if (checkpoint && payload.users.every((user, index) =>
+        user.mfaObservedAt === checkpoint.users[index].mfaObservedAt)) return null;
+    return payload;
 }
 
 async function performIdentityEvidenceCollection(companyId, collectionTrigger, { signal } = {}) {
     if (!identityEvidenceService) throw new Error('Identity evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Identity Protection';
     try {
-        const payload = await collectIdentityDashboardPayload(companyId, signal);
-        signal?.throwIfAborted();
-        return await identityEvidenceService.persistProcessedEvidence({
-            companyId,
-            tenantKey: 'sunbird',
-            payload,
-            collectionTrigger,
-            sourceEndpoint
-        });
+        let published;
+        const publish = async payload => {
+            signal?.throwIfAborted();
+            published = await identityEvidenceService.persistProcessedEvidence({
+                companyId,
+                tenantKey: 'sunbird',
+                payload,
+                collectionTrigger,
+                sourceEndpoint
+            });
+        };
+        const payload = await collectIdentityDashboardPayload(companyId, signal, publish);
+        if (payload) await publish(payload);
+        return published;
     } catch (error) {
         await identityEvidenceService.recordCollectionFailure({
             companyId,
