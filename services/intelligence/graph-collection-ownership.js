@@ -92,8 +92,8 @@ async function assertCollectionOwner(connection, companyId) {
     throw Object.assign(new Error('Graph collection ownership expired before publication'), { code: 'GRAPH_COLLECTION_OWNERSHIP_LOST' });
 }
 
-async function withCollectionPublication(database, companyId, write) {
-    if (!ownership.getStore()) return write(database);
+async function withCollectionPublication(database, companyId, write, { transaction = false } = {}) {
+    if (!transaction && !ownership.getStore()) return write(database);
     const connection = typeof database.getConnection === 'function' ? await database.getConnection() : database;
     try {
         await connection.beginTransaction();

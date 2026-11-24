@@ -54,6 +54,46 @@ function buildEmailDashboardPayload({
     };
 }
 
-module.exports = {
-    buildEmailDashboardPayload
+const emailSources = {
+    alerts: { coverage: 'alertsComplete', fields: ['alerts', 'threats', 'affectedUsers', 'insights'],
+        metrics: ['activeThreats', 'highSeverityAlerts', 'affectedUsersCount', 'threatResolutionRate',
+            'phishingCount', 'malwareCount', 'spamCount', 'becCount', 'securityScore'] },
+    incidents: { coverage: 'incidentsComplete', fields: ['incidents'], metrics: ['activeIncidents'] },
+    mailActivity: { coverage: 'mailActivityOk', fields: ['mailActivity'],
+        metrics: ['activeMailboxes', 'totalMailActivity', 'sendCount', 'receiveCount', 'readCount', 'mailActivity'] }
 };
+
+function hasVerifiedEmailSource(payload) {
+    return payload?.success === true && Object.values(emailSources).some(({ coverage }) =>
+        payload.sourceAudit?.[coverage] === true);
+}
+
+function mergeVerifiedEmailSources(previous, incoming, startedAt) {
+    if (!hasVerifiedEmailSource(incoming)) return null;
+    const merged = {
+        ...incoming,
+        summary: { ...incoming.summary },
+        sourceAudit: { ...incoming.sourceAudit, sourceTimestamps: {} }
+    };
+    let updated = false;
+    for (const [source, { coverage, fields, metrics }] of Object.entries(emailSources)) {
+        const priorTime = previous?.sourceAudit?.[coverage] === true
+            ? previous.sourceAudit.sourceTimestamps?.[source] || previous.fetchedAt : null;
+        const update = incoming.sourceAudit[coverage] === true &&
+            (!Number.isFinite(Date.parse(priorTime)) || startedAt.getTime() > Date.parse(priorTime));
+        const chosen = update ? incoming : Number.isFinite(Date.parse(priorTime)) ? previous : null;
+        merged.sourceAudit[coverage] = Boolean(chosen);
+        if (chosen) merged.sourceAudit.sourceTimestamps[source] = update ? startedAt.toISOString() : priorTime;
+        for (const field of fields) merged[field] = chosen?.[field];
+        for (const metric of metrics) merged.summary[metric] = chosen?.summary?.[metric];
+        updated ||= update;
+    }
+    if (!updated) return null;
+    const timestamps = Object.values(merged.sourceAudit.sourceTimestamps);
+    merged.fetchedAt = new Date(Math.max(...timestamps.map(Date.parse))).toISOString();
+    merged.sourceAudit.fetchedAt = merged.fetchedAt;
+    delete merged.dashboardMetrics;
+    return merged;
+}
+
+module.exports = { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources };

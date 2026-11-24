@@ -49,7 +49,7 @@ const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare')
 const { createAzureOpenAIService } = require('./services/azure-openai');
 const { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');
 const { createStackCTRLIntelligenceScheduler, DEFAULT_OUTPUT_TYPES } = require('./services/intelligence/scheduler');
-const { buildIdentityDashboardSource } = require('./services/intelligence/identity-dashboard-source');
+const { buildSavedIdentityDashboard } = require('./services/intelligence/identity-dashboard-source');
 const { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');
 const { createIdentityEvidenceStore } = require('./services/intelligence/identity-evidence-store');
 const { identityAdapter, devicesAdapter } = require('./services/intelligence/source-adapters');
@@ -59,7 +59,7 @@ const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, 
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
-const { buildEmailDashboardPayload } = require('./services/intelligence/email-dashboard-processor');
+const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources } = require('./services/intelligence/email-dashboard-processor');
 const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');
 const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');
 const { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');
@@ -11170,8 +11170,23 @@ function hasCompleteEmailThreatCoverage(payload) {
     return payload?.sourceAudit?.alertsComplete === true && payload.sourceAudit.incidentsComplete === true;
 }
 
-function hasCompleteEmailDashboard(payload) {
-    return hasCompleteEmailThreatCoverage(payload) && payload.sourceAudit.mailActivityOk === true;
+async function writeVerifiedEmailDashboard(companyId, payload, collectionStartedAt) {
+    if (!hasVerifiedEmailSource(payload)) return;
+    return withCollectionPublication(pool, companyId, async connection => {
+        await connection.query(
+            'INSERT INTO EmailSecurityPayloadCache (CompanyID) VALUES (?) ON DUPLICATE KEY UPDATE CompanyID = CompanyID',
+            [companyId]
+        );
+        const [rows] = await connection.query(
+            'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ? FOR UPDATE', [companyId]
+        );
+        const merged = mergeVerifiedEmailSources(parseReportJson(rows[0]?.Payload, null), payload, collectionStartedAt);
+        if (!merged) return;
+        await connection.query(
+            'UPDATE EmailSecurityPayloadCache SET Payload = ?, LastUpdated = ? WHERE CompanyID = ?',
+            [JSON.stringify(merged), new Date(merged.fetchedAt), companyId]
+        );
+    }, { transaction: true });
 }
 
 function hasCompleteSecurityDashboard(payload) {
@@ -11583,7 +11598,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
 
     const hasUsableEvidence = Boolean(recordsPrepared > 0 || mailUsers.length > 0);
 
-    if (!hasUsableEvidence && !(alertsResult.complete && incidentsResult.complete)) {
+    if (!hasUsableEvidence && !(alertsResult.complete || incidentsResult.complete || mailActivity.ok === true)) {
         const error = new Error(
             warnings.length
                 ? `Email evidence refresh failed: ${warnings.join('; ')}`
@@ -11949,10 +11964,7 @@ async function upsertDashboardMetricCaches() {
                     [companyId, email.activeThreats, email.highSeverity, email.usersTargeted, email.openIncidents], collectionStartedAt, hasCompleteEmailThreatCoverage(emailSecurity)
                 );
 
-                await writeMicrosoftDashboardCache(pool,
-                    'EmailSecurityPayloadCache', 'CompanyID, Payload',
-                    [companyId, JSON.stringify(emailSecurity)], collectionStartedAt, hasCompleteEmailDashboard(emailSecurity)
-                );
+                await writeVerifiedEmailDashboard(companyId, emailSecurity, collectionStartedAt);
             },
             async security() {
                 const collectionStartedAt = new Date();
@@ -12167,7 +12179,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         Number(summary.mailActivity?.totalMailActivity || 0) > 0;
                     const verifiedThreatCoverage = payload.sourceAudit?.alertsComplete === true && payload.sourceAudit?.incidentsComplete === true;
                     const canServeSavedEmail = req.query?.cacheOnly === '1'
-                        ? hasCompleteEmailDashboard(payload)
+                        ? hasVerifiedEmailSource(payload)
                         : (hasSignals || verifiedThreatCoverage) && hasMailActivityShape;
                     if (canServeSavedEmail) {
                         return res.json({
@@ -12184,10 +12196,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
         return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
             const collectionStartedAt = new Date();
             const api = await fetchEmailSecurityPayloadFromApi();
-            await writeMicrosoftDashboardCache(pool,
-                'EmailSecurityPayloadCache', 'CompanyID, Payload',
-                [context.companyId, JSON.stringify(api)], collectionStartedAt, hasCompleteEmailDashboard(api)
-            );
+            await writeVerifiedEmailDashboard(context.companyId, api, collectionStartedAt);
             return res.json({ ...api, source: 'api-fallback' });
         });
     } catch (error) {
@@ -12363,14 +12372,15 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
                 return null;
             });
+            const dashboard = buildSavedIdentityDashboard(identityUsers, identity.metrics, sourceTenantId);
             snapshots.identity = {
                 success: true,
                 source: 'db',
                 companyId, sourceTenantId, fetchedAt, signInCollection,
                 backfillUpdatedAt: history?.state?.updatedAt,
-                summary: { ...identity.metrics, totalUsers: identityUsers.length },
-                metrics: identity.metrics,
-                users: mergeBackfillUsers(identityUsers, history?.state, fetchedAt, signInCollection),
+                summary: { ...dashboard.metrics, totalUsers: identityUsers.length },
+                metrics: dashboard.metrics,
+                users: mergeBackfillUsers(dashboard.users, history?.state, fetchedAt, signInCollection),
                 roleAssignments: identity.evidence?.find(item => item.evidenceType === 'role_assignments')?.data || []
             };
         }
@@ -12387,7 +12397,7 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 );
             }],
             ['email', 'EmailSecurityPayloadCache', async payload => (
-                payload?.success && hasCompleteEmailDashboard(payload) ? payload : null
+                hasVerifiedEmailSource(payload) ? payload : null
             )],
             ['applications', 'ApplicationPayloadCache', async payload => (
                 payload?.success === true && Array.isArray(payload.applications) ? payload : null
@@ -12409,7 +12419,10 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
 
         res.set('Cache-Control', 'no-store');
         const completeSnapshots = Object.fromEntries(
-            Object.entries(snapshots).map(([key, snapshot]) => [key, { ...snapshot, complete: true }])
+            Object.entries(snapshots).map(([key, snapshot]) => [key, {
+                ...snapshot,
+                complete: key !== 'email' || (hasCompleteEmailThreatCoverage(snapshot) && snapshot.sourceAudit.mailActivityOk === true)
+            }])
         );
         return res.json({ success: true, companyId, snapshots: completeSnapshots });
     } catch (error) {
@@ -13918,14 +13931,15 @@ async function serveSavedSunbirdIdentity(req, res) {
         if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users)) {
             return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
         }
+        const dashboard = buildSavedIdentityDashboard(users, snapshot.metrics, sourceTenantId);
         const summary = {
-            ...snapshot.metrics,
+            ...dashboard.metrics,
             totalUsers: users.length,
             activeUsers24h: snapshot.metrics.activeUsers,
             adminUsers: snapshot.metrics.privilegedUsers,
-            mfaEnabledPercentage: snapshot.metrics.mfaCoverage,
-            mfaEnabledUsers: snapshot.metrics.mfaEnabled,
-            mfaMissingUsers: snapshot.metrics.mfaMissing,
+            mfaEnabledPercentage: dashboard.metrics.mfaCoverage,
+            mfaEnabledUsers: dashboard.metrics.mfaEnabled,
+            mfaMissingUsers: dashboard.metrics.mfaMissing,
             privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
         };
         const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
@@ -13946,9 +13960,9 @@ async function serveSavedSunbirdIdentity(req, res) {
             sourceTenantId,
             summary,
             metrics: summary,
-            stackctrlMetrics: snapshot.dashboardSourceMetrics,
+            stackctrlMetrics: { ...snapshot.dashboardSourceMetrics, ...dashboard.metrics },
             signInCollection,
-            users: mergeBackfillUsers(users, backfill?.state, fetchedAt, signInCollection),
+            users: mergeBackfillUsers(dashboard.users, backfill?.state, fetchedAt, signInCollection),
             roleAssignments: cachedRoles?.roleAssignments || []
         });
     } catch (error) {
@@ -16457,7 +16471,7 @@ app.get('/api/email-security', authenticateToken, async (req, res) => {
     const tenant = getTenantByEmail(req.user.email);
     if (!tenant?.companyId || tenant.clientId !== 'sunbird') return res.sendStatus(403);
     return serveSavedMicrosoftPayload(res, tenant.companyId, 'EmailSecurityPayloadCache',
-        payload => payload?.success && hasCompleteEmailDashboard(payload), tenant.clientId);
+        hasVerifiedEmailSource, tenant.clientId);
 });
 
 /**
@@ -16948,10 +16962,7 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
                 dashboardPayload.summary.activeIncidents || 0
             ], collectionStartedAt, hasCompleteEmailThreatCoverage(payload)
         );
-        await writeMicrosoftDashboardCache(pool,
-            'EmailSecurityPayloadCache', 'CompanyID, Payload',
-            [companyId, JSON.stringify(dashboardPayload)], collectionStartedAt, hasCompleteEmailDashboard(payload)
-        );
+        await writeVerifiedEmailDashboard(companyId, dashboardPayload, collectionStartedAt);
         return emailEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
@@ -17466,10 +17477,7 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                 'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
                 [companyId, metrics.activeThreats, metrics.highSeverity, metrics.usersTargeted, metrics.openIncidents], collectionStartedAt, hasCompleteEmailThreatCoverage(payload)
             );
-            await writeMicrosoftDashboardCache(pool,
-                'EmailSecurityPayloadCache', 'CompanyID, Payload',
-                [companyId, JSON.stringify(payload)], collectionStartedAt, hasCompleteEmailDashboard(payload)
-            );
+            await writeVerifiedEmailDashboard(companyId, payload, collectionStartedAt);
             return null;
         }
         case 'security_alerts': {

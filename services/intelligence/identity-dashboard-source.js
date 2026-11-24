@@ -181,7 +181,52 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
     };
 }
 
+function buildSavedIdentityDashboard(users, metrics, tenantId, now = Date.now()) {
+    const tenant = String(tenantId || '').trim().toLowerCase();
+    const displayUsers = users.map(user => {
+        const saved = user.lastVerifiedMfa;
+        const observedAt = Date.parse(saved?.observedAt);
+        if (typeof user.mfaEnabled === 'boolean' || !user.id || !tenant ||
+            String(saved?.tenantId || '').trim().toLowerCase() !== tenant ||
+            typeof saved?.enabled !== 'boolean' || !Number.isInteger(saved.count) || saved.count < 0 ||
+            !Number.isFinite(observedAt) || observedAt > now) return user;
+        return {
+            ...user, mfaEnabled: saved.enabled, authMethodCount: saved.count,
+            mfaStatus: 'stale', mfaObservedAt: saved.observedAt
+        };
+    });
+    const workforce = displayUsers.filter(user => user.isWorkforce === true);
+    const complete = workforce.length > 0 &&
+        displayUsers.every(user => user.isWorkforce === true || user.isExternal === true) &&
+        workforce.every(user => typeof user.mfaEnabled === 'boolean' && ['complete', 'stale'].includes(user.mfaStatus));
+    const observations = workforce.map(user => Date.parse(user.mfaObservedAt));
+    const oldest = complete && observations.every(time => Number.isFinite(time) && time <= now)
+        ? Math.min(...observations) : null;
+    const mfaOutdated = complete && (workforce.some(user => user.mfaStatus === 'stale') ||
+        (oldest !== null && now - oldest >= 30 * 60000));
+    const enabled = workforce.filter(user => user.mfaEnabled === true).length;
+    const mfaCoverage = complete ? Math.round(enabled / workforce.length * 100) : null;
+    const derived = buildIdentityDashboardSource({ usersRows: displayUsers }).dashboardMetrics;
+    const scoreInputsVerified = complete && displayUsers.every(user => user.rolesStatus === 'complete');
+    const highRiskUsers = displayUsers.filter(user => String(user.riskLevel).toUpperCase() === 'HIGH' ||
+        (user.mfaStatus === 'stale' && user.mfaEnabled === false && user.hasAdminRole === true)).length;
+    const securityScore = scoreInputsVerified ? Math.round(
+        (mfaCoverage * 0.4) + ((100 - highRiskUsers / displayUsers.length * 100) * 0.3) +
+        ((derived.privilegedUsers <= 5 ? 100 : 50) * 0.3)
+    ) : null;
+    return {
+        users: displayUsers,
+        metrics: {
+            ...metrics, mfaCoverage, securityScore, mfaOutdated,
+            mfaObservedAt: oldest === null ? null : new Date(oldest).toISOString(),
+            mfaEnabled: enabled,
+            mfaMissing: workforce.filter(user => user.mfaEnabled === false).length
+        }
+    };
+}
+
 module.exports = {
     buildIdentityDashboardSource,
+    buildSavedIdentityDashboard,
     normalizeIdentityDashboardUser
 };

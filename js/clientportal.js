@@ -2581,9 +2581,12 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
             totalUsers,
             mfaEnabled: mfaEnabledUsers.length,
             mfaMissing: mfaMissingUsers.length,
-            mfaCoverage: workforceUsers.length && !mfaUnknownUsers.length && !unknownUserTypes
+            mfaCoverage: Object.hasOwn(data?.metrics || {}, 'mfaCoverage') ? data.metrics.mfaCoverage :
+                workforceUsers.length && !mfaUnknownUsers.length && !unknownUserTypes
                 ? Math.round((mfaEnabledUsers.length / workforceUsers.length) * 100)
                 : null,
+            mfaOutdated: data?.metrics?.mfaOutdated === true,
+            mfaObservedAt: data?.metrics?.mfaObservedAt,
             mfaAssessmentStatus: mfaUnknownUsers.length || unknownUserTypes ? 'incomplete' : 'complete',
             privilegedUsers: privilegedUsers.length,
             highRiskUsers: highRiskUsers.length,
@@ -2974,7 +2977,7 @@ function renderSunbirdIdentityMetrics(model) {
     if (!metricsEl) return;
     const metrics = [
         { key: 'total-users', label: 'Total Users', value: model.metrics.totalUsers, tone: 'neutral', evidence: 'allUsers' },
-        { key: 'mfa-coverage', label: 'MFA Coverage', value: model.metrics.mfaCoverage === null ? 'Temporarily unavailable' : `${model.metrics.mfaCoverage}%`, tone: model.metrics.mfaCoverage === null ? 'neutral' : model.metrics.mfaCoverage >= 90 ? 'good' : model.metrics.mfaCoverage >= 70 ? 'warn' : 'bad', evidence: 'mfaMissingUsers' },
+        { key: 'mfa-coverage', label: model.metrics.mfaOutdated ? 'MFA Coverage · Outdated' : 'MFA Coverage', value: model.metrics.mfaCoverage === null ? 'Temporarily unavailable' : `${model.metrics.mfaCoverage}%`, title: model.metrics.mfaOutdated ? microsoftDashboardUpdateText({ fetchedAt: model.metrics.mfaObservedAt }, Infinity) : '', tone: model.metrics.mfaCoverage === null || model.metrics.mfaOutdated ? 'neutral' : model.metrics.mfaCoverage >= 90 ? 'good' : model.metrics.mfaCoverage >= 70 ? 'warn' : 'bad', evidence: 'mfaMissingUsers' },
         { key: 'privileged-users', label: 'Privileged Users', value: model.metrics.privilegedUsers, tone: model.metrics.privilegedUsers > 5 ? 'warn' : 'neutral', evidence: 'privilegedUsers' },
         { key: 'high-risk-users', label: 'High Risk Users', value: model.metrics.highRiskUsers, tone: model.metrics.highRiskUsers > 0 ? 'bad' : 'good', evidence: 'highRiskUsers' }
     ];
@@ -2982,7 +2985,7 @@ function renderSunbirdIdentityMetrics(model) {
     metricsEl.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
             <div class="sunbird-id-metric-value">${escapeIdentityText(metric.value)}</div>
-            <div class="sunbird-id-metric-label">${escapeIdentityText(metric.label)}</div>
+            <div class="sunbird-id-metric-label" title="${escapeIdentityText(metric.title || '')}">${escapeIdentityText(metric.label)}</div>
             <button type="button" onclick="openSunbirdIdentityEvidence('${metric.evidence}', '${metric.key}')" class="sunbird-id-evidence-btn">View Evidence</button>
         </article>
     `).join('');
@@ -4448,13 +4451,13 @@ async function loadSunbirdEmailDashboardData() {
 
 function getEmailThreatDisplayMetrics(data = {}) {
     const audit = data.sourceAudit || {};
-    const legacyComplete = Array.isArray(audit.warnings) && audit.warnings.length === 0;
-    const alertsAvailable = audit.alertsComplete ?? (audit.alertsOk === true && legacyComplete);
-    const incidentsAvailable = audit.incidentsComplete ?? (audit.incidentsOk === true && legacyComplete);
+    const alertsAvailable = audit.alertsComplete === true;
+    const incidentsAvailable = audit.incidentsComplete === true;
     const summary = data.summary || {};
     return {
         alertsAvailable,
         incidentsAvailable,
+        sourceTimestamps: audit.sourceTimestamps || {},
         activeThreats: alertsAvailable ? summary.activeThreats ?? 'Temporarily unavailable' : 'Temporarily unavailable',
         highSeverity: alertsAvailable ? summary.highSeverityAlerts ?? 'Temporarily unavailable' : 'Temporarily unavailable',
         targetedUsers: alertsAvailable ? summary.affectedUsersCount ?? 'Temporarily unavailable' : 'Temporarily unavailable',
@@ -4483,11 +4486,13 @@ function canReplaceSecurityDashboard(incoming, previous) {
 }
 
 function emailCardMetrics(threats) {
+    const updated = source => threats.sourceTimestamps?.[source]
+        ? microsoftDashboardUpdateText({ fetchedAt: threats.sourceTimestamps[source] }) : undefined;
     return [
-        { label: 'Active Threats', value: `: ${threats.activeThreats}`, icon: 'fas fa-exclamation-triangle' },
-        { label: 'High Severity', value: `: ${threats.highSeverity}`, icon: 'fas fa-circle-exclamation' },
-        { label: 'Users Targeted', value: `: ${threats.targetedUsers}`, icon: 'fas fa-user-shield' },
-        { label: 'Open Incidents', value: `: ${threats.openIncidents}`, icon: 'fas fa-bug' }
+        { label: 'Active Threats', value: `: ${threats.activeThreats}`, title: updated('alerts'), icon: 'fas fa-exclamation-triangle' },
+        { label: 'High Severity', value: `: ${threats.highSeverity}`, title: updated('alerts'), icon: 'fas fa-circle-exclamation' },
+        { label: 'Users Targeted', value: `: ${threats.targetedUsers}`, title: updated('alerts'), icon: 'fas fa-user-shield' },
+        { label: 'Open Incidents', value: `: ${threats.openIncidents}`, title: updated('incidents'), icon: 'fas fa-bug' }
     ];
 }
 
@@ -4617,16 +4622,25 @@ function renderSunbirdEmailMetrics(model) {
 function renderSunbirdEmailInsights(model) {
     const el = document.getElementById('sunbird-email-insights');
     if (!el) return;
+    const coverage = getEmailThreatDisplayMetrics(model);
+    const unavailable = 'Temporarily unavailable';
     const insights = [
         { title: 'Phishing', value: model.evidence.phishingAlerts.length, evidence: 'phishingAlerts', tone: model.evidence.phishingAlerts.length ? 'bad' : 'good', filter: { threat: 'phishing' } },
         { title: 'Malware', value: model.evidence.malwareAlerts.length, evidence: 'malwareAlerts', tone: model.evidence.malwareAlerts.length ? 'bad' : 'good', filter: { threat: 'malware' } },
         { title: 'Spam', value: model.evidence.spamAlerts.length, evidence: 'spamAlerts', tone: model.evidence.spamAlerts.length ? 'warn' : 'neutral', filter: { threat: 'spam' } },
         { title: 'BEC attempts', value: model.evidence.becAlerts.length, evidence: 'becAlerts', tone: model.evidence.becAlerts.length ? 'bad' : 'neutral', filter: { threat: 'bec' } },
-        { title: 'Active mailboxes', value: model.summary.mailActivity?.activeMailboxes || model.evidence.mailActivityUsers.length, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
-        { title: 'Mail events', value: model.summary.mailActivity?.totalMailActivity || 0, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
+        { title: 'Active mailboxes', value: model.summary.mailActivity?.activeMailboxes ?? unavailable, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
+        { title: 'Mail events', value: model.summary.mailActivity?.totalMailActivity ?? unavailable, evidence: 'mailActivityUsers', tone: 'neutral', filter: { threat: 'mailflow' } },
         { title: 'Open incidents', value: model.evidence.activeIncidents.length, evidence: 'activeIncidents', tone: model.evidence.activeIncidents.length ? 'bad' : 'good' },
         { title: 'Recommendations', value: model.recommendations.length, evidence: 'recommendations', tone: model.recommendations.some(r => r.priority === 'critical') ? 'bad' : 'warn' }
-    ];
+    ].map(item => {
+        if (['phishingAlerts', 'malwareAlerts', 'spamAlerts', 'becAlerts'].includes(item.evidence) && !coverage.alertsAvailable ||
+            item.evidence === 'activeIncidents' && !coverage.incidentsAvailable ||
+            item.evidence === 'mailActivityUsers' && model.sourceAudit?.mailActivityOk !== true) {
+            return { ...item, value: unavailable, tone: 'neutral' };
+        }
+        return item;
+    });
     el.innerHTML = insights.map((item, index) => `
         <article class="sunbird-id-insight tone-${item.tone}" role="button" tabindex="0" data-email-evidence-key="${item.evidence}" onclick="toggleSunbirdEmailInsightEvidenceLock('${item.evidence}')" onkeydown="handleSunbirdEmailInsightEvidenceKey(event, '${item.evidence}')">
             <span>${escapeIdentityText(item.title)}</span>
@@ -4733,6 +4747,9 @@ function renderSunbirdEmailRiskTrendChart(model) {
 }
 
 function renderSunbirdEmailHealthGraph(model) {
+    if (!getEmailThreatDisplayMetrics(model).alertsAvailable) {
+        return '<article class="sunbird-id-chart-card sunbird-id-health-card"><h3>Email posture</h3><p>Temporarily unavailable</p></article>';
+    }
     const resolved = model.summary.threatResolutionRate || 0;
     const score = model.summary.securityScore || 0;
     const exposure = model.alerts.length ? Math.max(0, 100 - Math.min(100, model.evidence.highSeverityAlerts.length * 12)) : 100;
@@ -4895,6 +4912,7 @@ function applySunbirdEmailTableFilter(filter = {}) {
 
 function openSunbirdEmailEvidence(evidenceKey) {
     const model = buildSunbirdEmailModel();
+    const threats = getEmailThreatDisplayMetrics(sunbirdEmailDashboardData || {});
     const rows = getSunbirdEmailEvidenceRows(evidenceKey, model);
     const modal = document.getElementById('sunbird-email-evidence-modal');
     if (!modal) return;
@@ -4930,9 +4948,9 @@ function openSunbirdEmailEvidence(evidenceKey) {
                 <button type="button" onclick="closeSunbirdEmailEvidence()" class="sunbird-id-modal-close">&times;</button>
             </div>
             <div class="sunbird-id-evidence-summary">
-                <span>Active threats: ${model.summary.activeThreats || 0}</span>
-                <span>High severity: ${model.summary.highSeverityAlerts || 0}</span>
-                <span>Users targeted: ${model.summary.affectedUsersCount || 0}</span>
+                <span>Active threats: ${threats.activeThreats}</span>
+                <span>High severity: ${threats.highSeverity}</span>
+                <span>Users targeted: ${threats.targetedUsers}</span>
             </div>
             <div class="sunbird-id-evidence-list">
                 ${rows.length ? rows.slice(0, 100).map(row => `
@@ -10899,10 +10917,9 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
         const email = snapshots.email;
         if (isNewerVerifiedMicrosoftDashboardSnapshot(email, latestEmailCardData,
             data => data?.success === true
-                && data.complete === true
-                && getEmailThreatDisplayMetrics(data).alertsAvailable
-                && getEmailThreatDisplayMetrics(data).incidentsAvailable
-                && data.sourceAudit?.mailActivityOk === true)) {
+                && (data.sourceAudit?.alertsComplete === true || data.sourceAudit?.incidentsComplete === true
+                    || data.sourceAudit?.mailActivityOk === true))
+            && !retainVerifiedEmailDashboard(latestEmailCardData, email)) {
             latestEmailCardData = normalizeSunbirdEmailData(email);
             sunbirdEmailDashboardData = latestEmailCardData;
             saveSunbirdEmailSnapshot(latestEmailCardData);
@@ -10915,7 +10932,9 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
                 project.cardMetrics = emailCardMetrics(threats);
                 const activity = mailSummary.activeMailboxes
                     ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events` : '';
-                project.cardFooter = threats.activeThreats > 0
+                project.cardFooter = !threats.alertsAvailable || !threats.incidentsAvailable
+                    ? ['Threat data incomplete', activity].filter(Boolean).join(' | ')
+                    : threats.activeThreats > 0
                     ? `${threats.activeThreats} active threats detected`
                     : activity || 'No active threats in collected alerts';
                 updateMicrosoftDashboardCardTimestamp(project, email);
@@ -10996,7 +11015,7 @@ function saveProjectCardToCache(project) {
     if (!project || !hasRealProjectMetrics(project)) return;
     const snapshot = readProjectCardCache();
     snapshot[project.id] = {
-        ...(project.id === 5 ? { emailCoverageAware: true } : {}),
+        ...(project.id === 5 ? { emailCoverageAware: 2 } : {}),
         status: project.status,
         securityScore: project.securityScore,
         risks: project.risks,
@@ -11015,7 +11034,7 @@ function applyCachedProjectCards() {
     mockProjects.forEach(project => {
         const cached = snapshot[project.id];
         if (!cached || !Array.isArray(cached.cardMetrics)) return;
-        if (project.id === 5 && cached.emailCoverageAware !== true) return;
+        if (project.id === 5 && cached.emailCoverageAware !== 2) return;
         if (hasRealProjectMetrics(project)) return;
 
         project.status = cached.status || 'active';
@@ -11160,6 +11179,7 @@ function updateIdentityProjectCardFromDashboard(data) {
     const admins = identityCardCount(summary.adminUsers ?? metrics.adminUsers, prior.admins, data.fetchedAt);
     project.identityVerifiedCounts = { scope, active: active.verified, admins: admins.verified };
     const securityScore = summary.securityScore ?? metrics.securityScore ?? 'Temporarily unavailable';
+    const scoreOutdated = Number.isFinite(securityScore) && metrics.mfaOutdated === true;
 
     project.status = 'active';
     project.securityScore = securityScore;
@@ -11172,7 +11192,8 @@ function updateIdentityProjectCardFromDashboard(data) {
         { label: "Total Users", value: `: ${totalUsers}`, icon: "fas fa-users" },
         { label: "Active (24h)", value: `: ${active.text}`, title: active.title, icon: "fas fa-user-check" },
         { label: "Admin Roles", value: `: ${admins.text}`, title: admins.title, icon: "fas fa-crown" },
-        { label: "Security Score", value: `: ${securityScore}`, icon: "fas fa-shield-alt" }
+        { label: "Security Score", value: `: ${securityScore}${scoreOutdated ? '*' : ''}`, title: scoreOutdated
+            ? `Outdated · ${microsoftDashboardUpdateText({ fetchedAt: metrics.mfaObservedAt }, Infinity)}` : undefined, icon: "fas fa-shield-alt" }
     ];
     project.cardFooter = `Users: ${totalUsers} | Active: ${active.text}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
     updateMicrosoftDashboardCardTimestamp(project, data);

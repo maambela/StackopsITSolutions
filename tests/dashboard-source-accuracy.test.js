@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
 const { identityAdapter } = require('../services/intelligence/source-adapters');
+const { buildSavedIdentityDashboard } = require('../services/intelligence/identity-dashboard-source');
+const { mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 const client = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
@@ -117,7 +119,7 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
         authenticateToken() {},
         verifySunbirdUser: async () => ({ clientId: 'sunbird', companyId: 25 }),
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 25); },
-        pool, identityAdapter,
+        pool, identityAdapter, buildSavedIdentityDashboard,
         readIdentityBackfill: async () => null,
         mergeBackfillUsers: rows => rows,
         async getCachedRoleAssignments(companyId) { assert.equal(companyId, 25); return { roleAssignments: [] }; },
@@ -144,6 +146,49 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
     assert.equal(missing.statusCode, 503);
     assert.equal(missing.body.success, false);
     assert.ok(queries.every(sql => !/\bidentity_users\b/i.test(sql)));
+});
+
+test('saved Identity display restores scoped, verified MFA with its original timestamp', () => {
+    const observedAt = '2026-11-24T17:00:00Z';
+    const now = Date.parse('2026-11-24T18:00:00Z');
+    const saved = { id: 'a', isWorkforce: true, userType: 'Member', rolesStatus: 'complete', roles: [],
+        mfaStatus: 'unavailable', lastVerifiedMfa: { enabled: true, count: 2, observedAt, tenantId: 'tenant-a' } };
+    const dashboard = buildSavedIdentityDashboard([saved], { activeUsers: null }, 'tenant-a', now);
+    assert.equal(dashboard.metrics.mfaCoverage, 100);
+    assert.equal(dashboard.metrics.securityScore, 100);
+    assert.equal(dashboard.metrics.mfaOutdated, true);
+    assert.equal(dashboard.metrics.mfaObservedAt, '2026-11-24T17:00:00.000Z');
+    assert.equal(dashboard.metrics.activeUsers, null);
+    assert.equal(dashboard.users[0].mfaStatus, 'stale');
+    assert.equal(saved.mfaStatus, 'unavailable');
+    assert.equal(buildSavedIdentityDashboard([saved], {}, 'tenant-b', now).metrics.mfaCoverage, null);
+    assert.equal(buildSavedIdentityDashboard([{ ...saved, lastVerifiedMfa: null }], {}, 'tenant-a', now).metrics.securityScore, null);
+    assert.equal(buildSavedIdentityDashboard([{ ...saved, rolesStatus: 'unavailable' }], {}, 'tenant-a', now).metrics.securityScore, null);
+});
+
+test('Email snapshots publish each verified source independently and reject late results', () => {
+    const date = minute => new Date(`2026-11-24T17:${minute}:00Z`);
+    const alerts = { success: true, sourceAudit: { alertsComplete: true },
+        alerts: [], summary: { activeThreats: 0, highSeverityAlerts: 0 } };
+    const activity = { success: true, sourceAudit: { mailActivityOk: true },
+        mailActivity: { users: [] }, summary: { activeMailboxes: 42 } };
+    const incidents = { success: true, sourceAudit: { incidentsComplete: true },
+        incidents: [], summary: { activeIncidents: 0 } };
+    const first = mergeVerifiedEmailSources(null, activity, date('10'));
+    const second = mergeVerifiedEmailSources(first, alerts, date('20'));
+    assert.equal(second.summary.activeThreats, 0);
+    assert.equal(second.summary.activeMailboxes, 42);
+    assert.equal(second.sourceAudit.incidentsComplete, false);
+    const third = mergeVerifiedEmailSources(second, incidents, date('15'));
+    assert.equal(third.summary.activeIncidents, 0);
+    assert.equal(third.sourceAudit.sourceTimestamps.mailActivity, date('10').toISOString());
+    assert.equal(third.sourceAudit.sourceTimestamps.incidents, date('15').toISOString());
+    assert.equal(third.fetchedAt, date('20').toISOString());
+    assert.equal(mergeVerifiedEmailSources(third, activity, date('09')), null);
+    assert.equal(mergeVerifiedEmailSources(third, { success: true, sourceAudit: {} }, date('25')), null);
+    const updated = mergeVerifiedEmailSources(third, activity, date('30'));
+    assert.equal(updated.sourceAudit.sourceTimestamps.alerts, date('20').toISOString());
+    assert.equal(updated.summary.activeIncidents, 0);
 });
 
 test('Email card displays zero only for covered sources and keeps mailbox activity separate', async () => {
@@ -187,6 +232,9 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     await card();
     assert.deepEqual(values(), [': Temporarily unavailable', ': Temporarily unavailable', ': Temporarily unavailable', ': 0']);
     assert.match(project.cardFooter, /Threat data incomplete.*42 active mailboxes.*14060 mail events/);
+    payload = { ...payload, sourceAudit: { alertsOk: true, incidentsOk: true, warnings: [] } };
+    await card();
+    assert.deepEqual(values(), [': Temporarily unavailable', ': Temporarily unavailable', ': Temporarily unavailable', ': 0']);
     payload = { ...payload, sourceAudit: { alertsComplete: true, incidentsComplete: true } };
     await card();
     assert.deepEqual(values(), [': 0', ': 0', ': 0', ': 0']);
@@ -196,5 +244,5 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     payload = null;
     await card();
     assert.deepEqual(values(), Array(4).fill(': 0'));
-    assert.deepEqual(calls, Array(4).fill('/api/db/email-security?cacheOnly=1'));
+    assert.deepEqual(calls, Array(5).fill('/api/db/email-security?cacheOnly=1'));
 });
