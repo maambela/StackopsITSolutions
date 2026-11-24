@@ -650,14 +650,21 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
         if (collection) return { value: payload.value };
         return payload;
     };
+    const getPayloadView = result => {
+        const viewKey = allowPartial ? 'partialPayload' : 'completePayload';
+        if (!Object.prototype.hasOwnProperty.call(result, viewKey)) {
+            result[viewKey] = unwrapPayload(result.payload);
+        }
+        return result[viewKey];
+    };
     const cached = microsoftGraphJsonCache.get(key);
     if (shared && cached && cached.expiresAt > Date.now()) {
         logRuntimeOperation('graph_request_cache_hit', { label, responseBytes: cached.responseBytes });
-        return unwrapPayload(cached.payload);
+        return getPayloadView(cached.result);
     }
     if (shared && microsoftGraphJsonPromises.has(key)) {
         logRuntimeOperation('graph_request_joined', { label });
-        return unwrapPayload((await microsoftGraphJsonPromises.get(key)).payload);
+        return getPayloadView(await microsoftGraphJsonPromises.get(key));
     }
 
     const request = (async () => {
@@ -713,15 +720,16 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
 
     if (shared) microsoftGraphJsonPromises.set(key, request);
     try {
-        const { payload, responseBytes } = await request;
+        const result = await request;
+        const { payload, responseBytes } = result;
         if (shared && payload?._collection?.status !== 'partial' && payload?._collection?.status !== 'unavailable'
             && responseBytes <= 1024 * 1024 && microsoftGraphJsonPromises.get(key) === request) {
             if (microsoftGraphJsonCache.size >= 32) {
                 microsoftGraphJsonCache.delete(microsoftGraphJsonCache.keys().next().value);
             }
-            microsoftGraphJsonCache.set(key, { payload, responseBytes, expiresAt: Date.now() + MICROSOFT_GRAPH_SHARED_CACHE_TTL_MS });
+            microsoftGraphJsonCache.set(key, { result, responseBytes, expiresAt: Date.now() + MICROSOFT_GRAPH_SHARED_CACHE_TTL_MS });
         }
-        return unwrapPayload(payload);
+        return getPayloadView(result);
     } finally {
         if (shared && microsoftGraphJsonPromises.get(key) === request) {
             microsoftGraphJsonPromises.delete(key);

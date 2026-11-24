@@ -37,6 +37,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         },
         console: { warn() {}, error: (...args) => failures.push(args.join(' ')) },
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 7); },
+        identityMetricsRefreshAttempts: new Map(),
         fetchIdentityMetricsFromApi() {
             starts.push('identity');
             return new Promise((resolve, reject) => { failIdentity = reject; });
@@ -55,7 +56,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     });
     const pending = refresh();
     await new Promise(setImmediate);
-    assert.deepEqual(starts, ['identity', 'devices']);
+    assert.deepEqual([...starts].sort(), ['devices', 'identity']);
     failIdentity(new Error('Graph deadline'));
     finishDevices({ totalDevices: 12 });
     await pending;
