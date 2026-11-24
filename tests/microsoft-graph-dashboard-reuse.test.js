@@ -77,6 +77,43 @@ test('standard sign-ins reuse the URL within a minute and keep different lookbac
     assert.match(calls[3].searchParams.get('$filter'), /:31:00\.000Z$/);
 });
 
+test('Identity sign-ins retain page-cap partial results and report request timeouts as unavailable', async () => {
+    let fail = false;
+    let options;
+    const signIns = vm.runInNewContext(section('async function fetchMicrosoftSignIns', 'async function fetchUserAuthMethods') +
+        '\nfetchMicrosoftSignIns;', {
+        console: { error() {} },
+        async fetchMicrosoftGraphJson(url, token, label, requestOptions) {
+            options = requestOptions;
+            if (fail) {
+                const error = new Error('Graph sign-in request timed out');
+                error.code = 'GRAPH_REQUEST_TIMEOUT';
+                throw error;
+            }
+            return {
+                value: [{ id: 'last-collected-page' }],
+                collectionStatus: 'partial',
+                collectionWarnings: ['Sign-in collection reached the 5,000-record page cap.'],
+                collectionErrorCode: 'GRAPH_PAGE_LIMIT'
+            };
+        }
+    });
+
+    const partial = await signIns('fixture', 30, { withStatus: true });
+    assert.equal(options.paginate, true);
+    assert.equal(options.allowPartial, true);
+    assert.equal(partial.status, 'partial');
+    assert.deepEqual(partial.records.map(record => record.id), ['last-collected-page']);
+    assert.equal(partial.errorCode, 'GRAPH_PAGE_LIMIT');
+    assert.match(partial.warnings[0], /5,000-record page cap/);
+
+    fail = true;
+    const unavailable = await signIns('fixture', 30, { withStatus: true });
+    assert.equal(unavailable.status, 'unavailable');
+    assert.equal(unavailable.records.length, 0);
+    assert.equal(unavailable.errorCode, 'GRAPH_REQUEST_TIMEOUT');
+});
+
 test('concurrent authentication-method cache misses still share one Graph request', async () => {
     let calls = 0;
     let finish;

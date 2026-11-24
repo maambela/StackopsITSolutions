@@ -1,4 +1,4 @@
-const { asArray, booleanFrom, buildContext, daysSince, numberFrom } = require('./common');
+const { asArray, booleanFrom, buildContext, numberFrom } = require('./common');
 
 function getRoleNames(user) {
     const roles = user?.roles || user?.assignedRoles || user?.roleNames || [];
@@ -14,39 +14,63 @@ function getLastSignIn(user) {
     return user?.lastSignIn?.dateTime || user?.signInActivity?.lastSignInDateTime || user?.lastSignInDateTime || null;
 }
 
+function getLastSignInDays(user) {
+    const raw = user?.lastSignIn?.daysSince;
+    if (raw !== null && raw !== undefined && raw !== '' && Number.isFinite(Number(raw))) return Number(raw);
+    const value = getLastSignIn(user);
+    if (!value) return null;
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? Math.max(0, Math.floor((Date.now() - time) / 86400000)) : null;
+}
+
+function hasMfaEvidence(user) {
+    const value = user?.mfaEnabled ?? user?.hasMfa ?? user?.mfaRegistered;
+    return value !== null && value !== undefined && value !== '';
+}
+
 function buildIdentityDashboardContext(source) {
     const users = asArray(source.evidence?.find(item => item?.evidenceType === 'users')?.data);
     const stored = source.metrics || {};
     const totalUsers = users.length || numberFrom(stored, ['TotalUsers', 'totalUsers']);
     const workforceUsers = users.filter(user => user?.isWorkforce || String(user?.userType || '').toLowerCase() === 'member');
     const privilegedUsers = workforceUsers.filter(isPrivileged);
-    const usersWithoutMfa = workforceUsers.filter(user => !booleanFrom(user.mfaEnabled ?? user.hasMfa ?? user.mfaRegistered));
+    const usersWithoutMfa = workforceUsers.filter(user => hasMfaEvidence(user) && !booleanFrom(user.mfaEnabled ?? user.hasMfa ?? user.mfaRegistered));
+    const usersWithUnknownMfa = workforceUsers.filter(user => !hasMfaEvidence(user));
     const highRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'HIGH');
     const mediumRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'MEDIUM');
     const externalUsers = users.filter(user => Boolean(user.isExternal) || String(user.userType || '').toLowerCase() === 'guest');
-    const inactiveUsers = users.filter(user => daysSince(getLastSignIn(user)) > 30);
-    const unknownDeviceUsers = users.filter(user => /unknown|no sign-in|n\/a/i.test(String(user?.lastSignIn?.device || user?.device || 'Unknown')));
+    const inactiveUsers = users.filter(user => {
+        const days = getLastSignInDays(user);
+        return days !== null && days > 30;
+    });
+    const unknownDeviceUsers = users.filter(user => {
+        const device = String(user?.lastSignIn?.device || user?.device || '').trim();
+        return Boolean(getLastSignIn(user) && (!device || /unknown|n\/a/i.test(device)));
+    });
     const failedSignInUsers = users.filter(user => {
-        const status = String(user?.lastSignIn?.status || user?.signInStatus || '').toLowerCase();
-        const location = String(user?.lastSignIn?.location || user?.location || '').toLowerCase();
-        const device = String(user?.lastSignIn?.device || user?.device || '').toLowerCase();
-        const risk = String(user.riskLevel || '').toUpperCase();
-        return status.includes('fail') || risk === 'HIGH' ||
-            location.includes('unknown') || location === 'no sign-in' ||
-            device.includes('unknown') || device === 'no sign-in' ||
-            daysSince(getLastSignIn(user)) > 30;
+        const status = String(user?.failedSignIn?.status || user?.lastSignIn?.status || user?.signInStatus || '').toLowerCase();
+        return status.includes('fail');
     });
     const adminsWithoutMfa = privilegedUsers.filter(user => usersWithoutMfa.includes(user));
     const mfaEnabled = workforceUsers.length ? workforceUsers.length - usersWithoutMfa.length : numberFrom(stored, ['MFAEnabled', 'mfaEnabled']);
     const mfaMissing = workforceUsers.length ? usersWithoutMfa.length : Math.max(0, totalUsers - mfaEnabled);
-    const mfaCoverage = workforceUsers.length ? Math.round((mfaEnabled / workforceUsers.length) * 100) : 0;
+    const mfaCoverage = workforceUsers.length && !usersWithUnknownMfa.length
+        ? Math.round((mfaEnabled / workforceUsers.length) * 100)
+        : null;
     const dashboardSource = source.dashboardSourceMetrics || {};
     const dashboardMetrics = {
         totalUsers: numberFrom(dashboardSource, ['totalUsers'], totalUsers),
         workforceUsers: numberFrom(dashboardSource, ['workforceUsers'], workforceUsers.length),
         externalUsers: numberFrom(dashboardSource, ['externalUsers'], externalUsers.length),
         unknownUserTypes: numberFrom(dashboardSource, ['unknownUserTypes'], users.filter(user => String(user.userType || '').toLowerCase() === 'unknown').length),
-        activeUsers: numberFrom(dashboardSource, ['activeUsers'], users.length ? users.filter(user => daysSince(getLastSignIn(user)) <= 30).length : numberFrom(stored, ['ActiveUsers', 'activeUsers'])),
+        activeUsers: dashboardSource.signInCollectionStatus && dashboardSource.signInCollectionStatus !== 'complete'
+            ? null
+            : numberFrom(dashboardSource, ['activeUsers'], users.length
+                ? users.filter(user => {
+                    const days = getLastSignInDays(user);
+                    return days !== null && days <= 30;
+                }).length
+                : numberFrom(stored, ['ActiveUsers', 'activeUsers'])),
         mfaEnabled: numberFrom(dashboardSource, ['mfaEnabled'], mfaEnabled),
         mfaMissing: numberFrom(dashboardSource, ['mfaMissing'], mfaMissing),
         mfaCoverage: numberFrom(dashboardSource, ['mfaCoverage'], mfaCoverage),
@@ -66,7 +90,9 @@ function buildIdentityDashboardContext(source) {
     return buildContext(source, {
         dashboardMetrics,
         calculatedIndicators: {
-            mfaCoverageStatus: dashboardMetrics.mfaCoverage >= 90 ? 'healthy' : dashboardMetrics.mfaCoverage >= 70 ? 'attention' : 'high_risk',
+            mfaCoverageStatus: dashboardMetrics.mfaCoverage === null
+                ? 'temporarily_unavailable'
+                : dashboardMetrics.mfaCoverage >= 90 ? 'healthy' : dashboardMetrics.mfaCoverage >= 70 ? 'attention' : 'high_risk',
             privilegedMfaGap: dashboardMetrics.adminsWithoutMfa,
             identityRiskUsers: dashboardMetrics.highRiskUsers + dashboardMetrics.signInIssues
         },

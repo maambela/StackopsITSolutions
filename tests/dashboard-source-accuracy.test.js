@@ -67,24 +67,26 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
     const users = Array.from({ length: 132 }, (_, index) => ({ id: String(index), userType: index < 48 ? 'Member' : 'Guest' }));
     const queries = [];
     let complete = true;
+    let snapshotTenantId = 'tenant-25';
     let handler;
     const pool = {
         async query(sql, parameters) {
             queries.push(sql);
             if (sql.includes('CompanyMicrosoftMapping')) {
                 assert.deepEqual(Array.from(parameters), [25]);
-                return [[{ MicrosoftTenantID: 6 }]];
+                return [[{ MicrosoftTenantID: 6, TenantID: 'tenant-25' }]];
             }
             if (sql.includes('StackCTRLIdentityEvidenceSnapshots')) {
-                assert.deepEqual(Array.from(parameters), [25]);
+                assert.deepEqual(Array.from(parameters), [25, 'sunbird']);
                 return [complete ? [{
                     ID: 11558, CompanyID: 25, IsComplete: 1, CollectionStatus: 'complete',
                     EvidenceRecordCount: 132, CollectedAt: '2026-11-23T21:00:09Z',
+                    SourceAuditJson: JSON.stringify({ tenantId: snapshotTenantId }),
                     DashboardMetricsJson: JSON.stringify({ totalUsers: 132, workforceUsers: 48, activeUsers: 5 })
                 }] : []];
             }
             if (sql.includes('StackCTRLIdentityUserEvidence')) {
-                assert.deepEqual(Array.from(parameters), [11558]);
+                assert.deepEqual(Array.from(parameters), [11558, 25, 'sunbird']);
                 return [users.map(user => ({ ProcessedEvidenceJson: JSON.stringify(user) }))];
             }
             assert.fail('unexpected cache lookup');
@@ -110,6 +112,11 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
     assert.equal(response.body.summary.workforceUsers, 48);
     assert.equal(response.body.fetchedAt, '2026-11-23T21:00:09.000Z');
     assert.equal((await request({})).body.summary.totalUsers, 132);
+    snapshotTenantId = 'different-tenant';
+    const wrongTenant = await request();
+    assert.equal(wrongTenant.statusCode, 503);
+    assert.equal(wrongTenant.body.success, false);
+    snapshotTenantId = 'tenant-25';
     complete = false;
     const missing = await request();
     assert.equal(missing.statusCode, 503);

@@ -93,12 +93,15 @@ function mysqlDateTime(value) {
 function deriveIdentityEvidence(payload = {}) {
     const usersInput = Array.isArray(payload.users) ? payload.users : [];
     const dashboardSource = buildIdentityDashboardSource({
-        metricsRow: { active_users_24h: payload.summary?.activeUsers24h },
+        metricsRow: {
+            active_users_24h: payload.summary?.activeUsers24h,
+            signInCollectionStatus: payload.signInCollection?.status
+        },
         usersRows: usersInput
     });
     const users = dashboardSource.users;
     const mediumRiskUsers = users.filter(user => String(user.riskLevel).toUpperCase() === 'MEDIUM').length;
-    const inactiveUsers = users.filter(user => Number(user.lastSignIn?.daysSince) > 30).length;
+    const inactiveUsers = users.filter(user => Number.isFinite(user.lastSignIn?.daysSince) && user.lastSignIn.daysSince > 30).length;
     const riskDistribution = {
         safe: Math.max(0, users.length - dashboardSource.dashboardMetrics.highRiskUsers - mediumRiskUsers),
         medium: mediumRiskUsers,
@@ -211,7 +214,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
                     evidence.isComplete ? 'complete' : 'incomplete', evidence.isComplete ? 1 : 0,
                     mysqlDateTime(collectedAt), mysqlDateTime(sourceFetchedAt), evidence.users.length,
                     evidence.expectedRecordCount, evidence.omittedRecordCount, evidence.completenessPercent,
-                    metrics.totalUsers, metrics.mfaEnabled, metrics.mfaMissing, metrics.mfaCoverage,
+                    metrics.totalUsers, metrics.mfaEnabled, metrics.mfaMissing, metrics.mfaCoverage ?? 0,
                     metrics.privilegedUsers, metrics.adminsWithoutMfa, metrics.highRiskUsers,
                     metrics.signInIssues, metrics.externalUsers, metrics.unknownDevices,
                     metrics.multiplePrivilegedRoles, JSON.stringify(evidence.riskDistribution),
@@ -220,6 +223,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
                     JSON.stringify(metrics), JSON.stringify({
                         source: 'stackctrl_processed_identity_dashboard',
                         dashboardFetchedAt: payload?.fetchedAt || null,
+                        tenantId: payload?.sourceTenantId || null,
                         collectionTrigger,
                         sourceEndpoint
                     }),
@@ -244,7 +248,7 @@ function createIdentityEvidenceStore({ pool, logger = console, now = () => new D
                         snapshotId, numericCompanyId, tenantKey, userSourceId, user.displayName,
                         user.mail || user.userPrincipalName, user.jobTitle, roles.join(', '),
                         JSON.stringify(roles), user.isExternal ? 'External' : 'Internal',
-                        user.mfaEnabled ? 1 : 0, user.authMethodCount, user.riskLevel,
+                        user.mfaEnabled === true ? 1 : 0, user.authMethodCount ?? 0, user.riskLevel,
                         user.accountEnabled === false ? 'Disabled' : 'Active',
                         mysqlDateTime(user.lastSignIn?.dateTime), user.lastSignIn?.daysSince,
                         user.lastSignIn?.status || null, user.lastSignIn?.location || null,

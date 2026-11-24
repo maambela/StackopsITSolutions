@@ -211,9 +211,9 @@ test('Identity dashboard and StackCTRL context share the exact user-derived prem
         privilegedUsers: 6,
         highRiskUsers: 1,
         adminsWithoutMfa: 1,
-        signInIssues: 57,
+        signInIssues: 0,
         externalUsers: 4,
-        unknownDevices: 48,
+        unknownDevices: 0,
         multiplePrivilegedRoles: 5
     };
     for (const [metric, value] of Object.entries(expected)) {

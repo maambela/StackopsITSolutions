@@ -394,11 +394,15 @@ const definitions = {
                 const snapshots = await queryRows(
                     pool,
                     `SELECT * FROM StackCTRLIdentityEvidenceSnapshots
-                     WHERE CompanyID = ? AND IsComplete = 1 AND CollectionStatus = 'complete'
-                     ORDER BY CollectedAt DESC, ID DESC LIMIT 1`,
-                    [companyId]
+                     WHERE CompanyID = ? AND TenantKey = ? AND IsComplete = 1 AND CollectionStatus = 'complete'
+                     ORDER BY CollectedAt DESC, ID DESC LIMIT 10`,
+                    [companyId, capability.profileKey]
                 );
-                const snapshot = snapshots[0];
+                const currentTenantId = String(tenant[0]?.TenantID || '').trim().toLowerCase();
+                const snapshot = snapshots.find(candidate => {
+                    const sourceTenantId = String(candidate.SourceAuditJson?.tenantId || '').trim().toLowerCase();
+                    return Boolean(currentTenantId && (!sourceTenantId || sourceTenantId === currentTenantId));
+                });
                 if (!snapshot) {
                     return {
                         records: [],
@@ -412,15 +416,17 @@ const definitions = {
                             collectionStatus: 'missing'
                         },
                         evidence: [],
-                        warnings: ['No complete StackCTRL Identity evidence snapshot is available. Azure analysis is blocked until collection succeeds.'],
+                        warnings: [snapshots.length
+                            ? 'No complete StackCTRL Identity evidence snapshot matches the currently mapped Microsoft tenant.'
+                            : 'No complete StackCTRL Identity evidence snapshot is available. Azure analysis is blocked until collection succeeds.'],
                         rawReference: { table: this.table, recordId: null }
                     };
                 }
                 const userRows = await queryRows(
                     pool,
                     `SELECT * FROM StackCTRLIdentityUserEvidence
-                     WHERE SnapshotID = ? ORDER BY ID`,
-                    [snapshot.ID]
+                     WHERE SnapshotID = ? AND CompanyID = ? AND TenantKey = ? ORDER BY ID`,
+                    [snapshot.ID, companyId, capability.profileKey]
                 );
                 if (userRows.length !== Number(snapshot.EvidenceRecordCount)) {
                     return {
@@ -449,8 +455,9 @@ const definitions = {
                     jobTitle: row.JobTitle,
                     mobilePhone: row.Phone,
                     roles: row.RolesJson || [],
-                    mfaEnabled: Boolean(Number(row.MFAEnabled)),
-                    authMethodCount: Number(row.AuthMethodCount || 0),
+                    mfaEnabled: null,
+                    mfaStatus: 'unavailable',
+                    authMethodCount: null,
                     riskLevel: row.RiskLevel,
                     isExternal: String(row.UserType).toLowerCase() === 'external',
                     accountEnabled: String(row.AccountStatus).toLowerCase() !== 'disabled',

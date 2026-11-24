@@ -11,11 +11,21 @@ function defaultMapWithConcurrency(items, limit, worker) {
     return Promise.all(workers).then(() => results);
 }
 
+function identityRoleName(role) {
+    return typeof role === 'string' ? role : role?.name || role?.displayName || '';
+}
+
 async function buildIdentityDashboardPayload({
     tenantKey = 'sunbird',
+    sourceTenantId = null,
     users = [],
     roleAssignments = [],
     signIns = [],
+    previousUsers = [],
+    roleAssignmentsStatus = 'complete',
+    signInCollectionStatus = 'complete',
+    signInWindowDays = 30,
+    collectionWarnings = [],
     loadAuthMethods,
     hasRealMfaMethod,
     mapWithConcurrency = defaultMapWithConcurrency,
@@ -26,51 +36,128 @@ async function buildIdentityDashboardPayload({
         throw new Error('Identity dashboard processing requires authentication-method helpers');
     }
 
-    const userRoleMap = {};
+    const userRoleMap = new Map();
     roleAssignments.forEach(assignment => {
-        const principalId = assignment.principalId;
-        if (!userRoleMap[principalId]) userRoleMap[principalId] = [];
-        userRoleMap[principalId].push({
+        const principalId = String(assignment.principalId || '').trim();
+        if (!principalId) return;
+        if (!userRoleMap.has(principalId)) userRoleMap.set(principalId, []);
+        userRoleMap.get(principalId).push({
             id: assignment.roleDefinition?.id,
             name: assignment.roleDefinition?.displayName || 'Unknown Role'
         });
     });
 
-    const latestSignInMap = {};
+    const previousById = new Map();
+    const previousByUpn = new Map();
+    previousUsers.forEach(user => {
+        if (user?.id) previousById.set(String(user.id), user);
+        const upn = String(user?.userPrincipalName || '').trim().toLowerCase();
+        if (upn) previousByUpn.set(upn, user);
+    });
+
+    const currentById = new Map();
+    const currentByUpn = new Map();
+    users.forEach(user => {
+        if (user?.id) currentById.set(String(user.id), user);
+        const upn = String(user?.userPrincipalName || '').trim().toLowerCase();
+        if (upn) currentByUpn.set(upn, user);
+    });
+
+    const latestSignInMap = new Map();
+    const latestFailedSignInMap = new Map();
+    const matchedSignIns = [];
     signIns.forEach(signIn => {
-        const upn = signIn.userPrincipalName;
-        if (!upn) return;
-        if (!latestSignInMap[upn] || new Date(signIn.createdDateTime) > new Date(latestSignInMap[upn].createdDateTime)) {
-            latestSignInMap[upn] = {
-                createdDateTime: signIn.createdDateTime,
-                appDisplayName: signIn.appDisplayName,
-                clientAppUsed: signIn.clientAppUsed,
-                ipAddress: signIn.ipAddress,
-                location: signIn.location?.city ? `${signIn.location.city}, ${signIn.location.countryOrRegion}` : 'Unknown Location',
-                deviceDetail: signIn.deviceDetail,
-                status: signIn.status?.errorCode === '0' ? 'Success' : 'Failed'
-            };
+        const user = signIn.userId
+            ? currentById.get(String(signIn.userId))
+            : currentByUpn.get(String(signIn.userPrincipalName || '').trim().toLowerCase());
+        const createdAt = signIn.createdDateTime ? new Date(signIn.createdDateTime) : null;
+        if (!user || !createdAt || Number.isNaN(createdAt.getTime())) return;
+        const key = String(user.id || user.userPrincipalName || '');
+        const errorCode = signIn.status?.errorCode;
+        const status = errorCode === 0 || errorCode === '0'
+            ? 'Success'
+            : errorCode === null || errorCode === undefined ? 'Unknown' : 'Failed';
+        const locationParts = [signIn.location?.city, signIn.location?.countryOrRegion].filter(Boolean);
+        const event = {
+            dateTime: createdAt.toISOString(),
+            appDisplayName: signIn.appDisplayName || null,
+            clientAppUsed: signIn.clientAppUsed || null,
+            ipAddress: signIn.ipAddress || null,
+            location: locationParts.length ? locationParts.join(', ') : null,
+            device: signIn.deviceDetail?.displayName || null,
+            status,
+            errorCode: errorCode ?? null,
+            failureReason: signIn.status?.failureReason || null
+        };
+        matchedSignIns.push({ user, event });
+        const latest = latestSignInMap.get(key);
+        if (!latest || createdAt.getTime() > Date.parse(latest.dateTime)) latestSignInMap.set(key, event);
+        if (status === 'Failed') {
+            const latestFailed = latestFailedSignInMap.get(key);
+            if (!latestFailed || createdAt.getTime() > Date.parse(latestFailed.dateTime)) latestFailedSignInMap.set(key, event);
         }
     });
 
     const collectedAt = now();
     const enrichedUsers = await mapWithConcurrency(users, concurrency, async user => {
-        const userRoles = userRoleMap[user.id] || [];
-        const hasAdminRole = userRoles.some(role => {
-            const name = String(role.name || '').toLowerCase();
-            return name.includes('admin') || name.includes('global');
-        });
-        const authMethods = await loadAuthMethods(user);
-        const hasMFA = hasRealMfaMethod(authMethods);
-        const lastSignIn = latestSignInMap[user.userPrincipalName];
-        const lastSignInDate = lastSignIn?.createdDateTime ? new Date(lastSignIn.createdDateTime) : null;
-        const daysSinceSignIn = lastSignInDate
-            ? Math.floor((collectedAt.getTime() - lastSignInDate.getTime()) / (1000 * 60 * 60 * 24))
-            : 999;
+        const key = String(user.id || user.userPrincipalName || '');
+        const previous = (user.id && previousById.get(String(user.id))) ||
+            previousByUpn.get(String(user.userPrincipalName || '').trim().toLowerCase());
+        const previousLastSignIn = previous?.lastSignIn;
+        const assignedRoles = user.id ? userRoleMap.get(String(user.id)) : null;
+        const rolesStatus = roleAssignmentsStatus === 'complete'
+            ? 'complete'
+            : Array.isArray(previous?.roles) ? 'stale' : 'unavailable';
+        const userRoles = roleAssignmentsStatus === 'complete'
+            ? (assignedRoles || [])
+            : (Array.isArray(previous?.roles) ? previous.roles : []);
+        const hasAdminRole = rolesStatus === 'unavailable'
+            ? null
+            : userRoles.some(role => {
+                const name = identityRoleName(role).toLowerCase();
+                return name.includes('admin') || name.includes('global');
+            });
+        let authMethods = null;
+        let mfaStatus = 'unavailable';
+        try {
+            const methods = await loadAuthMethods(user);
+            if (Array.isArray(methods)) {
+                authMethods = methods;
+                mfaStatus = 'complete';
+            }
+        } catch (_) {
+            // MFA is optional enrichment; preserve the user inventory and expose its unavailable state.
+        }
+        const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
+        const currentSignIn = latestSignInMap.get(key) || null;
+        const previousEvent = previousLastSignIn?.dateTime
+            ? {
+                dateTime: previousLastSignIn.dateTime,
+                appDisplayName: previousLastSignIn.appDisplayName || null,
+                clientAppUsed: previousLastSignIn.clientAppUsed || null,
+                ipAddress: previousLastSignIn.ipAddress || null,
+                location: previousLastSignIn.location || null,
+                device: previousLastSignIn.device || null,
+                status: previousLastSignIn.status || 'Unknown',
+                errorCode: previousLastSignIn.errorCode ?? null,
+                failureReason: previousLastSignIn.failureReason || null
+            }
+            : null;
+        const lastSignIn = currentSignIn || previousEvent;
+        const lastSignInDate = lastSignIn?.dateTime ? new Date(lastSignIn.dateTime) : null;
+        const daysSinceSignIn = lastSignInDate && !Number.isNaN(lastSignInDate.getTime())
+            ? Math.max(0, Math.floor((collectedAt.getTime() - lastSignInDate.getTime()) / 86400000))
+            : null;
+        const signInStatus = currentSignIn
+            ? 'observed'
+            : previousEvent
+                ? (signInCollectionStatus === 'complete' ? 'no_recent_sign_in' : 'stale')
+                : signInCollectionStatus === 'complete'
+                    ? 'no_recorded_sign_in'
+                    : signInCollectionStatus;
         let riskLevel = 'SAFE';
-        if (hasAdminRole && !hasMFA) riskLevel = 'HIGH';
-        else if (daysSinceSignIn > 30) riskLevel = 'MEDIUM';
-        const isNewLocation = Boolean(lastSignIn && lastSignIn.location === 'Unknown Location');
+        if (rolesStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false) riskLevel = 'HIGH';
+        else if (daysSinceSignIn !== null && daysSinceSignIn > 30) riskLevel = 'MEDIUM';
         const rawUserType = String(user.userType || user.UserType || '').trim().toLowerCase();
         const isGuest = rawUserType === 'guest' || (user.userPrincipalName && user.userPrincipalName.includes('#EXT#'));
         const isWorkforce = rawUserType === 'member' || (!rawUserType && user.userPrincipalName && !user.userPrincipalName.includes('#EXT#'));
@@ -85,25 +172,35 @@ async function buildIdentityDashboardPayload({
             mobilePhone: user.mobilePhone || 'N/A',
             roles: userRoles,
             hasAdminRole,
+            rolesStatus,
             isExternal: isGuest,
             isWorkforce,
             mfaEnabled: hasMFA,
-            authMethodCount: authMethods.length,
+            mfaStatus,
+            authMethodCount: authMethods?.length ?? null,
             riskLevel,
             accountEnabled: user.accountEnabled !== false,
             lastSignIn: {
                 dateTime: lastSignInDate?.toISOString() || null,
                 daysSince: daysSinceSignIn,
-                location: lastSignIn?.location || 'No sign-in',
-                device: lastSignIn?.deviceDetail?.displayName || 'Unknown',
-                appDisplayName: lastSignIn?.appDisplayName,
-                clientAppUsed: lastSignIn?.clientAppUsed,
-                status: lastSignIn?.status || 'No activity'
+                location: lastSignIn?.location || null,
+                device: lastSignIn?.device || null,
+                appDisplayName: lastSignIn?.appDisplayName || null,
+                clientAppUsed: lastSignIn?.clientAppUsed || null,
+                status: lastSignIn?.status || null,
+                errorCode: lastSignIn?.errorCode ?? null,
+                failureReason: lastSignIn?.failureReason || null,
+                observationStatus: signInStatus,
+                windowDays: signInWindowDays
             },
+            failedSignIn: latestFailedSignInMap.get(key) ||
+                (signInCollectionStatus === 'complete' ? null : previous?.failedSignIn
+                    ? { ...previous.failedSignIn, observationStatus: 'stale' }
+                    : null),
             flags: {
-                adminWithoutMFA: hasAdminRole && !hasMFA,
-                inactiveOver30Days: daysSinceSignIn > 30,
-                newLocationLogin: isNewLocation
+                adminWithoutMFA: rolesStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false,
+                inactiveOver30Days: daysSinceSignIn !== null && daysSinceSignIn > 30,
+                newLocationLogin: false
             }
         };
     });
@@ -116,19 +213,23 @@ async function buildIdentityDashboardPayload({
     const mfaEnabledUsers = workforceUsers.filter(user => user.mfaEnabled).length;
     const mfaMissingUsers = workforceUsers.filter(user => user.mfaEnabled === false).length;
     const mfaUnknownUsers = workforceUsers.length - mfaEnabledUsers - mfaMissingUsers;
-    const mfaPercentage = workforceUsers.length ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1) : '0.0';
+    const mfaAssessmentStatus = mfaUnknownUsers ? 'incomplete' : workforceUsers.length ? 'complete' : 'not_applicable';
+    const mfaPercentage = workforceUsers.length && !mfaUnknownUsers
+        ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1)
+        : null;
     const highRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'HIGH').length;
     const mediumRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'MEDIUM').length;
-    const activeUsers24h = enrichedUsers.filter(user => user.lastSignIn.daysSince <= 1).length;
+    const activeUsers24h = signInCollectionStatus === 'complete'
+        ? enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince <= 1).length
+        : null;
     const usersWithCompleteProfile = enrichedUsers.filter(user =>
         user.jobTitle !== 'No Title' && user.mobilePhone !== 'N/A'
     ).length;
-    const privilegedUsersWithoutMFA = workforceUsers.filter(user => user.hasAdminRole && !user.mfaEnabled).length;
+    const privilegedUsersWithoutMFA = workforceUsers.filter(user => user.flags.adminWithoutMFA).length;
 
     let identityRiskScore = 0;
     enrichedUsers.forEach(user => {
-        if (user.hasAdminRole && !user.mfaEnabled) identityRiskScore += 40;
-        if (user.lastSignIn.daysSince > 999) identityRiskScore += 25;
+        if (user.flags.adminWithoutMFA) identityRiskScore += 40;
         if (user.authMethodCount === 0) identityRiskScore += 20;
         if (user.isExternal) identityRiskScore += 15;
         if (user.riskLevel === 'MEDIUM') identityRiskScore += 10;
@@ -139,87 +240,114 @@ async function buildIdentityDashboardPayload({
         : 0;
 
     const inactiveBreakdown = {
-        '0-7days': enrichedUsers.filter(user => user.lastSignIn.daysSince >= 0 && user.lastSignIn.daysSince <= 7).length,
-        '7-30days': enrichedUsers.filter(user => user.lastSignIn.daysSince > 7 && user.lastSignIn.daysSince <= 30).length,
-        '30-90days': enrichedUsers.filter(user => user.lastSignIn.daysSince > 30 && user.lastSignIn.daysSince <= 90).length,
-        '90+days': enrichedUsers.filter(user => user.lastSignIn.daysSince > 90).length
+        '0-7days': enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince <= 7).length,
+        '7-30days': enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince > 7 && user.lastSignIn.daysSince <= 30).length,
+        '30-90days': enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince > 30 && user.lastSignIn.daysSince <= 90).length,
+        '90+days': enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince > 90).length
     };
     const deviceTrustAnalysis = { managed: 0, unmanaged: 0, unknown: 0 };
     enrichedUsers.forEach(user => {
         const device = String(user.lastSignIn?.device || '').toLowerCase();
-        if (!device || device.includes('unknown')) deviceTrustAnalysis.unknown += 1;
+        if (!user.lastSignIn?.dateTime) return;
+        if (!device) deviceTrustAnalysis.unknown += 1;
         else if (device.includes('managed') || device.includes('iphone') || device.includes('ipad') || device.includes('android')) deviceTrustAnalysis.managed += 1;
         else deviceTrustAnalysis.unmanaged += 1;
     });
     const authenticationStrength = { passwordOnly: 0, basicMFA: 0, strongMFA: 0 };
     enrichedUsers.forEach(user => {
+        if (user.mfaStatus !== 'complete') return;
         if (user.authMethodCount <= 1) authenticationStrength.passwordOnly += 1;
         else if (user.mfaEnabled) authenticationStrength.basicMFA += 1;
     });
-    authenticationStrength.strongMFA = enrichedUsers.filter(user => user.authMethodCount > 2).length;
+    authenticationStrength.strongMFA = enrichedUsers.filter(user => user.mfaStatus === 'complete' && user.authMethodCount > 2).length;
 
     const roleDistribution = {};
     enrichedUsers.forEach(user => user.roles.forEach(role => {
-        roleDistribution[role.name] = (roleDistribution[role.name] || 0) + 1;
+        const name = identityRoleName(role);
+        if (!name) return;
+        roleDistribution[name] = (roleDistribution[name] || 0) + 1;
     }));
     const topRoles = Object.entries(roleDistribution)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8)
         .map(([role, count]) => ({ role, count }));
     const profileCompleteness = totalUsers ? Math.round((enrichedUsers.filter(user => user.jobTitle !== 'No Title').length / totalUsers) * 100) : 0;
-    const authCompleteness = totalUsers ? Math.round((mfaEnabledUsers / totalUsers) * 100) : 0;
-    const activityCompleteness = totalUsers ? Math.round((enrichedUsers.filter(user => user.lastSignIn.daysSince <= 90).length / totalUsers) * 100) : 0;
-    const identityHygieneScore = Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
+    const authCompleteness = mfaAssessmentStatus === 'complete' && totalUsers ? Math.round((mfaEnabledUsers / totalUsers) * 100) : null;
+    const activityCompleteness = signInCollectionStatus === 'complete' && totalUsers
+        ? Math.round((enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince <= 90).length / totalUsers) * 100)
+        : null;
+    const identityHygieneScore = authCompleteness === null || activityCompleteness === null
+        ? null
+        : Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
     const systemHealth = {
-        performance: totalUsers ? Math.round((enrichedUsers.filter(user => user.lastSignIn.status === 'Success').length / totalUsers) * 100) : 0,
-        availability: totalUsers ? Math.round((activeUsers24h / totalUsers) * 100) : 0,
-        security: totalUsers ? Math.round((mfaEnabledUsers / totalUsers) * 100) : 0,
+        performance: signInCollectionStatus === 'complete' && totalUsers
+            ? Math.round((enrichedUsers.filter(user => user.lastSignIn.status === 'Success').length / totalUsers) * 100)
+            : null,
+        availability: activeUsers24h !== null && totalUsers ? Math.round((activeUsers24h / totalUsers) * 100) : null,
+        security: authCompleteness,
         compliance: totalUsers ? Math.round((usersWithCompleteProfile / totalUsers) * 100) : 0,
-        backup: totalUsers ? Math.round((enrichedUsers.filter(user => user.authMethodCount > 1).length / totalUsers) * 100) : 0
+        backup: mfaAssessmentStatus === 'complete' && totalUsers
+            ? Math.round((enrichedUsers.filter(user => user.authMethodCount > 1).length / totalUsers) * 100)
+            : null
     };
     const insights = {
         adminsWithoutMFA: enrichedUsers.filter(user => user.flags.adminWithoutMFA),
         inactiveUsers: enrichedUsers.filter(user => user.flags.inactiveOver30Days),
-        newLocationLogins: enrichedUsers.filter(user => user.flags.newLocationLogin)
+        failedSignInUsers: enrichedUsers.filter(user => user.failedSignIn?.status === 'Failed')
     };
     const deviceBreakdown = {};
     const locationBreakdown = {};
     enrichedUsers.forEach(user => {
         const device = String(user.lastSignIn?.device || '').toLowerCase();
-        if (device) deviceBreakdown[device] = (deviceBreakdown[device] || 0) + 1;
+        if (device && user.lastSignIn?.dateTime) deviceBreakdown[device] = (deviceBreakdown[device] || 0) + 1;
         const location = user.lastSignIn?.location;
-        if (location && location !== 'No sign-in') locationBreakdown[location] = (locationBreakdown[location] || 0) + 1;
+        if (location && user.lastSignIn?.dateTime) locationBreakdown[location] = (locationBreakdown[location] || 0) + 1;
     });
     const topLocations = Object.entries(locationBreakdown)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
         .map(([location, count]) => ({ location, count }));
-    const securityScore = Math.round(
+    const securityScore = mfaPercentage === null ? null : Math.round(
         (Number(mfaPercentage) * 0.4) +
         ((100 - (totalUsers ? (highRiskUsers / totalUsers * 100) : 0)) * 0.3) +
         ((adminUsers <= 5 ? 100 : 50) * 0.3)
     );
+    const fetchedAt = now();
 
     return {
         success: true,
         tenant: tenantKey,
-        fetchedAt: collectedAt.toISOString(),
+        sourceTenantId,
+        fetchedAt: fetchedAt.toISOString(),
+        roleAssignmentsStatus,
+        signInCollection: {
+            status: signInCollectionStatus,
+            windowDays: signInWindowDays,
+            warnings: collectionWarnings
+        },
+        warnings: collectionWarnings,
+        mfaCollection: {
+            status: mfaAssessmentStatus,
+            failedUserCount: enrichedUsers.filter(user => user.mfaStatus !== 'complete').length
+        },
         summary: {
             totalUsers,
             workforceUsers: workforceUsers.length,
             externalUsers: externalUsers.length,
             unknownUserTypes,
             activeUsers24h,
-            activeUsersPercentage: totalUsers ? Math.round((activeUsers24h / totalUsers) * 100) : 0,
+            activeUsers24hStatus: signInCollectionStatus,
+            activeUsersPercentage: activeUsers24h !== null && totalUsers ? Math.round((activeUsers24h / totalUsers) * 100) : null,
             adminUsers,
             mfaEnabledPercentage: mfaPercentage,
+            mfaAssessmentStatus,
             mfaEnabledUsers,
             mfaMissingUsers,
             mfaUnknownUsers,
             highRiskUsers,
             highRiskBreakdown: {
                 adminWithoutMFA: privilegedUsersWithoutMFA,
-                neverSignedIn: enrichedUsers.filter(user => user.lastSignIn.daysSince > 999).length,
+                noRecordedSignIn: enrichedUsers.filter(user => user.lastSignIn.observationStatus === 'no_recorded_sign_in').length,
                 externalUser: externalUsers.length
             },
             securityScore,
@@ -240,10 +368,11 @@ async function buildIdentityDashboardPayload({
         signInPatterns: {
             topLocations,
             deviceBreakdown,
-            avgSignInsPerUser: totalUsers ? signIns.length / totalUsers : 0
+            avgSignInsPerUser: signInCollectionStatus === 'complete' && totalUsers ? matchedSignIns.length / totalUsers : null,
+            failedSignInCount: matchedSignIns.filter(({ event }) => event.status === 'Failed').length
         },
         roleInsights: {
-            globalAdmins: enrichedUsers.filter(user => user.roles.some(role => role.name.toLowerCase().includes('global'))).length,
+            globalAdmins: enrichedUsers.filter(user => user.roles.some(role => identityRoleName(role).toLowerCase().includes('global'))).length,
             privilegedUsers: enrichedUsers.filter(user => user.roles.length > 0).length,
             usersWithMultipleRoles: enrichedUsers.filter(user => user.roles.length > 1).length,
             roleDistribution: topRoles

@@ -2436,13 +2436,22 @@ function normalizeSunbirdIdentityUser(user = {}) {
     const signInActivity = user.signInActivity || {};
     const dateTime = rawSignIn.dateTime || signInActivity.lastSignInDateTime || user.lastSignInDateTime || null;
     const lastSignInTime = dateTime ? new Date(dateTime).getTime() : 0;
-    const daysSince = Number.isFinite(Number(rawSignIn.daysSince))
+    const daysSince = lastSignInTime && rawSignIn.daysSince !== null && rawSignIn.daysSince !== undefined && rawSignIn.daysSince !== '' && Number.isFinite(Number(rawSignIn.daysSince))
         ? Number(rawSignIn.daysSince)
         : lastSignInTime
             ? Math.floor((Date.now() - lastSignInTime) / (24 * 60 * 60 * 1000))
-            : 999;
+            : null;
+    const mfaValue = user.mfaEnabled;
+    const mfaString = String(mfaValue ?? '').trim().toLowerCase();
+    const normalizedMfa = typeof mfaValue === 'boolean' ? mfaValue
+        : mfaValue === 1 || ['true', 'yes', 'enabled', '1'].includes(mfaString) ? true
+            : mfaValue === 0 || ['false', 'no', 'disabled', '0'].includes(mfaString) ? false
+                : null;
+    const hasMfaValue = normalizedMfa !== null;
     return {
         ...user,
+        mfaEnabled: normalizedMfa,
+        mfaStatus: user.mfaStatus || (hasMfaValue ? 'complete' : 'unavailable'),
         signInActivity: {
             ...signInActivity,
             lastSignInDateTime: dateTime || signInActivity.lastSignInDateTime || null
@@ -2450,24 +2459,32 @@ function normalizeSunbirdIdentityUser(user = {}) {
         lastSignIn: {
             ...rawSignIn,
             dateTime,
-            location: rawSignIn.location || user.location || signInActivity.location || 'Unknown',
-            device: rawSignIn.device || user.device || signInActivity.device || 'Unknown Device',
-            status: rawSignIn.status || signInActivity.status || user.signInStatus || 'Success',
-            daysSince
-        }
+            location: rawSignIn.location || user.location || signInActivity.location || null,
+            device: rawSignIn.device || user.device || signInActivity.device || null,
+            status: rawSignIn.status || signInActivity.status || null,
+            daysSince,
+            observationStatus: rawSignIn.observationStatus || (dateTime ? 'observed' : 'unavailable')
+        },
+        failedSignIn: user.failedSignIn || null
     };
 }
 
 function getIdentityDaysSinceSignIn(user) {
-    if (Number.isFinite(Number(user?.lastSignIn?.daysSince))) return Number(user.lastSignIn.daysSince);
+    if (user?.lastSignIn?.daysSince !== null && user?.lastSignIn?.daysSince !== undefined
+        && Number.isFinite(Number(user.lastSignIn.daysSince))) return Number(user.lastSignIn.daysSince);
     const time = getIdentityLastSignInTime(user);
-    if (!time) return 999;
+    if (!time) return null;
     return Math.floor((Date.now() - time) / (24 * 60 * 60 * 1000));
 }
 
 function formatIdentityDate(user) {
     const time = getIdentityLastSignInTime(user);
-    if (!time) return 'Never';
+    if (!time) {
+        const status = user?.lastSignIn?.observationStatus;
+        if (status === 'no_recorded_sign_in') return `No recorded sign-in in the last ${user.lastSignIn.windowDays || 30} days`;
+        if (status === 'partial') return 'Sign-in collection incomplete';
+        return 'Sign-in information unavailable';
+    }
     const date = new Date(time);
     const dateStr = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -2489,18 +2506,26 @@ function getSunbirdIdentityUsers(data = sunbirdDashboardData) {
 function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
     const users = getSunbirdIdentityUsers(data);
     const totalUsers = users.length;
+    const workforceUsers = users.filter(user => user.isWorkforce === true);
+    const unknownUserTypes = users.filter(user => !user.isWorkforce && !user.isExternal).length;
     const privilegedUsers = users.filter(isIdentityPrivileged);
-    const mfaEnabledUsers = users.filter(user => toBooleanMfa(user.mfaEnabled));
-    const mfaMissingUsers = users.filter(user => !toBooleanMfa(user.mfaEnabled));
+    const mfaEnabledUsers = workforceUsers.filter(user => user.mfaEnabled === true);
+    const mfaMissingUsers = workforceUsers.filter(user => user.mfaEnabled === false);
+    const mfaUnknownUsers = workforceUsers.filter(user => user.mfaEnabled !== true && user.mfaEnabled !== false);
     const highRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'HIGH');
     const mediumRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'MEDIUM');
     const safeUsers = Math.max(0, totalUsers - highRiskUsers.length - mediumRiskUsers.length);
     const externalUsers = users.filter(user => user.isExternal);
-    const inactiveUsers = users.filter(user => getIdentityDaysSinceSignIn(user) > 30);
-    const unknownDeviceUsers = users.filter(user => /unknown|no sign-in|n\/a/i.test(String(user?.lastSignIn?.device || 'Unknown')));
-    const adminsWithoutMfa = privilegedUsers.filter(user => !toBooleanMfa(user.mfaEnabled));
+    const inactiveUsers = users.filter(user => {
+        const days = getIdentityDaysSinceSignIn(user);
+        return days !== null && days > 30;
+    });
+    const unknownDeviceUsers = users.filter(user => getIdentityLastSignInTime(user) > 0 && !user?.lastSignIn?.device);
+    const adminsWithoutMfa = privilegedUsers.filter(user => user.mfaEnabled === false);
     const failedSignInUsers = users.filter(user => getSunbirdSignInIssueReasons(user).length > 0);
     const multiplePrivilegedRoles = users.filter(user => getIdentityRoleNames(user).filter(role => /(admin|global|privileged|security|directory)/i.test(role)).length > 1);
+    const signInCollectionStatus = data?.signInCollection?.status ||
+        (users.some(user => ['partial', 'unavailable'].includes(user.lastSignIn?.observationStatus)) ? 'incomplete' : 'complete');
 
     return {
         users,
@@ -2508,7 +2533,10 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
             totalUsers,
             mfaEnabled: mfaEnabledUsers.length,
             mfaMissing: mfaMissingUsers.length,
-            mfaCoverage: totalUsers ? Math.round((mfaEnabledUsers.length / totalUsers) * 100) : 0,
+            mfaCoverage: workforceUsers.length && !mfaUnknownUsers.length && !unknownUserTypes
+                ? Math.round((mfaEnabledUsers.length / workforceUsers.length) * 100)
+                : null,
+            mfaAssessmentStatus: mfaUnknownUsers.length || unknownUserTypes ? 'incomplete' : 'complete',
             privilegedUsers: privilegedUsers.length,
             highRiskUsers: highRiskUsers.length,
             mediumRiskUsers: mediumRiskUsers.length,
@@ -2520,6 +2548,7 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
             adminsWithoutMfa: adminsWithoutMfa.length,
             multiplePrivilegedRoles: multiplePrivilegedRoles.length
         },
+        signInCollectionStatus,
         evidence: {
             allUsers: users,
             mfaEnabledUsers,
@@ -2539,17 +2568,9 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
 
 function getSunbirdSignInIssueReasons(user) {
     const reasons = [];
-    const status = String(user?.lastSignIn?.status || '').toLowerCase();
-    const location = String(user?.lastSignIn?.location || '').toLowerCase();
-    const device = String(user?.lastSignIn?.device || '').toLowerCase();
-    const risk = String(user?.riskLevel || '').toUpperCase();
-    const daysSince = getIdentityDaysSinceSignIn(user);
+    const status = String(user?.failedSignIn?.status || user?.lastSignIn?.status || '').toLowerCase();
 
     if (status.includes('fail')) reasons.push('Failed sign-in');
-    if (risk === 'HIGH') reasons.push('High-risk user');
-    if (location.includes('unknown') || location === 'no sign-in') reasons.push('Unknown location');
-    if (device.includes('unknown') || device === 'no sign-in') reasons.push('Unknown device');
-    if (daysSince > 30) reasons.push('Inactive sign-in');
 
     return reasons;
 }
@@ -2936,7 +2957,7 @@ function renderSunbirdIdentityMetrics(model) {
     if (!metricsEl) return;
     const metrics = [
         { key: 'total-users', label: 'Total Users', value: model.metrics.totalUsers, tone: 'neutral', evidence: 'allUsers' },
-        { key: 'mfa-coverage', label: 'MFA Coverage', value: `${model.metrics.mfaCoverage}%`, tone: model.metrics.mfaCoverage >= 90 ? 'good' : model.metrics.mfaCoverage >= 70 ? 'warn' : 'bad', evidence: 'mfaMissingUsers' },
+        { key: 'mfa-coverage', label: 'MFA Coverage', value: model.metrics.mfaCoverage === null ? 'Temporarily unavailable' : `${model.metrics.mfaCoverage}%`, tone: model.metrics.mfaCoverage === null ? 'neutral' : model.metrics.mfaCoverage >= 90 ? 'good' : model.metrics.mfaCoverage >= 70 ? 'warn' : 'bad', evidence: 'mfaMissingUsers' },
         { key: 'privileged-users', label: 'Privileged Users', value: model.metrics.privilegedUsers, tone: model.metrics.privilegedUsers > 5 ? 'warn' : 'neutral', evidence: 'privilegedUsers' },
         { key: 'high-risk-users', label: 'High Risk Users', value: model.metrics.highRiskUsers, tone: model.metrics.highRiskUsers > 0 ? 'bad' : 'good', evidence: 'highRiskUsers' }
     ];
@@ -2959,7 +2980,7 @@ function renderSunbirdIdentityInsights(model) {
         { title: 'Inactive users', value: model.metrics.inactiveUsers, evidence: 'inactiveUsers', sort: 'lastSignIn', tone: 'warn' },
         { title: 'Sign-in issues', value: model.metrics.failedSignIns, evidence: 'failedSignInUsers', tone: 'bad' },
         { title: 'External users', value: model.metrics.externalUsers, evidence: 'externalUsers', filter: { type: 'external' }, tone: 'neutral' },
-        { title: 'Unknown devices', value: model.metrics.unknownDevices, evidence: 'unknownDeviceUsers', tone: 'warn' },
+        { title: 'Unknown devices', value: model.metrics.unknownDevices, evidence: 'unknownDeviceUsers', tone: 'neutral' },
         { title: 'Multiple privileged roles', value: model.metrics.multiplePrivilegedRoles, evidence: 'multiplePrivilegedRoles', tone: 'bad' }
     ];
 
@@ -3091,22 +3112,26 @@ function renderSunbirdPieChart(title, items, total, extraClass = '', toneColor =
 
 function renderSunbirdHealthGraph(model) {
     const mfa = model.metrics.mfaCoverage;
-    const privilegedMfa = model.metrics.privilegedUsers
+    const privilegedMfa = model.metrics.mfaAssessmentStatus !== 'complete'
+        ? null
+        : model.metrics.privilegedUsers
         ? Math.round(((model.metrics.privilegedUsers - model.metrics.adminsWithoutMfa) / model.metrics.privilegedUsers) * 100)
         : 100;
-    const activity = model.metrics.totalUsers ? Math.round(((model.metrics.totalUsers - model.metrics.inactiveUsers) / model.metrics.totalUsers) * 100) : 0;
+    const activity = model.signInCollectionStatus === 'complete' && model.metrics.totalUsers
+        ? Math.round(((model.metrics.totalUsers - model.metrics.inactiveUsers) / model.metrics.totalUsers) * 100)
+        : null;
     return `
         <article class="sunbird-id-chart-card sunbird-id-health-card sunbird-id-compact-health-card">
             <h3>Identity posture</h3>
             ${[
-                { label: 'MFA', value: mfa, tone: mfa >= 80 ? 'good' : 'warn' },
-                { label: 'Privileged MFA', value: privilegedMfa, tone: privilegedMfa >= 100 ? 'good' : 'bad' },
-                { label: 'Active in 30 days', value: activity, tone: activity >= 70 ? 'good' : 'warn' }
+                { label: 'MFA', value: mfa, tone: mfa === null ? 'neutral' : mfa >= 80 ? 'good' : 'warn' },
+                { label: 'Privileged MFA', value: privilegedMfa, tone: privilegedMfa === null ? 'neutral' : privilegedMfa >= 100 ? 'good' : 'bad' },
+                { label: 'Active in 30 days', value: activity, tone: activity === null ? 'neutral' : activity >= 70 ? 'good' : 'warn' }
             ].map(item => `
                 <div class="sunbird-id-health-row">
                     <span>${item.label}</span>
-                    <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${item.tone}" style="width:${item.value}%"></div></div>
-                    <strong>${item.value}%</strong>
+                    <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${item.tone}" style="width:${item.value ?? 0}%"></div></div>
+                    <strong>${item.value === null ? 'Unavailable' : `${item.value}%`}</strong>
                 </div>
             `).join('')}
         </article>
@@ -3135,6 +3160,7 @@ function renderSunbirdSignInTrend(users) {
     const buckets = { '0-1d': 0, '2-7d': 0, '8-30d': 0, '30d+': 0 };
     users.forEach(user => {
         const days = getIdentityDaysSinceSignIn(user);
+        if (days === null) return;
         if (days <= 1) buckets['0-1d']++;
         else if (days <= 7) buckets['2-7d']++;
         else if (days <= 30) buckets['8-30d']++;
@@ -3150,38 +3176,56 @@ function renderSunbirdSignInTrend(users) {
 function renderSunbirdIdentitySignIns(model) {
     const signinsEl = document.getElementById('sunbird-id-signins');
     if (!signinsEl) return;
-    const latest = [...model.users]
+    const latest = model.users.filter(user => getIdentityLastSignInTime(user) > 0)
         .sort((a, b) => getIdentityLastSignInTime(b) - getIdentityLastSignInTime(a))
         .slice(0, 50);
     const failed = [...model.evidence.failedSignInUsers]
-        .sort((a, b) => getIdentityLastSignInTime(b) - getIdentityLastSignInTime(a))
+        .sort((a, b) => getIdentityFailedSignInTime(b) - getIdentityFailedSignInTime(a))
         .slice(0, 50);
+    const signInNotice = model.signInCollectionStatus === 'complete' && latest.length === 0
+        ? 'A complete 30-day search found no sign-in events. This does not prove that these accounts have never signed in.'
+        : model.signInCollectionStatus === 'partial' || model.signInCollectionStatus === 'incomplete'
+            ? 'Sign-in collection is incomplete; only recorded events are shown.'
+            : 'Sign-in information is unavailable; user inventory remains available.';
 
     signinsEl.innerHTML = `
         ${sunbirdIdentityDashboardNotice ? `<p class="sunbird-id-stale-notice">${escapeIdentityText(sunbirdIdentityDashboardNotice)}</p>` : ''}
-        ${renderSunbirdSignInList('Latest sign-ins', latest, false)}
-        ${renderSunbirdSignInList('Sign-in issues', failed, true)}
+        <p class="sunbird-id-stale-notice">${escapeIdentityText(signInNotice)}</p>
+        ${renderSunbirdSignInList('Latest sign-ins', latest, false, 'No recorded sign-ins.')}
+        ${renderSunbirdSignInList('Sign-in issues', failed, true, 'No failed sign-ins were recorded.')}
     `;
 }
 
-function renderSunbirdSignInList(title, users, showIssues = false) {
+function getIdentityFailedSignInTime(user) {
+    const raw = user?.failedSignIn?.dateTime || user?.lastSignIn?.dateTime;
+    const time = raw ? new Date(raw).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+}
+
+function renderSunbirdSignInList(title, users, showIssues = false, emptyText = 'No matching sign-ins.') {
+    const items = users.map(user => {
+        const event = showIssues && user.failedSignIn ? user.failedSignIn : user.lastSignIn;
+        const displayUser = { ...user, lastSignIn: { ...user.lastSignIn, ...event } };
+        return `
+            <div class="sunbird-id-signin-item">
+                <div>
+                    <strong>${escapeIdentityText(user.displayName || 'Unknown')}</strong>
+                    <span>${escapeIdentityText(user.mail || user.userPrincipalName || 'N/A')}</span>
+                    ${showIssues ? `<div class="sunbird-id-issue-tags">${getSunbirdSignInIssueReasons(user).map(reason => `<em>${escapeIdentityText(reason)}</em>`).join('')}</div>` : ''}
+                </div>
+                <div>
+                    <small>${escapeIdentityText(formatIdentityDate(displayUser))}</small>
+                    <small>${escapeIdentityText(event?.location || 'Unknown location')}</small>
+                    <small>${escapeIdentityText(event?.device || 'Unknown device')}</small>
+                </div>
+            </div>
+        `;
+    }).join('');
     return `
         <article class="sunbird-id-signin-card">
             <h3>${escapeIdentityText(title)}</h3>
             <div class="sunbird-id-signin-list">
-                ${users.length ? users.map(user => `
-                    <div class="sunbird-id-signin-item">
-                        <div>
-                            <strong>${escapeIdentityText(user.displayName || 'Unknown')}</strong>
-                            <span>${escapeIdentityText(user.mail || user.userPrincipalName || 'N/A')}</span>
-                            ${showIssues ? `<div class="sunbird-id-issue-tags">${getSunbirdSignInIssueReasons(user).map(reason => `<em>${escapeIdentityText(reason)}</em>`).join('')}</div>` : ''}
-                        </div>
-                        <div>
-                            <small>${escapeIdentityText(formatIdentityDate(user))}</small>
-                            <small>${escapeIdentityText(user?.lastSignIn?.location || 'Unknown')}</small>
-                        </div>
-                    </div>
-                `).join('') : '<div class="sunbird-id-empty compact">No matching sign-ins.</div>'}
+                ${items || `<div class="sunbird-id-empty compact">${escapeIdentityText(emptyText)}</div>`}
             </div>
         </article>
     `;
@@ -3209,7 +3253,7 @@ function getFilteredSunbirdIdentityUsers(model = buildSunbirdIdentityModel()) {
 
         if (search && !haystack.includes(search)) return false;
         if (riskFilter !== 'all' && risk !== riskFilter) return false;
-        if (mfaFilter !== 'all' && (toBooleanMfa(user.mfaEnabled) ? 'yes' : 'no') !== mfaFilter) return false;
+        if (mfaFilter !== 'all' && (user.mfaEnabled === true ? 'yes' : user.mfaEnabled === false ? 'no' : 'unknown') !== mfaFilter) return false;
         if (typeFilter !== 'all' && (user.isExternal ? 'external' : 'internal') !== typeFilter) return false;
         return true;
     }).sort((a, b) => {
@@ -3231,6 +3275,7 @@ function renderSunbirdIdentityTable(model = buildSunbirdIdentityModel()) {
     body.innerHTML = users.map(user => {
         const roles = getIdentityRoleNames(user);
         const risk = String(user.riskLevel || 'SAFE').toLowerCase();
+        const mfaStatus = user.mfaEnabled === true ? 'Yes' : user.mfaEnabled === false ? 'No' : 'Temporarily unavailable';
         return `
             <tr>
                 <td data-label="Name">${escapeIdentityText(user.displayName || 'Unknown')}</td>
@@ -3238,13 +3283,13 @@ function renderSunbirdIdentityTable(model = buildSunbirdIdentityModel()) {
                 <td data-label="Job Title">${escapeIdentityText(user.jobTitle || 'No Title')}</td>
                 <td data-label="Roles"><div class="sunbird-id-role-list">${roles.length ? roles.map(role => `<span>${escapeIdentityText(role)}</span>`).join('') : '<em>Standard</em>'}</div></td>
                 <td data-label="Type"><span class="sunbird-id-pill">${user.isExternal ? 'External' : 'Internal'}</span></td>
-                <td data-label="MFA"><span class="sunbird-id-pill ${toBooleanMfa(user.mfaEnabled) ? 'ok' : 'bad'}">${toBooleanMfa(user.mfaEnabled) ? 'Yes' : 'No'}</span></td>
-                <td data-label="Auth Methods">${escapeIdentityText(user.authMethodCount ?? 0)}</td>
+                <td data-label="MFA"><span class="sunbird-id-pill ${user.mfaEnabled === true ? 'ok' : user.mfaEnabled === false ? 'bad' : ''}">${escapeIdentityText(mfaStatus)}</span></td>
+                <td data-label="Auth Methods">${escapeIdentityText(user.authMethodCount ?? '—')}</td>
                 <td data-label="Risk"><span class="sunbird-id-risk ${risk}">${escapeIdentityText(risk)}</span></td>
                 <td data-label="Status">${user.accountEnabled === false ? 'Disabled' : 'Active'}</td>
                 <td data-label="Last Sign-In">${escapeIdentityText(formatIdentityDate(user))}</td>
-                <td data-label="Location">${escapeIdentityText(user?.lastSignIn?.location || 'Unknown')}</td>
-                <td data-label="Device">${escapeIdentityText(user?.lastSignIn?.device || 'Unknown')}</td>
+                <td data-label="Location">${escapeIdentityText(user?.lastSignIn?.dateTime ? user.lastSignIn.location || 'Unknown location' : '—')}</td>
+                <td data-label="Device">${escapeIdentityText(user?.lastSignIn?.dateTime ? user.lastSignIn.device || 'Unknown device' : '—')}</td>
                 <td data-label="Phone">${escapeIdentityText(user.mobilePhone || 'N/A')}</td>
             </tr>
         `;
@@ -10968,11 +11013,11 @@ function normalizeSunbirdDashboardData(data) {
         }
         const auth = { passwordOnly: 0, basicMFA: 0, strongMFA: 0 };
         users.forEach(user => {
-            if (!user.mfaEnabled) {
+            if (user.mfaEnabled === false) {
                 auth.passwordOnly++;
-            } else if (user.authMethodCount && user.authMethodCount >= 2) {
+            } else if (user.mfaEnabled === true && user.authMethodCount && user.authMethodCount >= 2) {
                 auth.strongMFA++;
-            } else {
+            } else if (user.mfaEnabled === true) {
                 auth.basicMFA++;
             }
         });
@@ -10985,7 +11030,8 @@ function normalizeSunbirdDashboardData(data) {
         }
         const inactive = { '0-7days': 0, '7-30days': 0, '30-90days': 0, '90+days': 0 };
         users.forEach(user => {
-            const daysSince = user.lastSignIn?.daysSince ?? 999;
+            const daysSince = getIdentityDaysSinceSignIn(user);
+            if (daysSince === null) return;
             if (daysSince <= 7) inactive['0-7days']++;
             else if (daysSince <= 30) inactive['7-30days']++;
             else if (daysSince <= 90) inactive['30-90days']++;
@@ -11000,13 +11046,13 @@ function normalizeSunbirdDashboardData(data) {
         const authStrength = calculateAuthenticationStrength();
         
         return {
-            securityScore: existing.securityScore || 75,
-            identityRiskScore: existing.identityRiskScore || (riskDist.HIGH > 0 ? 50 : 30),
+            securityScore: existing.securityScore ?? null,
+            identityRiskScore: existing.identityRiskScore ?? null,
             activeUsers24h: existing.activeUsers24h ?? null,
             activeUsersPercentage: existing.activeUsersPercentage ?? null,
             highRiskUsers: existing.highRiskUsers || riskDist.HIGH,
             privilegedUsersWithoutMFA: existing.privilegedUsersWithoutMFA || 0,
-            identityHygieneScore: existing.identityHygieneScore || 65,
+            identityHygieneScore: existing.identityHygieneScore ?? null,
             ...existing
         };
     };
@@ -11017,11 +11063,11 @@ function normalizeSunbirdDashboardData(data) {
         summary: calculateSummary(),
         riskDistribution: calculateRiskDistribution(),
         systemHealth: {
-            performance: data.systemHealth?.performance || 80,
-            availability: data.systemHealth?.availability || 95,
-            security: data.systemHealth?.security || 70,
-            compliance: data.systemHealth?.compliance || 85,
-            backup: data.systemHealth?.backup || 90,
+            performance: data.systemHealth?.performance ?? null,
+            availability: data.systemHealth?.availability ?? null,
+            security: data.systemHealth?.security ?? null,
+            compliance: data.systemHealth?.compliance ?? null,
+            backup: data.systemHealth?.backup ?? null,
             ...data.systemHealth
         },
         authenticationStrength: calculateAuthenticationStrength(),
@@ -11919,8 +11965,12 @@ function populateIdentityTable() {
                 : '—';
 
             // MFA Status: Show both enabled status and method count
-            const authMethodCount = user.authMethodCount || 0;
-            const mfaStatus = user.mfaEnabled ? `✅ Yes (${authMethodCount})` : `❌ No (${authMethodCount})`;
+            const authMethodCount = user.authMethodCount ?? '—';
+            const mfaStatus = user.mfaEnabled === true
+                ? `✅ Yes (${authMethodCount})`
+                : user.mfaEnabled === false
+                    ? `❌ No (${authMethodCount})`
+                    : 'Temporarily unavailable';
             
             const riskLevel = user.riskLevel || 'SAFE';
             const riskBadgeClass = riskLevel === 'HIGH' ? 'risk-badge-high' : 
@@ -11930,17 +11980,15 @@ function populateIdentityTable() {
                            riskLevel === 'MEDIUM' ? '🟡' : 
                            '🟢';
 
-            const lastSignInText = (user.lastSignIn && user.lastSignIn.dateTime) ? 
-                getTimeAgoString(new Date(user.lastSignIn.dateTime)) : 'Never';
+            const lastSignInText = formatIdentityDate(user);
 
-            // Location: Already formatted in backend as "City, Country"
-            const locationDisplay = (user.lastSignIn && user.lastSignIn.location && user.lastSignIn.location !== 'No sign-in') ? user.lastSignIn.location : 'No sign-in';
+            const locationDisplay = user.lastSignIn?.dateTime
+                ? user.lastSignIn.location || 'Unknown location'
+                : '—';
             
-            // Device: Show device name  
-            let deviceDisplay = 'Unknown';
-            if (user.lastSignIn && user.lastSignIn.device) {
-                deviceDisplay = user.lastSignIn.device.toLowerCase().includes('unknown') ? 'Unknown' : user.lastSignIn.device;
-            }
+            const deviceDisplay = user.lastSignIn?.dateTime
+                ? user.lastSignIn.device || 'Unknown device'
+                : '—';
 
             // Log first row for debugging
             if (index === 0) {
@@ -11969,7 +12017,7 @@ function populateIdentityTable() {
                 <td>${authMethodCount}</td>
                 <td><span class="${riskBadgeClass}">${riskIcon} ${riskLevel}</span></td>
                 <td>
-                    <span class="user-status-badge active">Active</span>
+                    <span class="user-status-badge ${user.accountEnabled === false ? 'inactive' : 'active'}">${user.accountEnabled === false ? 'Disabled' : 'Active'}</span>
                 </td>
                 <td>${lastSignInText}</td>
                 <td><span class="location-cell" title="${locationDisplay}">${locationDisplay}</span></td>
@@ -14893,7 +14941,8 @@ function buildProjectPreviewModel(project) {
 
 function formatIdentityPreviewSignIn(user) {
     const time = getIdentityLastSignInTime(user);
-    const freshness = time ? getTimeAgoString(new Date(time)) : 'No live sign-in time';
+    const freshness = time ? getTimeAgoString(new Date(time)) : formatIdentityDate(user);
+    if (!time) return `${user.displayName || 'User'}: ${freshness}`;
     const location = user?.lastSignIn?.location || 'Unknown location';
     const status = user?.lastSignIn?.status && !/success/i.test(user.lastSignIn.status) ? ` (${user.lastSignIn.status})` : '';
     return `${user.displayName || 'User'} signed in ${freshness} from ${location}${status}`;
@@ -14908,10 +14957,13 @@ function buildIdentityPreviewModel() {
     });
 
     const adminCount = adminSet.size;
-    const usersWithoutMfa = users.filter(user => !user.mfaEnabled).length;
-    const inactiveUsers = users.filter(user => getIdentityDaysSinceSignIn(user) > 30).length;
+    const usersWithoutMfa = users.filter(user => user.isWorkforce && user.mfaEnabled === false).length;
+    const inactiveUsers = users.filter(user => {
+        const days = getIdentityDaysSinceSignIn(user);
+        return days !== null && days > 30;
+    }).length;
     const highRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'HIGH').length;
-    const adminWithoutMfa = users.filter(user => adminSet.has(user.id) && !user.mfaEnabled).length;
+    const adminWithoutMfa = users.filter(user => adminSet.has(user.id) && user.mfaEnabled === false).length;
     const mediumRiskUsers = users.filter(user => String(user.riskLevel || '').toUpperCase() === 'MEDIUM').length + Math.max(0, inactiveUsers - highRiskUsers);
     const safeUsers = Math.max(0, users.length - highRiskUsers - mediumRiskUsers);
 

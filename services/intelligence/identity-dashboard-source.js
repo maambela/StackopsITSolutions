@@ -28,11 +28,21 @@ function booleanValue(value) {
     return ['1', 'true', 'yes', 'enabled'].includes(String(value || '').trim().toLowerCase());
 }
 
+function nullableBoolean(value) {
+    return value === null || value === undefined || value === '' ? null : booleanValue(value);
+}
+
 function normalizeIdentityDashboardUser(row = {}) {
     const userType = normalizeUserType(row.userType ?? row.user_type ?? row.UserType ?? row.type ?? row.accountType);
-    const isWorkforce = userType === 'Member';
-    const isExternal = userType === 'Guest';
+    const rawMfa = row.mfaEnabled ?? row.mfa_enabled ?? row.mfaRegistered ?? row.hasMfa;
+    const mfaEnabled = nullableBoolean(rawMfa);
+    const rawDateTime = row.lastSignIn?.dateTime || row.last_signin_datetime || null;
+    const rawDaysSince = row.lastSignIn?.daysSince ?? row.days_since_signin;
+    const daysSince = rawDaysSince === null || rawDaysSince === undefined || rawDaysSince === ''
+        ? (rawDateTime ? daysSinceValue(rawDateTime) : null)
+        : numberValue(rawDaysSince, null);
     return {
+        ...row,
         id: row.id || row.ID || null,
         displayName: row.displayName || row.display_name || 'Unknown User',
         mail: row.mail || null,
@@ -41,22 +51,34 @@ function normalizeIdentityDashboardUser(row = {}) {
         jobTitle: row.jobTitle || row.job_title || 'No Title',
         mobilePhone: row.mobilePhone || row.mobile_phone || 'N/A',
         roles: parseArray(row.roles),
-        mfaEnabled: booleanValue(row.mfaEnabled ?? row.mfa_enabled ?? row.mfaRegistered ?? row.hasMfa),
-        authMethodCount: numberValue(row.authMethodCount ?? row.auth_method_count),
+        mfaEnabled,
+        mfaStatus: row.mfaStatus || (mfaEnabled === null ? 'unavailable' : 'complete'),
+        authMethodCount: row.authMethodCount === null || row.authMethodCount === undefined
+            ? (row.auth_method_count === undefined ? null : numberValue(row.auth_method_count, null))
+            : numberValue(row.authMethodCount, null),
         riskLevel: row.riskLevel || row.risk_level || 'SAFE',
-        isExternal,
-        isWorkforce,
+        isExternal: row.isExternal ?? (userType === 'Guest'),
+        isWorkforce: row.isWorkforce ?? (userType === 'Member'),
         accountEnabled: row.accountEnabled ?? row.account_enabled ?? true,
         assignedLicenses: Array.isArray(row.assignedLicenses) ? row.assignedLicenses : [],
         licenseAssignmentStates: Array.isArray(row.licenseAssignmentStates) ? row.licenseAssignmentStates : [],
         lastSignIn: {
-            dateTime: row.lastSignIn?.dateTime || row.last_signin_datetime || null,
-            daysSince: numberValue(row.lastSignIn?.daysSince ?? row.days_since_signin, 999),
-            location: row.lastSignIn?.location || row.last_signin_location || 'Unknown',
-            device: row.lastSignIn?.device || row.last_signin_device || 'Unknown',
-            status: row.lastSignIn?.status || row.last_signin_status || null
-        }
+            ...row.lastSignIn,
+            dateTime: rawDateTime,
+            daysSince,
+            location: row.lastSignIn?.location || row.last_signin_location || null,
+            device: row.lastSignIn?.device || row.last_signin_device || null,
+            status: row.lastSignIn?.status || row.last_signin_status || null,
+            observationStatus: row.lastSignIn?.observationStatus ||
+                (rawDateTime ? 'observed' : 'unavailable')
+        },
+        failedSignIn: row.failedSignIn || null
     };
+}
+
+function daysSinceValue(value) {
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? Math.max(0, Math.floor((Date.now() - time) / 86400000)) : null;
 }
 
 function roleName(role) {
@@ -82,15 +104,8 @@ function mergeRoleAssignments(users, roleAssignments) {
     });
 }
 
-function hasSignInIssue(user) {
-    const status = String(user.lastSignIn.status || '').toLowerCase();
-    const location = String(user.lastSignIn.location || '').toLowerCase();
-    const device = String(user.lastSignIn.device || '').toLowerCase();
-    const risk = String(user.riskLevel || '').toUpperCase();
-    return status.includes('fail') || risk === 'HIGH' ||
-        location.includes('unknown') || location === 'no sign-in' ||
-        device.includes('unknown') || device === 'no sign-in' ||
-        user.lastSignIn.daysSince > 30;
+function hasFailedSignIn(user) {
+    return String(user.failedSignIn?.status || user.lastSignIn.status || '').toLowerCase().includes('fail');
 }
 
 function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow = {}, signInRow = {}, roleAssignments = [] } = {}) {
@@ -100,23 +115,30 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
     const workforceUsers = users.filter(user => user.isWorkforce);
     const externalUsers = users.filter(user => user.isExternal);
     const unknownUserTypes = users.filter(user => user.userType === 'Unknown').length;
-    const mfaEnabled = workforceUsers.filter(user => user.mfaEnabled).length;
+    const mfaEnabled = workforceUsers.filter(user => user.mfaEnabled === true).length;
     const mfaMissing = workforceUsers.filter(user => user.mfaEnabled === false).length;
     const mfaUnknown = workforceUsers.length - mfaEnabled - mfaMissing;
-    const mfaCoverage = workforceUsers.length ? Math.round((mfaEnabled / workforceUsers.length) * 100) : 0;
+    const mfaCoverage = workforceUsers.length && !mfaUnknown ? Math.round((mfaEnabled / workforceUsers.length) * 100) : null;
     const privilegedUsersList = workforceUsers.filter(user => privilegedRoleNames(user).length > 0);
     const privilegedUsers = hasUsers ? privilegedUsersList.length : numberValue(metricsRow.admin_users);
     const highRiskUsers = hasUsers ? users.filter(user => String(user.riskLevel).toUpperCase() === 'HIGH').length : numberValue(metricsRow.high_risk_users);
     const unknownDevices = hasUsers
-        ? users.filter(user => /unknown|no sign-in|n\/a/i.test(String(user.lastSignIn.device || 'Unknown'))).length
+        ? users.filter(user => user.lastSignIn.dateTime && (!user.lastSignIn.device || /unknown|n\/a/i.test(user.lastSignIn.device))).length
         : numberValue(riskRow.device_unknown);
-    const signInIssues = hasUsers ? users.filter(hasSignInIssue).length : numberValue(signInRow.failed_signin_count_24h);
-    const adminsWithoutMfa = hasUsers ? privilegedUsersList.filter(user => !user.mfaEnabled).length : numberValue(metricsRow.privileged_users_without_mfa);
+    const signInIssues = hasUsers ? users.filter(hasFailedSignIn).length : numberValue(signInRow.failed_signin_count_24h);
+    const adminsWithoutMfa = hasUsers ? privilegedUsersList.filter(user => user.mfaEnabled === false).length : numberValue(metricsRow.privileged_users_without_mfa);
     const multiplePrivilegedRoles = hasUsers ? users.filter(user =>
         user.roles.map(roleName).filter(role => /(admin|global|privileged|security|directory)/i.test(role)).length > 1
     ).length : 0;
-    const mfaAssessmentStatus = unknownUserTypes || mfaUnknown ? 'incomplete' : workforceUsers.length ? 'complete' : 'not_applicable';
-    const securityScore = Math.round(
+    const mfaAssessmentStatus = unknownUserTypes || mfaUnknown
+        ? 'incomplete'
+        : workforceUsers.length ? 'complete' : 'not_applicable';
+    const signInCollectionStatus = metricsRow.signInCollectionStatus ||
+        (users.some(user => ['partial', 'unavailable'].includes(user.lastSignIn.observationStatus)) ? 'incomplete' : 'complete');
+    const activeUsers = signInCollectionStatus === 'complete'
+        ? numberValue(metricsRow.active_users_24h, users.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince <= 1).length)
+        : null;
+    const securityScore = mfaCoverage === null ? null : Math.round(
         (mfaCoverage * 0.4) +
         ((100 - (totalUsers > 0 ? (highRiskUsers / totalUsers) * 100 : 0)) * 0.3) +
         ((privilegedUsers <= 5 ? 100 : 50) * 0.3)
@@ -126,7 +148,8 @@ function buildIdentityDashboardSource({ metricsRow = {}, usersRows = [], riskRow
         workforceUsers: workforceUsers.length,
         externalUsers: externalUsers.length,
         unknownUserTypes,
-        activeUsers: numberValue(metricsRow.active_users_24h),
+        activeUsers,
+        signInCollectionStatus,
         mfaEnabled,
         mfaMissing,
         mfaUnknown,

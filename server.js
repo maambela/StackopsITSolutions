@@ -137,6 +137,7 @@ const BACKUP_DATABASE_TIMEOUT_MS = Math.max(5000, Number(process.env.BACKUP_DATA
 const authMethodsCache = new Map();
 const AUTH_METHODS_CACHE_TTL_MS = 5 * 60 * 1000;
 const AUTH_METHODS_CACHE_MAX_ENTRIES = 4096;
+const identityMetricsRefreshAttempts = new Map();
 let identityEvidenceService = null;
 let deviceEvidenceService = null;
 let emailEvidenceService = null;
@@ -629,16 +630,34 @@ function isRetryableGraphError(error, retryTimeouts) {
     return /\((?:408|429|5\d\d)\)|timed out|network|fetch failed/i.test(String(error?.message || ''));
 }
 
-async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false, retryTimeouts = true } = {}) {
+async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retries = 1, paginate = false, retryTimeouts = true, allowPartial = false } = {}) {
     const key = shared ? `${crypto.createHash('sha256').update(token).digest('hex')}:${url}:${paginate}` : null;
+    const unwrapPayload = payload => {
+        const collection = payload?._collection;
+        if (collection?.status !== 'complete' && collection?.status && !allowPartial) {
+            const error = new Error(collection.warnings?.[0] || `${label} returned an incomplete collection`);
+            error.code = collection.errorCode || 'GRAPH_COLLECTION_INCOMPLETE';
+            throw error;
+        }
+        if (allowPartial && collection) {
+            return {
+                ...payload,
+                collectionStatus: collection.status,
+                collectionWarnings: collection.warnings,
+                collectionErrorCode: collection.errorCode
+            };
+        }
+        if (collection) return { value: payload.value };
+        return payload;
+    };
     const cached = microsoftGraphJsonCache.get(key);
     if (shared && cached && cached.expiresAt > Date.now()) {
         logRuntimeOperation('graph_request_cache_hit', { label, responseBytes: cached.responseBytes });
-        return cached.payload;
+        return unwrapPayload(cached.payload);
     }
     if (shared && microsoftGraphJsonPromises.has(key)) {
         logRuntimeOperation('graph_request_joined', { label });
-        return (await microsoftGraphJsonPromises.get(key)).payload;
+        return unwrapPayload((await microsoftGraphJsonPromises.get(key)).payload);
     }
 
     const request = (async () => {
@@ -663,10 +682,18 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
                 complete: Boolean(result.ok && !result.hasMore && !result.warnings?.length),
                 errorCode: result.errorCode, rateLimits: result.rateLimits
             });
-            if (!result.ok || result.hasMore || result.warnings?.length) {
-                throw new Error(result.warnings?.[0] || `${label} returned an incomplete collection`);
-            }
-            return { payload: { value: result.value }, responseBytes };
+            const complete = Boolean(result.ok && !result.hasMore && !result.warnings?.length);
+            return {
+                payload: {
+                    value: result.value || [],
+                    _collection: {
+                        status: complete ? 'complete' : result.recordsFetched > 0 || result.hasMore ? 'partial' : 'unavailable',
+                        warnings: result.warnings || [],
+                        errorCode: result.errorCode || null
+                    }
+                },
+                responseBytes
+            };
         }
         let lastError;
         for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -687,13 +714,14 @@ async function fetchMicrosoftGraphJson(url, token, label, { shared = true, retri
     if (shared) microsoftGraphJsonPromises.set(key, request);
     try {
         const { payload, responseBytes } = await request;
-        if (shared && responseBytes <= 1024 * 1024 && microsoftGraphJsonPromises.get(key) === request) {
+        if (shared && payload?._collection?.status !== 'partial' && payload?._collection?.status !== 'unavailable'
+            && responseBytes <= 1024 * 1024 && microsoftGraphJsonPromises.get(key) === request) {
             if (microsoftGraphJsonCache.size >= 32) {
                 microsoftGraphJsonCache.delete(microsoftGraphJsonCache.keys().next().value);
             }
             microsoftGraphJsonCache.set(key, { payload, responseBytes, expiresAt: Date.now() + MICROSOFT_GRAPH_SHARED_CACHE_TTL_MS });
         }
-        return payload;
+        return unwrapPayload(payload);
     } finally {
         if (shared && microsoftGraphJsonPromises.get(key) === request) {
             microsoftGraphJsonPromises.delete(key);
@@ -769,7 +797,7 @@ async function fetchMicrosoftRoleAssignments(token) {
 }
 
 // Fetch sign-in logs from Microsoft Graph
-async function fetchMicrosoftSignIns(token, daysBack = 30, { requireComplete = false } = {}) {
+async function fetchMicrosoftSignIns(token, daysBack = 30, { requireComplete = false, withStatus = false } = {}) {
   try {
     const since = new Date(Math.floor(Date.now() / 60000) * 60000);
     since.setDate(since.getDate() - daysBack);
@@ -778,11 +806,27 @@ async function fetchMicrosoftSignIns(token, daysBack = 30, { requireComplete = f
         const data = await fetchMicrosoftGraphJson(
             `https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=createdDateTime ge ${filterDate}&$orderby=createdDateTime desc&$top=250&$select=createdDateTime,userPrincipalName,userId,appDisplayName,clientAppUsed,ipAddress,location,deviceDetail,status`,
             token,
-            'Microsoft Graph sign-ins', { paginate: true }
+            'Microsoft Graph sign-ins',             { paginate: true, allowPartial: withStatus }
     );
+    if (withStatus) {
+        return {
+            records: data.value || [],
+            status: data.collectionStatus || 'complete',
+            warnings: data.collectionWarnings || [],
+            errorCode: data.collectionErrorCode || null
+        };
+    }
     return data.value || [];
   } catch (error) {
     console.error('[Microsoft Graph] Failed to fetch sign-ins:', error.message);
+    if (withStatus) {
+        return {
+            records: [],
+            status: 'unavailable',
+            warnings: [error.message],
+            errorCode: error.code || null
+        };
+    }
     if (requireComplete) throw error;
     return []; // Return empty array if sign-ins not available
   }
@@ -3456,6 +3500,7 @@ async function assertSharedGraphTenantForCompany(companyId) {
     error.code = 'SECURITY_ALERTS_TENANT_MISMATCH';
     throw error;
   }
+  return mappedTenantId;
 }
 
 async function getSecurityAlertsGraphTokenForCompany(companyId) {
@@ -10801,18 +10846,25 @@ setInterval(syncDuoData, 60 * 60 * 1000);
 
 async function fetchIdentityMetricsFromApi(tokenOverride = null) {
     const token = tokenOverride || await getMicrosoftGraphToken();
-    const [users, roleAssignments, signIns] = await Promise.all([
+    const [users, roleAssignments, signInCollection] = await Promise.all([
         fetchMicrosoftUsers(token),
         fetchMicrosoftRoleAssignments(token),
-        fetchMicrosoftSignIns(token, 1, { requireComplete: true })
+        fetchMicrosoftSignIns(token, 1, { withStatus: true })
     ]);
 
     const totalUsers = users.length;
-    const activeUserIds = new Set(signIns.map(s => s.userId).filter(Boolean));
-    const activeUsers = activeUserIds.size;
+    const activeUserIds = new Set(signInCollection.records.map(signIn => signIn.userId).filter(Boolean));
+    const activeUsers = signInCollection.status === 'complete' ? activeUserIds.size : null;
     const adminRoles = roleAssignments.length;
-    const score = Math.max(0, Math.min(100, Math.round(100 - (adminRoles * 0.4) - ((totalUsers - activeUsers) * 0.2))));
-    return { totalUsers, activeUsers, adminRoles, securityScore: score };
+    const score = activeUsers === null ? null
+        : Math.max(0, Math.min(100, Math.round(100 - (adminRoles * 0.4) - ((totalUsers - activeUsers) * 0.2))));
+    return {
+        totalUsers,
+        activeUsers,
+        activeUsersStatus: signInCollection.status,
+        adminRoles,
+        securityScore: score
+    };
 }
 
 function processMicrosoftRoleAssignments(roleAssignments) {
@@ -11764,15 +11816,41 @@ async function upsertDashboardMetricCaches() {
         }
         const refresh = {
             async identity() {
-                const collectionStartedAt = new Date();
+                const [cachedMetricsRows] = await pool.query(
+                    'SELECT LastUpdated FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
+                    [companyId]
+                );
+                const cachedMetricsAt = cachedMetricsRows[0]?.LastUpdated
+                    ? new Date(cachedMetricsRows[0].LastUpdated).getTime()
+                    : 0;
+                const cachedAgeMs = cachedMetricsAt ? Date.now() - cachedMetricsAt : Number.POSITIVE_INFINITY;
+                if (cachedAgeMs >= 0 && cachedAgeMs < 30 * 60 * 1000) {
+                    logRuntimeOperation('identity_metrics_refresh_skipped_recent_complete', { companyId, cachedAgeMs });
+                    return;
+                }
+                const lastAttemptAt = identityMetricsRefreshAttempts.get(Number(companyId)) || 0;
+                if (Date.now() - lastAttemptAt < 30 * 60 * 1000) {
+                    logRuntimeOperation('identity_metrics_refresh_skipped_recent_attempt', {
+                        companyId,
+                        ageMs: Date.now() - lastAttemptAt
+                    });
+                    return;
+                }
+                identityMetricsRefreshAttempts.set(Number(companyId), Date.now());
                 const identity = await fetchIdentityMetricsFromApi();
                 const identityDetails = await fetchIdentityDetailsFromApi();
-                await writeMicrosoftDashboardCache(pool,
-                    'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
-                    [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore], collectionStartedAt
-                );
-                await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [companyId, JSON.stringify(identityDetails.users || [])], collectionStartedAt);
-                await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || [], collectionStartedAt);
+                const sourceFetchedAt = new Date();
+                if (identity.activeUsers !== null) {
+                    await writeMicrosoftDashboardCache(pool,
+                        'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+                        [companyId, identity.totalUsers, identity.activeUsers, identity.adminRoles, identity.securityScore], sourceFetchedAt
+                    );
+                    identityMetricsRefreshAttempts.delete(Number(companyId));
+                } else {
+                    console.warn(`[Cache Worker] Identity sign-in data is ${identity.activeUsersStatus} for company ${companyId}; the last verified metrics were retained.`);
+                }
+                await writeMicrosoftDashboardCache(pool, 'IdentityUserDetailsCache', 'CompanyID, UsersPayload', [companyId, JSON.stringify(identityDetails.users || [])], sourceFetchedAt);
+                await upsertRoleAssignmentsCache(companyId, identityDetails.roleAssignments || [], sourceFetchedAt);
             },
             async devices() {
                 const collectionStartedAt = new Date();
@@ -11881,13 +11959,15 @@ app.get('/api/db/identity-metrics', authenticateToken, async (req, res) => {
         const [rows] = await pool.query('SELECT * FROM IdentityMetricsCache WHERE CompanyID = ? ORDER BY LastUpdated DESC, ID ASC LIMIT 1', [context.companyId]);
         if (rows.length > 0) return res.json({ success: true, source: 'db', metrics: rows[0] });
 
-        const collectionStartedAt = new Date();
         const api = await fetchIdentityMetricsFromApi();
-        await writeMicrosoftDashboardCache(pool,
-            'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
-            [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore], collectionStartedAt
-        );
-        return res.json({ success: true, source: 'api-fallback', fetchedAt: collectionStartedAt.toISOString(), metrics: api });
+        const fetchedAt = new Date();
+        if (api.activeUsers !== null) {
+            await writeMicrosoftDashboardCache(pool,
+                'IdentityMetricsCache', 'CompanyID, TotalUsers, ActiveUsers, AdminRoles, SecurityScore',
+                [context.companyId, api.totalUsers, api.activeUsers, api.adminRoles, api.securityScore], fetchedAt
+            );
+        }
+        return res.json({ success: true, source: 'api-fallback', fetchedAt: fetchedAt.toISOString(), metrics: api });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
@@ -13598,21 +13678,41 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
     operation.step('tenant_verified', { companyId: tenant.companyId || null });
 
         // Get Microsoft Graph token
-        await assertSharedGraphTenantForCompany(tenant.companyId);
+        const sourceTenantId = await assertSharedGraphTenantForCompany(tenant.companyId);
         const collectionStartedAt = new Date();
         const token = await getMicrosoftGraphToken();
     operation.step('graph_token_loaded');
 
-        // Fetch all data in parallel
-        const [users, roleAssignments, signIns] = await Promise.all([
+        const collectionWarnings = [];
+        const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
             fetchMicrosoftUsers(token),
-            fetchMicrosoftRoleAssignments(token),
-            fetchMicrosoftSignIns(token, 30, { requireComplete: true })
+            fetchMicrosoftRoleAssignments(token).then(
+                assignments => ({ assignments, status: 'complete' }),
+                error => {
+                    console.warn('[Sunbird Dashboard] Role assignment enrichment unavailable:', error.message);
+                    collectionWarnings.push('Administrator role assignments are unavailable.');
+                    return { assignments: [], status: 'unavailable' };
+                }
+            ),
+            fetchMicrosoftSignIns(token, 30, { withStatus: true }),
+            loadStoredIdentityUsers(tenant.companyId, sourceTenantId).catch(error => {
+                console.warn('[Sunbird Dashboard] Previous verified sign-in data could not be loaded:', error.message);
+                collectionWarnings.push('Previous verified sign-in details could not be loaded.');
+                return [];
+            })
         ]);
+        const roleAssignments = roleResult.assignments;
+        const signIns = signInCollection.records;
+        if (signInCollection.status !== 'complete') {
+            collectionWarnings.push(signInCollection.status === 'partial'
+                ? 'The 30-day sign-in collection is incomplete.'
+                : 'Sign-in information is unavailable.');
+        }
         operation.step('graph_aggregates_loaded', {
             users: users.length,
             roleAssignments: roleAssignments.length,
-            signIns: signIns.length
+            signIns: signIns.length,
+            signInCollectionStatus: signInCollection.status
         });
 
         console.log(`[Sunbird Dashboard] Fetched ${users.length} users, ${roleAssignments.length} role assignments, ${signIns.length} sign-ins`);
@@ -13630,53 +13730,82 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             });
         });
 
-        // Build sign-in map (latest sign-in per user)
-        const latestSignInMap = {};
+        const usersById = new Map(users.filter(user => user.id).map(user => [String(user.id), user]));
+        const usersByUpn = new Map(users.filter(user => user.userPrincipalName)
+            .map(user => [String(user.userPrincipalName).trim().toLowerCase(), user]));
+        const latestSignInMap = new Map();
+        const latestFailedSignInMap = new Map();
         signIns.forEach(signin => {
-            const upn = signin.userPrincipalName;
-            if (!latestSignInMap[upn] || new Date(signin.createdDateTime) > new Date(latestSignInMap[upn].createdDateTime)) {
-                latestSignInMap[upn] = {
-                    createdDateTime: signin.createdDateTime,
-                    appDisplayName: signin.appDisplayName,
-                    clientAppUsed: signin.clientAppUsed,
-                    ipAddress: signin.ipAddress,
-                    location: signin.location?.city ? `${signin.location.city}, ${signin.location.countryOrRegion}` : 'Unknown Location',
-                    deviceDetail: signin.deviceDetail,
-                    status: signin.status?.errorCode === '0' ? 'Success' : 'Failed'
-                };
+            const user = signin.userId
+                ? usersById.get(String(signin.userId))
+                : usersByUpn.get(String(signin.userPrincipalName || '').trim().toLowerCase());
+            const date = signin.createdDateTime ? new Date(signin.createdDateTime) : null;
+            if (!user || !date || Number.isNaN(date.getTime())) return;
+            const key = String(user.id || user.userPrincipalName);
+            const errorCode = signin.status?.errorCode;
+            const event = {
+                dateTime: date.toISOString(),
+                appDisplayName: signin.appDisplayName || null,
+                clientAppUsed: signin.clientAppUsed || null,
+                ipAddress: signin.ipAddress || null,
+                location: [signin.location?.city, signin.location?.countryOrRegion].filter(Boolean).join(', ') || null,
+                device: signin.deviceDetail?.displayName || null,
+                status: errorCode === 0 || errorCode === '0' ? 'Success'
+                    : errorCode === null || errorCode === undefined ? 'Unknown' : 'Failed',
+                errorCode: errorCode ?? null,
+                failureReason: signin.status?.failureReason || null
+            };
+            const latest = latestSignInMap.get(key);
+            if (!latest || date.getTime() > Date.parse(latest.dateTime)) latestSignInMap.set(key, event);
+            if (event.status === 'Failed') {
+                const failed = latestFailedSignInMap.get(key);
+                if (!failed || date.getTime() > Date.parse(failed.dateTime)) latestFailedSignInMap.set(key, event);
             }
         });
+        const previousUsersById = new Map(previousUsers.filter(user => user.id).map(user => [String(user.id), user]));
+        const previousUsersByUpn = new Map(previousUsers.filter(user => user.userPrincipalName)
+            .map(user => [String(user.userPrincipalName).trim().toLowerCase(), user]));
 
-        // Enrich user data with roles, sign-ins, and calculate risks.
-        // Use controlled concurrency to avoid Graph throttling on auth-method calls.
         const enrichedUsers = await mapWithConcurrency(users, 8, async (user) => {
-            const userRoles = userRoleMap[user.id] || [];
-            const hasAdminRole = userRoles.some(r => 
-                r.name.toLowerCase().includes('admin') || 
-                r.name.toLowerCase().includes('global')
-            );
-
-            // Fetch auth methods for MFA status
-            const authMethods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
-            const hasMFA = hasRealMfaMethod(authMethods);
-
-            // Get latest sign-in
-            const lastSignIn = latestSignInMap[user.userPrincipalName];
-            const lastSignInDate = lastSignIn?.createdDateTime ? new Date(lastSignIn.createdDateTime) : null;
-            const daysSinceSignIn = lastSignInDate ? Math.floor((Date.now() - lastSignInDate) / (1000 * 60 * 60 * 24)) : 999;
-
-            // Calculate risk level
+            const key = String(user.id || user.userPrincipalName);
+            const previous = (user.id && previousUsersById.get(String(user.id))) ||
+                previousUsersByUpn.get(String(user.userPrincipalName || '').trim().toLowerCase());
+            const roleStatus = roleResult.status === 'complete' ? 'complete'
+                : Array.isArray(previous?.roles) ? 'stale' : 'unavailable';
+            const userRoles = roleStatus === 'complete' ? userRoleMap[user.id] || [] : previous?.roles || [];
+            const hasAdminRole = roleStatus === 'unavailable' ? null : userRoles.some(role => {
+                const name = String(typeof role === 'string' ? role : role?.name || '').toLowerCase();
+                return name.includes('admin') || name.includes('global');
+            });
+            let authMethods = null;
+            let mfaStatus = 'unavailable';
+            try {
+                authMethods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
+                mfaStatus = 'complete';
+            } catch (_) {
+                // Preserve the complete inventory when optional MFA enrichment is unavailable.
+            }
+            const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
+            const lastSignIn = latestSignInMap.get(key) || previous?.lastSignIn?.dateTime
+                ? (latestSignInMap.get(key) || previous.lastSignIn)
+                : null;
+            const lastSignInDate = lastSignIn?.dateTime
+                ? new Date(lastSignIn.dateTime)
+                : lastSignIn?.createdDateTime ? new Date(lastSignIn.createdDateTime) : null;
+            const hasValidSignInDate = lastSignInDate && !Number.isNaN(lastSignInDate.getTime());
+            const daysSinceSignIn = hasValidSignInDate
+                ? Math.max(0, Math.floor((Date.now() - lastSignInDate.getTime()) / 86400000))
+                : null;
+            const signInStatus = latestSignInMap.has(key) ? 'observed'
+                : previous?.lastSignIn?.dateTime
+                    ? (signInCollection.status === 'complete' ? 'no_recent_sign_in' : 'stale')
+                    : signInCollection.status === 'complete' ? 'no_recorded_sign_in' : signInCollection.status;
             let riskLevel = 'SAFE';
-            if (hasAdminRole && !hasMFA) {
+            if (roleStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false) {
                 riskLevel = 'HIGH';
-            } else if (daysSinceSignIn > 30) {
+            } else if (daysSinceSignIn !== null && daysSinceSignIn > 30) {
                 riskLevel = 'MEDIUM';
             }
-
-            // Check for unusual location (simple logic - can be enhanced)
-            const isNewLocation = lastSignIn && lastSignIn.location === 'Unknown Location';
-
-            const userType = String(user.userType || user.UserType || '').trim().toLowerCase();
             const isGuest = isGuestMicrosoftUser(user);
             const isWorkforce = isWorkforceMicrosoftUser(user);
 
@@ -13689,25 +13818,35 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 jobTitle: user.jobTitle || 'No Title',
                 mobilePhone: user.mobilePhone || 'N/A',
                 roles: userRoles,
-                hasAdminRole: hasAdminRole,
+                hasAdminRole,
+                rolesStatus: roleStatus,
                 isExternal: isGuest,
                 isWorkforce,
                 mfaEnabled: hasMFA,
-                authMethodCount: authMethods.length,
+                mfaStatus,
+                authMethodCount: authMethods?.length ?? null,
                 riskLevel: riskLevel,
                 lastSignIn: {
-                    dateTime: lastSignInDate?.toISOString() || null,
+                    dateTime: hasValidSignInDate ? lastSignInDate.toISOString() : null,
                     daysSince: daysSinceSignIn,
-                    location: lastSignIn?.location || 'No sign-in',
-                    device: lastSignIn?.deviceDetail?.displayName || 'Unknown',
-                    appDisplayName: lastSignIn?.appDisplayName,
-                    clientAppUsed: lastSignIn?.clientAppUsed,
-                    status: lastSignIn?.status || 'No activity'
+                    location: lastSignIn?.location || null,
+                    device: lastSignIn?.device || lastSignIn?.deviceDetail?.displayName || null,
+                    appDisplayName: lastSignIn?.appDisplayName || null,
+                    clientAppUsed: lastSignIn?.clientAppUsed || null,
+                    status: lastSignIn?.status || null,
+                    errorCode: lastSignIn?.errorCode ?? null,
+                    failureReason: lastSignIn?.failureReason || null,
+                    observationStatus: signInStatus,
+                    windowDays: 30
                 },
+                failedSignIn: latestFailedSignInMap.get(key) ||
+                    (signInCollection.status === 'complete' ? null : previous?.failedSignIn
+                        ? { ...previous.failedSignIn, observationStatus: 'stale' }
+                        : null),
                 flags: {
-                    adminWithoutMFA: hasAdminRole && !hasMFA,
-                    inactiveOver30Days: daysSinceSignIn > 30,
-                    newLocationLogin: isNewLocation
+                    adminWithoutMFA: roleStatus === 'complete' && hasAdminRole === true && mfaStatus === 'complete' && hasMFA === false,
+                    inactiveOver30Days: daysSinceSignIn !== null && daysSinceSignIn > 30,
+                    newLocationLogin: false
                 }
             };
         });
@@ -13722,35 +13861,41 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const mfaEnabledUsers = workforceUsers.filter(u => u.mfaEnabled).length;
         const mfaMissingUsers = workforceUsers.filter(u => u.mfaEnabled === false).length;
         const mfaUnknownUsers = workforceUsers.length - mfaEnabledUsers - mfaMissingUsers;
-        const mfaPercentage = workforceUsers.length ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1) : '0.0';
+        const mfaAssessmentStatus = mfaUnknownUsers || unknownUserTypes ? 'incomplete' : 'complete';
+        const mfaPercentage = workforceUsers.length && mfaAssessmentStatus === 'complete'
+            ? ((mfaEnabledUsers / workforceUsers.length) * 100).toFixed(1)
+            : null;
         const highRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'HIGH').length;
         const mediumRiskUsers = enrichedUsers.filter(u => u.riskLevel === 'MEDIUM').length;
-        const activeUsers24h = enrichedUsers.filter(u => u.lastSignIn.daysSince <= 1).length;
+        const activeUsers24h = signInCollection.status === 'complete'
+            ? enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 1).length
+            : null;
         const usersWithCompleteProfile = enrichedUsers.filter(u => 
             u.jobTitle !== 'No Title' && u.mobilePhone !== 'N/A'
         ).length;
 
         // 🎯 NEW: A. Privileged Risk - Admins without MFA
-        const privilegedUsersWithoutMFA = workforceUsers.filter(u => u.hasAdminRole && !u.mfaEnabled).length;
+        const privilegedUsersWithoutMFA = workforceUsers.filter(u => u.flags.adminWithoutMFA).length;
 
         // 🎯 NEW: B. Identity Risk Score (calculated, not random)
         let identityRiskScore = 0;
         enrichedUsers.forEach(user => {
-            if (user.hasAdminRole && !user.mfaEnabled) identityRiskScore += 40;
-            if (user.lastSignIn.daysSince > 999) identityRiskScore += 25; // Never signed in
+            if (user.flags.adminWithoutMFA) identityRiskScore += 40;
             if (user.authMethodCount === 0) identityRiskScore += 20;
             if (user.isExternal) identityRiskScore += 15;
             if (user.riskLevel === 'MEDIUM') identityRiskScore += 10;
             if (user.riskLevel === 'HIGH') identityRiskScore += 30;
         });
-        identityRiskScore = Math.min(100, Math.round((identityRiskScore / (totalUsers * 40)) * 100)); // Normalize to 0-100
+        identityRiskScore = totalUsers
+            ? Math.min(100, Math.round((identityRiskScore / (totalUsers * 40)) * 100))
+            : null;
 
         // 🎯 NEW: C. Inactive Users Breakdown
         const inactiveBreakdown = {
-            '0-7days': enrichedUsers.filter(u => u.lastSignIn.daysSince >= 0 && u.lastSignIn.daysSince <= 7).length,
-            '7-30days': enrichedUsers.filter(u => u.lastSignIn.daysSince > 7 && u.lastSignIn.daysSince <= 30).length,
-            '30-90days': enrichedUsers.filter(u => u.lastSignIn.daysSince > 30 && u.lastSignIn.daysSince <= 90).length,
-            '90+days': enrichedUsers.filter(u => u.lastSignIn.daysSince > 90).length
+            '0-7days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 7).length,
+            '7-30days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 7 && u.lastSignIn.daysSince <= 30).length,
+            '30-90days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 30 && u.lastSignIn.daysSince <= 90).length,
+            '90+days': enrichedUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince > 90).length
         };
 
         // 🎯 NEW: E. Device Trust Analysis
@@ -13760,6 +13905,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             unknown: 0
         };
         enrichedUsers.forEach(user => {
+            if (!user.lastSignIn.dateTime) return;
             if (user.lastSignIn && user.lastSignIn.device) {
                 const device = user.lastSignIn.device.toLowerCase();
                 if (device.includes('unknown') || device === 'unknown') {
@@ -13769,9 +13915,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 } else {
                     deviceTrustAnalysis.unmanaged++;
                 }
-            } else {
-                deviceTrustAnalysis.unknown++;
-            }
+            } else deviceTrustAnalysis.unknown++;
         });
 
         // 🎯 NEW: F. Authentication Strength
@@ -13781,6 +13925,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             strongMFA: 0 // FIDO2, Authenticator app
         };
         enrichedUsers.forEach(user => {
+            if (user.mfaStatus !== 'complete') return;
             if (user.authMethodCount === 0 || user.authMethodCount === 1) {
                 authenticationStrength.passwordOnly++;
             } else if (user.mfaEnabled && user.authMethodCount >= 2) {
@@ -13788,13 +13933,14 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 // Note: would need detailed auth method data to differentiate strongMFA
             }
         });
-        authenticationStrength.strongMFA = Math.round(enrichedUsers.filter(u => u.authMethodCount > 2).length);
+        authenticationStrength.strongMFA = Math.round(enrichedUsers.filter(u => u.mfaStatus === 'complete' && u.authMethodCount > 2).length);
 
         // 🎯 NEW: G. Role Distribution (Top roles)
         const roleDistribution = {};
         enrichedUsers.forEach(user => {
             user.roles.forEach(role => {
-                roleDistribution[role.name] = (roleDistribution[role.name] || 0) + 1;
+                const name = typeof role === 'string' ? role : role?.name;
+                if (name) roleDistribution[name] = (roleDistribution[name] || 0) + 1;
             });
         });
         const topRoles = Object.entries(roleDistribution)
@@ -13803,18 +13949,28 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             .map(([role, count]) => ({ role, count }));
 
         // 🎯 NEW: H. Identity Hygiene Score
-        const profileCompleteness = Math.round((enrichedUsers.filter(u => u.jobTitle !== 'No Title').length / totalUsers) * 100);
+        const profileCompleteness = totalUsers
+            ? Math.round((enrichedUsers.filter(u => u.jobTitle !== 'No Title').length / totalUsers) * 100)
+            : 0;
         const workforceBase = Math.max(1, workforceUsers.length);
-        const authCompleteness = Math.round((mfaEnabledUsers / workforceBase) * 100);
-        const activityCompleteness = Math.round((workforceUsers.filter(u => u.lastSignIn.daysSince <= 90).length / workforceBase) * 100);
-        const identityHygieneScore = Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
+        const authCompleteness = mfaAssessmentStatus === 'complete' ? Math.round((mfaEnabledUsers / workforceBase) * 100) : null;
+        const activityCompleteness = signInCollection.status === 'complete'
+            ? Math.round((workforceUsers.filter(u => u.lastSignIn.daysSince !== null && u.lastSignIn.daysSince <= 90).length / workforceBase) * 100)
+            : null;
+        const identityHygieneScore = authCompleteness === null || activityCompleteness === null
+            ? null
+            : Math.round((profileCompleteness + authCompleteness + activityCompleteness) / 3);
 
         const systemHealth = {
-            performance: Math.round((workforceUsers.filter(u => u.lastSignIn.status === 'Success').length / workforceBase) * 100) || 0,
-            availability: Math.round(((workforceUsers.filter(u => u.lastSignIn.daysSince <= 1).length / workforceBase) * 100) || 0),
-            security: Math.round((mfaEnabledUsers / workforceBase) * 100) || 0,
+            performance: signInCollection.status === 'complete'
+                ? Math.round((workforceUsers.filter(u => u.lastSignIn.status === 'Success').length / workforceBase) * 100)
+                : null,
+            availability: activeUsers24h === null ? null : Math.round((activeUsers24h / workforceBase) * 100),
+            security: authCompleteness,
             compliance: Math.round((workforceUsers.filter(u => u.jobTitle !== 'No Title' && u.mobilePhone !== 'N/A').length / workforceBase) * 100) || 0,
-            backup: Math.round((workforceUsers.filter(u => u.authMethodCount > 1).length / workforceBase) * 100) || 0
+            backup: mfaAssessmentStatus === 'complete'
+                ? Math.round((workforceUsers.filter(u => u.authMethodCount > 1).length / workforceBase) * 100)
+                : null
         };
 
         // Smart insights
@@ -13827,13 +13983,13 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const insights = {
             adminsWithoutMFA: enrichedUsers.filter(u => u.flags.adminWithoutMFA).slice(0, 20).map(toInsightEvidence),
             inactiveUsers: enrichedUsers.filter(u => u.flags.inactiveOver30Days).slice(0, 20).map(toInsightEvidence),
-            newLocationLogins: enrichedUsers.filter(u => u.flags.newLocationLogin).slice(0, 20).map(toInsightEvidence)
+            failedSignInUsers: enrichedUsers.filter(u => u.failedSignIn?.status === 'Failed').slice(0, 20).map(toInsightEvidence)
         };
 
         // Device breakdown
         const deviceBreakdown = {};
         enrichedUsers.forEach(user => {
-            if (user.lastSignIn.device) {
+            if (user.lastSignIn.dateTime && user.lastSignIn.device) {
                 const device = user.lastSignIn.device.toLowerCase();
                 deviceBreakdown[device] = (deviceBreakdown[device] || 0) + 1;
             }
@@ -13842,7 +13998,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         // Top locations
         const locationBreakdown = {};
         enrichedUsers.forEach(user => {
-            if (user.lastSignIn.location && user.lastSignIn.location !== 'No sign-in') {
+            if (user.lastSignIn.dateTime && user.lastSignIn.location) {
                 locationBreakdown[user.lastSignIn.location] = (locationBreakdown[user.lastSignIn.location] || 0) + 1;
             }
         });
@@ -13853,7 +14009,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             .map(([location, count]) => ({ location, count }));
 
         // Calculate security score (0-100)
-        const securityScore = Math.round(
+        const securityScore = mfaPercentage === null ? null : Math.round(
             (mfaPercentage * 0.4) +  // MFA is 40% of score
             ((100 - (highRiskUsers / totalUsers * 100)) * 0.3) +  // Low risk is 30%
             ((adminUsers <= 5 ? 100 : 50) * 0.3)  // Admin count is 30%
@@ -13864,23 +14020,37 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         const dashboardPayload = {
             success: true,
             tenant: tenant.clientId,
+            sourceTenantId,
             collectionStartedAt: collectionStartedAt.toISOString(),
             fetchedAt: new Date().toISOString(),
+            roleAssignmentsStatus: roleResult.status,
+            signInCollection: {
+                status: signInCollection.status,
+                windowDays: 30,
+                warnings: signInCollection.warnings
+            },
+            mfaCollection: {
+                status: mfaAssessmentStatus,
+                failedUserCount: enrichedUsers.filter(user => user.mfaStatus !== 'complete').length
+            },
+            warnings: collectionWarnings,
             summary: {
                 totalUsers,
                 workforceUsers: workforceUsers.length,
                 externalUsers: externalUsers.length,
                 unknownUserTypes,
                 activeUsers24h,
-                activeUsersPercentage: Math.round((activeUsers24h / totalUsers) * 100),
+                activeUsers24hStatus: signInCollection.status,
+                activeUsersPercentage: activeUsers24h === null || !totalUsers ? null : Math.round((activeUsers24h / totalUsers) * 100),
                 adminUsers,
                 mfaEnabledPercentage: mfaPercentage,
+                mfaAssessmentStatus,
                 mfaEnabledUsers,
                 mfaMissingUsers,
                 highRiskUsers,
                 highRiskBreakdown: {
                     adminWithoutMFA: privilegedUsersWithoutMFA,
-                    neverSignedIn: enrichedUsers.filter(u => u.lastSignIn.daysSince > 999).length,
+                    noRecordedSignIn: enrichedUsers.filter(u => u.lastSignIn.observationStatus === 'no_recorded_sign_in').length,
                     externalUser: externalUsers.length
                 },
                 securityScore,
@@ -13909,10 +14079,16 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             signInPatterns: {
                 topLocations,
                 deviceBreakdown,
-                avgSignInsPerUser: signIns.length / totalUsers
+                avgSignInsPerUser: signInCollection.status === 'complete' && totalUsers ? signIns.length / totalUsers : null,
+                failedSignInCount: signIns.filter(signIn => signIn.status?.errorCode !== null
+                    && signIn.status?.errorCode !== undefined
+                    && signIn.status.errorCode !== 0
+                    && signIn.status.errorCode !== '0').length
             },
             roleInsights: {
-                globalAdmins: enrichedUsers.filter(u => u.roles.some(r => r.name.toLowerCase().includes('global'))).length,
+                globalAdmins: enrichedUsers.filter(u => u.roles.some(role =>
+                    String(typeof role === 'string' ? role : role?.name || '').toLowerCase().includes('global')
+                )).length,
                 privilegedUsers: enrichedUsers.filter(u => u.roles.length > 0).length,
                 usersWithMultipleRoles: enrichedUsers.filter(u => u.roles.length > 1).length,
                 roleDistribution: topRoles
@@ -17016,33 +17192,88 @@ async function getSecret(secretName) {
     }
 }
 
+async function loadStoredIdentityUsers(companyId, tenantId) {
+    const [snapshots] = await pool.query(
+        `SELECT ID, TenantKey, EvidenceRecordCount, SourceAuditJson
+         FROM StackCTRLIdentityEvidenceSnapshots
+         WHERE CompanyID = ? AND TenantKey = ? AND IsComplete = 1 AND CollectionStatus = 'complete'
+         ORDER BY CollectedAt DESC, ID DESC
+         LIMIT 10`,
+        [companyId, 'sunbird']
+    );
+    for (const snapshot of snapshots) {
+        const sourceAudit = parseReportJson(snapshot.SourceAuditJson, {});
+        const storedTenantId = String(sourceAudit.tenantId || '').trim();
+        if (storedTenantId && storedTenantId.toLowerCase() !== String(tenantId).trim().toLowerCase()) continue;
+        const [rows] = await pool.query(
+            `SELECT ProcessedEvidenceJson
+             FROM StackCTRLIdentityUserEvidence
+             WHERE SnapshotID = ? AND CompanyID = ? AND TenantKey = ?
+             ORDER BY ID`,
+            [snapshot.ID, companyId, snapshot.TenantKey]
+        );
+        if (rows.length !== Number(snapshot.EvidenceRecordCount)) continue;
+        return rows.map(row => parseReportJson(row.ProcessedEvidenceJson, null)).filter(Boolean);
+    }
+    return [];
+}
+
+async function collectIdentityDashboardPayload(companyId) {
+    const tenantId = await assertSharedGraphTenantForCompany(companyId);
+    const collectionStartedAt = new Date();
+    const token = await getMicrosoftGraphToken();
+    const warnings = [];
+    const [users, roleResult, signInCollection, previousUsers] = await Promise.all([
+        fetchMicrosoftUsers(token),
+        fetchMicrosoftRoleAssignments(token).then(
+            assignments => ({ assignments, status: 'complete' }),
+            error => {
+                console.warn('[Identity Evidence] Role assignment enrichment unavailable:', error.message);
+                warnings.push('Administrator role assignments are unavailable; previously verified roles are retained when possible.');
+                return { assignments: [], status: 'unavailable' };
+            }
+        ),
+        fetchMicrosoftSignIns(token, 30, { withStatus: true }),
+        loadStoredIdentityUsers(companyId, tenantId).catch(error => {
+            console.warn('[Identity Evidence] Previous verified sign-in data could not be loaded:', error.message);
+            warnings.push('Previous verified sign-in details could not be loaded.');
+            return [];
+        })
+    ]);
+    if (signInCollection.status !== 'complete') {
+        warnings.push(signInCollection.status === 'partial'
+            ? 'The 30-day sign-in collection is incomplete.'
+            : 'Sign-in information is unavailable.');
+    }
+    const payload = await buildIdentityDashboardPayload({
+        tenantKey: 'sunbird',
+        sourceTenantId: tenantId,
+        users,
+        roleAssignments: roleResult.assignments,
+        roleAssignmentsStatus: roleResult.status,
+        signIns: signInCollection.records,
+        signInCollectionStatus: signInCollection.status,
+        signInWindowDays: 30,
+        previousUsers,
+        collectionWarnings: warnings,
+        loadAuthMethods: user => fetchUserAuthMethods(token, user.id, 2, { requireComplete: true }),
+        hasRealMfaMethod,
+        mapWithConcurrency,
+        now: () => new Date(),
+        concurrency: Number(process.env.IDENTITY_EVIDENCE_AUTH_CONCURRENCY || 4)
+    });
+    return { ...payload, collectionStartedAt: collectionStartedAt.toISOString() };
+}
+
 async function performIdentityEvidenceCollection(companyId, collectionTrigger) {
     if (!identityEvidenceService) throw new Error('Identity evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Identity Protection';
     try {
-        await assertSharedGraphTenantForCompany(companyId);
-        const collectionStartedAt = new Date();
-        const token = await getMicrosoftGraphToken();
-        const [users, roleAssignments, signIns] = await Promise.all([
-            fetchMicrosoftUsers(token),
-            fetchMicrosoftRoleAssignments(token),
-            fetchMicrosoftSignIns(token, 30, { requireComplete: true })
-        ]);
-        const payload = await buildIdentityDashboardPayload({
-            tenantKey: 'sunbird',
-            users,
-            roleAssignments,
-            signIns,
-            loadAuthMethods: user => fetchUserAuthMethods(token, user.id, 2, { requireComplete: true }),
-            hasRealMfaMethod,
-            mapWithConcurrency,
-            now: () => collectionStartedAt,
-            concurrency: Number(process.env.IDENTITY_EVIDENCE_AUTH_CONCURRENCY || 4)
-        });
-        return identityEvidenceService.persistProcessedEvidence({
+        const payload = await collectIdentityDashboardPayload(companyId);
+        return await identityEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
-            payload: { ...payload, collectionStartedAt: collectionStartedAt.toISOString() },
+            payload,
             collectionTrigger,
             sourceEndpoint
         });

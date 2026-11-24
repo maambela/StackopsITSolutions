@@ -20,6 +20,7 @@ function identityDashboardPayload() {
         displayName: `User ${index + 1}`,
         mail: `user${index + 1}@sunbird.eu`,
         userPrincipalName: `user${index + 1}@sunbird.eu`,
+        userType: index >= 53 ? 'Guest' : 'Member',
         jobTitle: index === 0 ? 'Administrator' : 'No Title',
         mobilePhone: index === 0 ? '+27000000000' : 'N/A',
         roles: index < 5
@@ -50,12 +51,12 @@ function identityDashboardPayload() {
 const EXPECTED_METRICS = {
     totalUsers: 57,
     mfaEnabled: 46,
-    mfaMissing: 11,
-    mfaCoverage: 81,
+    mfaMissing: 7,
+    mfaCoverage: 87,
     privilegedUsers: 6,
     adminsWithoutMfa: 1,
     highRiskUsers: 1,
-    signInIssues: 57,
+    signInIssues: 0,
     externalUsers: 4,
     unknownDevices: 48,
     multiplePrivilegedRoles: 5
@@ -81,7 +82,8 @@ test('the scheduled processor produces the same Identity metrics that are saved 
         id: `user-${index + 1}`,
         displayName: `User ${index + 1}`,
         mail: index >= 53 ? `guest${index}@example.com` : `user${index + 1}@sunbird.eu`,
-        userPrincipalName: `user${index + 1}@sunbird.eu`
+        userPrincipalName: `user${index + 1}@sunbird.eu`,
+        userType: index >= 53 ? 'Guest' : 'Member'
     }));
     const roleAssignments = [];
     for (let index = 0; index < 5; index += 1) {
@@ -156,8 +158,8 @@ test('Identity evidence storage writes one readable user row per displayed recor
     assert.equal(userWrites.length, 57);
     assert.equal(snapshotWrite.params[12], 57);
     assert.equal(snapshotWrite.params[13], 46);
-    assert.equal(snapshotWrite.params[14], 11);
-    assert.equal(snapshotWrite.params[15], 81);
+    assert.equal(snapshotWrite.params[14], 7);
+    assert.equal(snapshotWrite.params[15], 87);
     assert.equal(snapshotWrite.params[21], 48);
     assert.equal(snapshotWrite.params[22], 5);
     assert.equal(userWrites[0].params[4], 'User 1');
