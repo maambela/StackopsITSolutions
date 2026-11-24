@@ -1,9 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, mergeBackfillUsers } =
     require('../services/intelligence/identity-sign-in-backfill');
 const now = Date.parse('2026-11-24T12:00:00Z');
 const day = 86400000;
+
+test('daily automation awaits a bounded backfill without a browser trigger', async () => {
+    const source = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const client = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
+    const start = source.indexOf('async function runScheduledIdentityBackfill');
+    const end = source.indexOf('async function collectIdentityEvidenceForConfiguredTenants', start);
+    let calls = 0;
+    const run = vm.runInNewContext(source.slice(start, end) + '\nrunScheduledIdentityBackfill;', {
+        getIdentityEvidenceCompanies: async () => [{ CompanyID: 42 }],
+        runIdentityBackfillStep: async companyId => {
+            assert.equal(companyId, 42);
+            await new Promise(setImmediate);
+            calls++;
+            return true;
+        }
+    });
+    assert.equal(await run(), 3);
+    assert.equal(calls, 3);
+    assert.match(source, /await runScheduledIdentityBackfill\(\)/);
+    assert.doesNotMatch(client, /\/api\/sunbird\/identity-sign-in-backfill/);
+});
 
 test('completed ranges and verified 2-, 10-, and 25-day events survive a restart', () => {
     let state = backfillPlan(null, now);

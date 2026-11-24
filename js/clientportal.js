@@ -10706,8 +10706,6 @@ function startMicrosoftDashboardAutoRefresh() {
     }
 }
 
-let identityBackfillRequest = null;
-
 async function refreshMicrosoftDashboardSnapshots() {
     if (microsoftDashboardRefreshRequest) return microsoftDashboardRefreshRequest;
     if (!isSessionValid() || !isMicrosoftDashboardViewActive()) {
@@ -10748,12 +10746,7 @@ async function refreshMicrosoftDashboardSnapshots() {
             }
             microsoftDashboardRefreshCompanyId = Number(data.companyId);
             applyMicrosoftDashboardSnapshots(data.snapshots || {});
-            if (data.snapshots?.identity?.backfillDue && !identityBackfillRequest) {
-                // The server holds this separate request open through the checkpoint write.
-                identityBackfillRequest = fetch('/api/sunbird/identity-sign-in-backfill', {
-                    method: 'POST', headers: { Authorization: `Bearer ${token}` }
-                }).catch(() => {}).finally(() => { identityBackfillRequest = null; });
-            }
+
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.warn('[Dashboard Refresh] Saved Microsoft snapshots could not be checked:', error.message);

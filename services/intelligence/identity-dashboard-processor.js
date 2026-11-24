@@ -118,19 +118,18 @@ async function buildIdentityDashboardPayload({
                 const name = identityRoleName(role).toLowerCase();
                 return name.includes('admin') || name.includes('global');
             });
-        let authMethods = null;
-        let mfaStatus = 'unavailable';
+        let mfa = null;
         const mfaCollectionStartedAt = now().toISOString();
         try {
             const methods = await loadAuthMethods(user);
             if (Array.isArray(methods)) {
-                authMethods = methods;
-                mfaStatus = 'complete';
-            }
+                mfa = { enabled: hasRealMfaMethod(methods), count: methods.length, observedAt: mfaCollectionStartedAt };
+            } else mfa = methods;
         } catch (_) {
             // MFA is optional enrichment; preserve the user inventory and expose its unavailable state.
         }
-        const hasMFA = mfaStatus === 'complete' ? hasRealMfaMethod(authMethods) : null;
+        const mfaStatus = typeof mfa?.enabled === 'boolean' ? 'complete' : 'unavailable';
+        const hasMFA = mfa?.enabled ?? null;
         const currentSignIn = latestSignInMap.get(key) || null;
         const currentFailure = latestFailedSignInMap.get(key);
         const priorFailure = previous?.failedSignIn;
@@ -184,9 +183,10 @@ async function buildIdentityDashboardPayload({
             isWorkforce,
             mfaEnabled: hasMFA,
             mfaStatus,
-            mfaObservedAt: mfaStatus === 'complete' ? mfaCollectionStartedAt : null,
+            mfaObservedAt: mfaStatus === 'complete' ? mfa.observedAt : null,
             mfaSourceTenantId: mfaStatus === 'complete' ? sourceTenantId : null,
-            authMethodCount: authMethods?.length ?? null,
+            lastVerifiedMfa: mfa?.lastVerifiedMfa,
+            authMethodCount: mfa?.count ?? null,
             riskLevel,
             accountEnabled: user.accountEnabled !== false,
             lastSignIn: {

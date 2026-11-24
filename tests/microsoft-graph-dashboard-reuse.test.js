@@ -26,6 +26,21 @@ test('Identity dashboard reuses verified MFA evidence without Graph calls for th
     await resolve('fixture', { id: 'user-a' }, { ...saved, mfaStatus: 'unavailable' }, 'tenant-a', now);
     assert.equal(calls, 4);
 });
+
+test('failed MFA refresh retains expired verified evidence without promoting it to current data', async () => {
+    const now = Date.parse('2026-11-24T02:00:00Z');
+    const resolve = vm.runInNewContext(section('async function resolveIdentityDashboardMfa', '// APPLICATIONS & SERVICE PRINCIPALS') +
+        '\nresolveIdentityDashboardMfa;', {
+        fetchUserAuthMethods: async () => { throw new Error('Graph timeout'); }
+    });
+    const saved = { id: 'user-a', mfaSourceTenantId: 'tenant-a', mfaEnabled: true, mfaStatus: 'complete',
+        authMethodCount: 2, mfaObservedAt: '2026-11-24T01:00:00Z' };
+    const failed = await resolve('fixture', { id: 'user-a' }, saved, 'tenant-a', now);
+    assert.equal(failed.enabled, null);
+    assert.equal(failed.lastVerifiedMfa.enabled, true);
+    assert.equal(failed.lastVerifiedMfa.observedAt, saved.mfaObservedAt);
+    await assert.rejects(resolve('fixture', { id: 'user-a' }, saved, 'tenant-b', now), /Graph timeout/);
+});
 function section(start, end) {
     const from = server.indexOf(start);
     const to = server.indexOf(end, from + start.length);

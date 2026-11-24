@@ -868,16 +868,22 @@ async function fetchUserAuthMethods(token, userId, retries = 2, { requireComplet
 }
 
 async function resolveIdentityDashboardMfa(token, user, savedUser, tenantId, now = Date.now()) {
-    const observedAt = Date.parse(savedUser?.mfaObservedAt || '');
-    const age = now - observedAt;
-    if (user.id && user.id === savedUser?.id && tenantId &&
-        savedUser.mfaSourceTenantId === tenantId && savedUser.mfaStatus === 'complete' &&
-        typeof savedUser.mfaEnabled === 'boolean' && Number.isInteger(savedUser.authMethodCount) &&
-        age >= 0 && age < 30 * 60000) {
-        return { enabled: savedUser.mfaEnabled, count: savedUser.authMethodCount, observedAt: savedUser.mfaObservedAt };
+    const saved = savedUser?.mfaStatus === 'complete'
+        ? { enabled: savedUser.mfaEnabled, count: savedUser.authMethodCount,
+            observedAt: savedUser.mfaObservedAt, tenantId: savedUser.mfaSourceTenantId }
+        : savedUser?.lastVerifiedMfa;
+    const age = now - Date.parse(saved?.observedAt || '');
+    const verified = user.id && user.id === savedUser?.id && tenantId &&
+        saved?.tenantId === tenantId && typeof saved.enabled === 'boolean' &&
+        Number.isInteger(saved.count) && saved.count >= 0 && age >= 0;
+    if (verified && age < 30 * 60000) return saved;
+    try {
+        const methods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
+        return { enabled: hasRealMfaMethod(methods), count: methods.length, observedAt: new Date(now).toISOString() };
+    } catch (error) {
+        if (!verified) throw error;
+        return { enabled: null, count: null, observedAt: null, lastVerifiedMfa: saved };
     }
-    const methods = await fetchUserAuthMethods(token, user.id, 2, { requireComplete: true });
-    return { enabled: hasRealMfaMethod(methods), count: methods.length, observedAt: new Date(now).toISOString() };
 }
 
 // ===============================
@@ -12278,7 +12284,6 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 source: 'db',
                 companyId, sourceTenantId, fetchedAt, signInCollection,
                 backfillUpdatedAt: history?.state?.updatedAt,
-                backfillDue: Boolean(nextBackfillRange(backfillPlan(history?.state, Date.now()), Date.now())),
                 summary: { ...identity.metrics, totalUsers: identityUsers.length },
                 metrics: identity.metrics,
                 users: mergeBackfillUsers(identityUsers, history?.state, fetchedAt, signInCollection),
@@ -13836,7 +13841,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             } catch (_) {
                 // Preserve the complete inventory when optional MFA enrichment is unavailable.
             }
-            const mfaStatus = mfa ? 'complete' : 'unavailable';
+            const mfaStatus = typeof mfa?.enabled === 'boolean' ? 'complete' : 'unavailable';
             const hasMFA = mfa?.enabled ?? null;
             const currentSignIn = latestSignInMap.get(key);
             const currentFailure = latestFailedSignInMap.get(key);
@@ -13882,7 +13887,8 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
                 mfaEnabled: hasMFA,
                 mfaStatus,
                 mfaObservedAt: mfa?.observedAt ?? null,
-                mfaSourceTenantId: mfa ? sourceTenantId : null,
+                mfaSourceTenantId: mfaStatus === 'complete' ? sourceTenantId : null,
+                lastVerifiedMfa: mfa?.lastVerifiedMfa,
                 authMethodCount: mfa?.count ?? null,
                 riskLevel: riskLevel,
                 lastSignIn: {
@@ -17271,55 +17277,48 @@ function savedIdentityHistoryEvents(users, now) {
     });
 }
 
-app.post('/api/sunbird/identity-sign-in-backfill', authenticateToken, async (req, res) => {
-    try {
-        const context = await getAccessContextByUser(req.user);
-        if (!context?.companyId || !context.hasSunbirdAccess && context.accessType !== 'sunbird') return res.sendStatus(403);
-        const companyId = Number(context.companyId);
-        const tenantId = await assertSharedGraphTenantForCompany(companyId);
-        await withBackfillLock(pool, companyId, tenantId, async connection => {
-            const checkpoint = await readIdentityBackfill(connection, companyId, tenantId, true);
-            if (!checkpoint) return;
-            const state = backfillPlan(checkpoint.state, Date.now());
-            const range = nextBackfillRange(state, Date.now());
-            if (!range) return;
-            const params = new URLSearchParams({
-                $filter: `createdDateTime ge ${new Date(range.start).toISOString()} and createdDateTime lt ${new Date(range.end).toISOString()}`,
-                $orderby: 'createdDateTime desc', $top: '250',
-                $select: 'createdDateTime,userId,userPrincipalName,status,location,deviceDetail,appDisplayName'
-            });
-            let result;
-            try {
-                const token = await getMicrosoftGraphToken();
-                result = await fetchGraphCollectionPagesWithRetry({
-                    url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns?' + params,
-                    token, timeoutMs: 15000, maxPages: 4, maxAttempts: 2,
-                    label: 'Identity sign-in backfill',
-                    readJson: async response => JSON.parse(await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, 'Identity sign-in backfill'))
-                });
-            } catch (error) {
-                result = { ok: false, errorCode: error.code };
-            }
-            finishBackfillRange(state, range, result, Date.now());
-            state.updatedAt = new Date().toISOString();
-            await connection.query(
-                `UPDATE StackCTRLIdentityEvidenceSnapshots
-                 SET SourceAuditJson = JSON_SET(SourceAuditJson, '$.signInBackfill', CAST(? AS JSON))
-                 WHERE ID = ? AND CompanyID = ? AND TenantKey = 'sunbird'
-                   AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(SourceAuditJson, '$.tenantId'))) = ?`,
-                [JSON.stringify(state), checkpoint.id, companyId, tenantId.toLowerCase()]
-            );
-            console.info('[Identity Backfill] Range checkpointed', {
-                companyId, start: range.start, end: range.end, status: result.httpStatus ?? null,
-                errorCode: result.errorCode ?? null, complete: state.ranges.some(item => item.start === range.start && item.end === range.end && item.status === 'complete')
-            });
+async function runIdentityBackfillStep(companyId) {
+    const tenantId = await assertSharedGraphTenantForCompany(companyId);
+    return withBackfillLock(pool, companyId, tenantId, async connection => {
+        const checkpoint = await readIdentityBackfill(connection, companyId, tenantId, true);
+        if (!checkpoint) return;
+        const state = backfillPlan(checkpoint.state, Date.now());
+        const range = nextBackfillRange(state, Date.now());
+        if (!range) return;
+        const params = new URLSearchParams({
+            $filter: `createdDateTime ge ${new Date(range.start).toISOString()} and createdDateTime lt ${new Date(range.end).toISOString()}`,
+            $orderby: 'createdDateTime desc', $top: '250',
+            $select: 'createdDateTime,userId,userPrincipalName,status,location,deviceDetail,appDisplayName'
         });
-        return res.sendStatus(204);
-    } catch (error) {
-        console.warn('[Identity Backfill] Step failed:', error.message);
-        return res.sendStatus(error.statusCode || 503);
-    }
-});
+        let result;
+        try {
+            const token = await getMicrosoftGraphToken();
+            result = await fetchGraphCollectionPagesWithRetry({
+                url: 'https://graph.microsoft.com/v1.0/auditLogs/signIns?' + params,
+                token, timeoutMs: 15000, maxPages: 4, maxAttempts: 2,
+                label: 'Identity sign-in backfill',
+                readJson: async response => JSON.parse(await readBoundedResponseText(response, MICROSOFT_GRAPH_MAX_RESPONSE_BYTES, 'Identity sign-in backfill'))
+            });
+        } catch (error) {
+            result = { ok: false, errorCode: error.code };
+        }
+        finishBackfillRange(state, range, result, Date.now());
+        state.updatedAt = new Date().toISOString();
+        await connection.query(
+            `UPDATE StackCTRLIdentityEvidenceSnapshots
+             SET SourceAuditJson = JSON_SET(SourceAuditJson, '$.signInBackfill', CAST(? AS JSON))
+             WHERE ID = ? AND CompanyID = ? AND TenantKey = 'sunbird'
+               AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(SourceAuditJson, '$.tenantId'))) = ?`,
+            [JSON.stringify(state), checkpoint.id, companyId, tenantId.toLowerCase()]
+        );
+        console.info('[Identity Backfill] Range checkpointed', {
+            companyId, start: range.start, end: range.end, status: result.httpStatus ?? null,
+            errorCode: result.errorCode ?? null, complete: state.ranges.some(item => item.start === range.start && item.end === range.end && item.status === 'complete')
+        });
+        return true;
+    });
+
+}
 
 async function readIdentityBackfill(connection, companyId, tenantId, allowNew = false) {
     const [rows] = await connection.query(
@@ -17391,6 +17390,7 @@ async function collectIdentityDashboardPayload(companyId) {
             ? 'The 24-hour sign-in collection is incomplete.'
             : 'Sign-in information is unavailable.');
     }
+    const savedMfaUsers = new Map(previousUsers.filter(user => user.id).map(user => [String(user.id), user]));
     const payload = await buildIdentityDashboardPayload({
         tenantKey: 'sunbird',
         sourceTenantId: tenantId,
@@ -17403,7 +17403,7 @@ async function collectIdentityDashboardPayload(companyId) {
         signInRecordCount: signInCollection.records.length,
         previousUsers,
         collectionWarnings: warnings,
-        loadAuthMethods: user => fetchUserAuthMethods(token, user.id, 2, { requireComplete: true }),
+        loadAuthMethods: user => resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId),
         hasRealMfaMethod,
         mapWithConcurrency,
         now: () => new Date(),
@@ -17442,7 +17442,7 @@ async function collectAndPersistIdentityEvidence(companyId, collectionTrigger = 
     return identityEvidenceCollectors.run({ companyId, sourceKey: 'identity', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performIdentityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
 }
 
-async function collectIdentityEvidenceForConfiguredTenants({ trigger = 'scheduled_30_minute' } = {}) {
+async function getIdentityEvidenceCompanies() {
     const [companies] = await pool.query(
         `SELECT DISTINCT company.ID AS CompanyID, company.CompanyName
          FROM Companies company
@@ -17452,6 +17452,28 @@ async function collectIdentityEvidenceForConfiguredTenants({ trigger = 'schedule
          WHERE LOWER(company.CompanyName) LIKE '%sunbird%'
             OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1)`
     );
+    return companies;
+}
+
+async function runScheduledIdentityBackfill() {
+    let steps = 0;
+    const deadline = Date.now() + 30000;
+    for (const { CompanyID } of await getIdentityEvidenceCompanies()) {
+        try {
+            while (steps < 3 && Date.now() < deadline) {
+                if (!await runIdentityBackfillStep(Number(CompanyID))) break;
+                steps++;
+            }
+        } catch (error) {
+            console.warn('[Identity Backfill] Scheduled step failed:', error.message);
+        }
+        if (steps >= 3 || Date.now() >= deadline) break;
+    }
+    return steps;
+}
+
+async function collectIdentityEvidenceForConfiguredTenants({ trigger = 'scheduled_30_minute' } = {}) {
+    const companies = await getIdentityEvidenceCompanies();
     const results = [];
     for (const company of companies) {
         try {
@@ -18529,9 +18551,16 @@ app.post(['/api/internal/automation/enterprise-hourly', '/api/internal/automatio
     const triggerTime = parseCloudSchedulerScheduleTime(scheduledTimeHeader);
     const operation = beginSunbirdOperation(req, 'enterprise_daily_trigger');
     try {
+        if (isExplicitDailyTrigger) {
+            const backfillSteps = await runScheduledIdentityBackfill().catch(error => {
+                console.warn('[Identity Backfill] Scheduler failed:', error.message);
+                return 0;
+            });
+            operation.step('identity_backfill_completed', { steps: backfillSteps });
+        }
         const result = await enterpriseIntelligenceService.runDailyAutomationTick({ now: triggerTime, force: isExplicitDailyTrigger });
         const companies = Array.isArray(result?.companies) ? result.companies : [];
-        const responseStatus = result?.status === 'failed' ? 500 : 200;
+        const responseStatus = result?.status === 'failed' ? 500 : result?.status === 'deferred' ? 202 : 200;
         operation.finish(responseStatus, { companies: companies.length, localTime: result?.localTime || null, status: result?.status || null });
         return res.status(responseStatus).json({ success: responseStatus < 400, ...result });
     } catch (error) {

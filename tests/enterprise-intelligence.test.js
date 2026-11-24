@@ -3842,6 +3842,18 @@ test('scheduled enterprise pipeline reports analysis failure and does not publis
     assert.equal(result.companies[0].runs[0].pipelineFailure.failureStage, 'ENTERPRISE_DEEP_ANALYSIS_FAILED');
 });
 
+test('midnight schedule defers an existing active enterprise run without reporting failure', async () => {
+    const fixture = createScheduledPipelineFixture({
+        activeRun: { ID: 133, Status: 'running', PeriodType: 'daily', Mode: 'enterprise_deep_reporting' }
+    });
+    const result = await fixture.service.runDailyAutomationTick({
+        now: new Date('2026-08-13T00:00:00.000Z'), companyId: 1, force: true
+    });
+    assert.equal(result.status, 'deferred');
+    assert.equal(result.companies[0].runs[0].runId, 133);
+    assert.equal(fixture.getFinalizationCount(), 0);
+});
+
 test('duplicate scheduled delivery reuses the existing run without another snapshot or analysis', async () => {
     const fixture = createScheduledPipelineFixture({ duplicate: true });
     const result = await fixture.service.runScheduledTick({

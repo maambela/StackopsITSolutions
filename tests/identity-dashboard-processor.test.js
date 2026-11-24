@@ -85,7 +85,7 @@ test('full sign-in history is requested only on demand', () => {
 test('saved history fallback retains verified failures and excludes out-of-window events', () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
     const start = source.indexOf('function savedIdentityHistoryEvents');
-    const end = source.indexOf("app.post('/api/sunbird/identity-sign-in-backfill'", start);
+    const end = source.indexOf('async function runIdentityBackfillStep', start);
     const events = vm.runInNewContext(source.slice(start, end) + '\nsavedIdentityHistoryEvents;');
     const rows = events([{ id: 'user-1',
         lastSignIn: { dateTime: '2026-10-01T11:00:00Z', status: 'Success' },

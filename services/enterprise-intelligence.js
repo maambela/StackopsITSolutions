@@ -8774,6 +8774,7 @@ Return exactly these top-level fields:
 
         const results = [];
         let hasFailure = false;
+        let hasDeferred = false;
         for (const id of companyIds) {
             const pipelineExecutionId = `${id}:enterprise:${normalizedCadence}:${scheduleKey}`;
             try {
@@ -8788,6 +8789,14 @@ Return exactly these top-level fields:
                 });
                 const companyRuns = [{ periodType: 'daily', ...daily }];
                 const effectiveStatus = daily.status === 'duplicate' ? daily.existingStatus : daily.status;
+                if (['already_running', 'queued', 'running'].includes(effectiveStatus)) {
+                    hasDeferred = true;
+                    logger.info('[StackCTRL Enterprise Pipeline]', {
+                        event: 'scheduled_run_deferred', companyId: id, runId: daily.runId, status: effectiveStatus
+                    });
+                    results.push({ companyId: id, runs: companyRuns });
+                    continue;
+                }
                 const analysisSucceeded = ['completed', 'completed_with_warnings'].includes(String(effectiveStatus || '').toLowerCase());
 
                 if (!analysisSucceeded) {
@@ -8940,7 +8949,7 @@ Return exactly these top-level fields:
             }
         }
         return {
-            status: hasFailure ? 'failed' : 'completed',
+            status: hasFailure ? 'failed' : hasDeferred ? 'deferred' : 'completed',
             cadence: normalizedCadence,
             scheduleKey,
             localTime: local.toISO(),
