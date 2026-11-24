@@ -820,6 +820,7 @@ async function fetchMicrosoftSignIns(token, daysBack = 30, { requireComplete = f
         return {
             records: data.value || [],
             status: data.collectionStatus || 'complete',
+            since: filterDate,
             warnings: data.collectionWarnings || [],
             errorCode: data.collectionErrorCode || null
         };
@@ -13694,7 +13695,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
         if (req.query?.signInHistory === '30d') {
             const history = await fetchMicrosoftSignIns(token, 30, { withStatus: true });
             operation.finish(200, { signIns: history.records.length });
-            return res.json({ success: true, status: history.status, records: history.records });
+            return res.json({ success: true, companyId: Number(tenant.companyId), sourceTenantId, fetchedAt: collectionStartedAt.toISOString(), since: history.since, status: history.status, records: history.records });
         }
 
         const collectionWarnings = [];
@@ -14037,6 +14038,7 @@ app.get('/api/sunbird/identity-dashboard', authenticateToken, async (req, res) =
             success: true,
             tenant: tenant.clientId,
             sourceTenantId,
+            companyId: Number(tenant.companyId),
             collectionStartedAt: collectionStartedAt.toISOString(),
             fetchedAt: new Date().toISOString(),
             roleAssignmentsStatus: roleResult.status,
@@ -14290,7 +14292,7 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
         if (!tenant.companyId) {
             return res.status(403).json({ success: false, message: 'Access mapping not configured' });
         }
-        await assertSharedGraphTenantForCompany(tenant.companyId);
+        const sourceTenantId = await assertSharedGraphTenantForCompany(tenant.companyId);
         const snapshot = await identityAdapter({
             pool,
             companyId: tenant.companyId,
@@ -14316,6 +14318,8 @@ app.get('/api/sunbird/identity-dashboard-cached', authenticateToken, async (req,
             tenant: tenant.clientId,
             fetchedAt: snapshot.freshness.lastUpdated,
             source: 'identity_evidence_snapshot',
+            companyId: Number(tenant.companyId),
+            sourceTenantId,
             summary,
             metrics: summary,
             stackctrlMetrics: snapshot.dashboardSourceMetrics,

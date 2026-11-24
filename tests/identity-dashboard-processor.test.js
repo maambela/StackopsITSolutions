@@ -40,17 +40,34 @@ test('24-hour partial refresh preserves newer verified events and rejects confli
     assert.equal(deriveIdentityEvidence(payload).dashboardMetrics.signInCollection.windowDays, 1);
 });
 
-test('the recent sign-in panel only confirms zero from a complete 24-hour result', () => {
+test('30-day history restores older events and verifies absence only with complete coverage', () => {
     const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
-    const start = source.indexOf('function identityRecentSignInState');
-    const end = source.indexOf('async function loadSunbirdIdentitySignInHistory', start);
-    const state = vm.runInNewContext(source.slice(start, end) + '\nidentityRecentSignInState;');
-    const model = { fetchedAt: FIXED_NOW.toISOString() };
-    assert.equal(state(model).empty, false);
-    assert.equal(state({ ...model, signInCollection: { windowDays: 30, status: 'complete', recordCount: 0 } }).empty, false);
-    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'partial', recordCount: 0 } }).empty, false);
-    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'complete', recordCount: 2 } }).empty, false);
-    assert.equal(state({ ...model, signInCollection: { windowDays: 1, status: 'complete', recordCount: 0 } }).empty, true);
+    const start = source.indexOf('function mergeIdentitySignInHistory');
+    const end = source.indexOf('function buildSunbirdIdentityModel', start);
+    const merge = vm.runInNewContext(source.slice(start, end) + '\nmergeIdentitySignInHistory;');
+    const scope = { companyId: 7, sourceTenantId: 'tenant-a', fetchedAt: FIXED_NOW.toISOString() };
+    const users = [{ id: 'two-days' }, { id: 'twenty-days' }, { id: 'missing' }, {
+        id: 'saved', lastSignIn: { dateTime: '2026-11-23T11:00:00Z' }
+    }];
+    const history = { ...scope, since: '2026-10-24T12:00:00Z', status: 'partial', records: [
+        { userId: 'two-days', createdDateTime: '2026-11-21T12:00:00Z' },
+        { userId: 'twenty-days', createdDateTime: '2026-11-03T12:00:00Z' },
+        { userId: 'saved', createdDateTime: '2026-11-21T12:00:00Z' }
+    ] };
+    const rows = merge(users, scope, history, FIXED_NOW.getTime());
+    assert.equal(rows[0].lastSignIn.dateTime, '2026-11-21T12:00:00Z');
+    assert.equal(rows[1].lastSignIn.dateTime, '2026-11-03T12:00:00Z');
+    assert.equal(rows[2].historyComplete, false);
+    assert.equal(rows[3].lastSignIn.dateTime, users[3].lastSignIn.dateTime);
+    assert.equal(merge(users, scope, { ...history, status: 'complete' }, FIXED_NOW.getTime())[2].historyComplete, true);
+    assert.equal(merge(users, scope, { ...history, companyId: 8 }, FIXED_NOW.getTime()), users);
+});
+
+test('full sign-in history is requested only on demand', () => {
+    const source = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const route = source.slice(source.indexOf("app.get('/api/sunbird/identity-dashboard'"), source.indexOf("app.get('/api/sunbird/identity-dashboard-cached'"));
+    assert.ok(route.includes("if (req.query?.signInHistory === '30d') {\n            const history = await fetchMicrosoftSignIns(token, 30"));
+    assert.ok(route.includes('fetchMicrosoftSignIns(token, 1, { withStatus: true })'));
 });
 
 test('sign-ins are matched by tenant user ID and absent events are not labeled never-signed-in', async () => {
