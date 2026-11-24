@@ -4458,10 +4458,10 @@ function getEmailThreatDisplayMetrics(data = {}) {
         alertsAvailable,
         incidentsAvailable,
         sourceTimestamps: audit.sourceTimestamps || {},
-        activeThreats: alertsAvailable ? summary.activeThreats ?? 'Temporarily unavailable' : 'Temporarily unavailable',
-        highSeverity: alertsAvailable ? summary.highSeverityAlerts ?? 'Temporarily unavailable' : 'Temporarily unavailable',
-        targetedUsers: alertsAvailable ? summary.affectedUsersCount ?? 'Temporarily unavailable' : 'Temporarily unavailable',
-        openIncidents: incidentsAvailable ? summary.activeIncidents ?? 'Temporarily unavailable' : 'Temporarily unavailable'
+        activeThreats: (alertsAvailable ? summary.activeThreats : null) ?? 'Unknown',
+        highSeverity: (alertsAvailable ? summary.highSeverityAlerts : null) ?? 'Unknown',
+        targetedUsers: (alertsAvailable ? summary.affectedUsersCount : null) ?? 'Unknown',
+        openIncidents: (incidentsAvailable ? summary.activeIncidents : null) ?? 'Unknown'
     };
 }
 
@@ -4623,7 +4623,7 @@ function renderSunbirdEmailInsights(model) {
     const el = document.getElementById('sunbird-email-insights');
     if (!el) return;
     const coverage = getEmailThreatDisplayMetrics(model);
-    const unavailable = 'Temporarily unavailable';
+    const unavailable = 'Unknown';
     const insights = [
         { title: 'Phishing', value: model.evidence.phishingAlerts.length, evidence: 'phishingAlerts', tone: model.evidence.phishingAlerts.length ? 'bad' : 'good', filter: { threat: 'phishing' } },
         { title: 'Malware', value: model.evidence.malwareAlerts.length, evidence: 'malwareAlerts', tone: model.evidence.malwareAlerts.length ? 'bad' : 'good', filter: { threat: 'malware' } },
@@ -15162,9 +15162,9 @@ function buildEmailPreviewModel() {
             { label: 'Open Incidents', value: openIncidents, icon: 'fas fa-bug', tone: 'warning' }
         ],
         riskBreakdown: [
-            { label: 'Phishing', value: alertsAvailable ? phishing : 'Unavailable', tone: 'critical' },
-            { label: 'Malware', value: alertsAvailable ? malware : 'Unavailable', tone: 'high' },
-            { label: 'Mail Events', value: mailSummary.totalMailActivity ?? 'Unavailable', tone: 'medium' }
+            { label: 'Phishing', value: alertsAvailable ? phishing : 'Unknown', tone: 'critical' },
+            { label: 'Malware', value: alertsAvailable ? malware : 'Unknown', tone: 'high' },
+            { label: 'Mail Events', value: mailSummary.totalMailActivity ?? 'Unknown', tone: 'medium' }
         ],
         keyInsight,
         miniFeed: feed

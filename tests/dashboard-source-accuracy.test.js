@@ -230,11 +230,11 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     };
     const values = () => Array.from(project.cardMetrics, metric => metric.value);
     await card();
-    assert.deepEqual(values(), [': Temporarily unavailable', ': Temporarily unavailable', ': Temporarily unavailable', ': 0']);
+    assert.deepEqual(values(), [': Unknown', ': Unknown', ': Unknown', ': 0']);
     assert.match(project.cardFooter, /Threat data incomplete.*42 active mailboxes.*14060 mail events/);
     payload = { ...payload, sourceAudit: { alertsOk: true, incidentsOk: true, warnings: [] } };
     await card();
-    assert.deepEqual(values(), [': Temporarily unavailable', ': Temporarily unavailable', ': Temporarily unavailable', ': 0']);
+    assert.deepEqual(values(), [': Unknown', ': Unknown', ': Unknown', ': 0']);
     payload = { ...payload, sourceAudit: { alertsComplete: true, incidentsComplete: true } };
     await card();
     assert.deepEqual(values(), [': 0', ': 0', ': 0', ': 0']);
