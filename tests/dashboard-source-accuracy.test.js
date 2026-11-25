@@ -304,21 +304,23 @@ test('reused Exchange data keeps its old provenance as Defender source evidence 
     assert.equal(isolated.mailActivity, undefined);
 });
 
-test('Email posture stays unscored without verified protection settings while threat counts remain visible', () => {
+test('Email Observed Alert Score uses only verified saved alert evidence and the historical weights', () => {
     const element = { classList: { add() {} }, setAttribute() {} };
     let model;
     const ui = vm.runInNewContext([
         section(client, 'function getEmailThreatDisplayMetrics', 'function getSecurityDashboardMetrics'),
         section(client, 'function getSunbirdEmailTargetedUserChartItems', 'function buildSunbirdEmailRecommendations'),
-        section(client, 'function renderSunbirdEmailMetrics', 'function renderSunbirdEmailInsights'),
+        section(client, 'function getSunbirdObservedAlertScore', 'function renderSunbirdEmailInsights'),
+        section(client, 'function emailAlertChartStatus', 'function renderSunbirdEmailCharts'),
         section(client, 'function renderSunbirdEmailHealthGraph', 'function renderSunbirdEmailPanels'),
         section(client, 'function openSunbirdEmailEvidence', '\nfunction '),
-        '({ chart: getSunbirdEmailTargetedUserChartItems, metrics: renderSunbirdEmailMetrics, health: renderSunbirdEmailHealthGraph, evidence: openSunbirdEmailEvidence });'
+        '({ chart: getSunbirdEmailTargetedUserChartItems, metrics: renderSunbirdEmailMetrics, health: renderSunbirdEmailHealthGraph, evidence: openSunbirdEmailEvidence, score: getSunbirdObservedAlertScore });'
     ].join('\n'), {
         document: { getElementById: () => element },
         escapeIdentityText: String,
         buildSunbirdEmailModel: () => model,
-        getSunbirdEmailEvidenceRows: () => [],
+        getSunbirdEmailEvidenceRows: key => key === 'allAlerts' ? [{ title: 'Collected alert', subtitle: '', meta: 'High' }] : [],
+        microsoftDashboardUpdateText: ({ fetchedAt }) => `Last updated ${fetchedAt}`,
         sunbirdEmailDashboardData: {}
     });
     model = { sourceAudit: { alertsComplete: true, incidentsComplete: true }, alerts: [],
@@ -329,18 +331,39 @@ test('Email posture stays unscored without verified protection settings while th
     assert.match(element.innerHTML, /Unknown/);
     assert.doesNotMatch(element.innerHTML, /100%/);
     assert.match(ui.health(model), /No collected alerts to resolve/);
+    ui.evidence('observedAlertScore');
+    assert.match(element.innerHTML, /No collected email alerts to score/);
 
-    model.alerts.push({ severity: 'high' });
-    Object.assign(model.summary, { securityScore: 88, activeThreats: 1, threatResolutionRate: 50 });
+    model.alerts.push({ severity: 'high' }, { severity: 'medium' });
+    Object.assign(model.summary, { securityScore: 100, activeThreats: 1, threatResolutionRate: 50 });
+    model.sourceAudit.sourceTimestamps = { alerts: '2026-11-25T01:00:00Z' };
+    model.sourceAudit.sourceOutcomes = { alerts: { status: 'failed' } };
+    model.fetchedAt = '2026-11-25T02:00:00Z';
     ui.metrics(model);
-    assert.match(element.innerHTML, /Unknown/);
+    assert.match(element.innerHTML, /83%[\s\S]*Observed Alert Score/);
     assert.match(element.innerHTML, />1<\/div>\s*<div[^>]+>Active Threats/);
-    assert.doesNotMatch(element.innerHTML, /88%/);
+    assert.doesNotMatch(element.innerHTML, /100%/);
     assert.match(ui.health(model), /Resolved[\s\S]*50%/);
-    assert.doesNotMatch(ui.health(model), /88%|Exposure/);
-    ui.evidence('protectionScore');
-    assert.match(element.innerHTML, /verified anti-phishing.*mailbox coverage/);
+    assert.doesNotMatch(ui.health(model), /83%|Exposure/);
+    ui.evidence('observedAlertScore');
+    assert.match(element.innerHTML, /18 per critical alert, 12 per high, 5 per medium and 2 per low/);
+    assert.match(element.innerHTML, /83% from 2 collected alerts/);
+    assert.match(element.innerHTML, /Refresh incomplete.*Last updated 2026-11-25T01:00:00Z/);
+    assert.match(element.innerHTML, /Collected alert/);
+    assert.doesNotMatch(element.innerHTML, /2026-11-25T02:00:00Z/);
     assert.doesNotMatch(element.innerHTML, /View in Table/);
+
+    const score = severities => ui.score({ ...model, alerts: severities.map(severity => ({ severity })) });
+    assert.equal(score(['critical', 'high', 'medium', 'low', 'unknown']).value, 61);
+    assert.equal(score([...Array(30).fill('low'), 'critical']).value, 40);
+    assert.equal(score(Array(7).fill('critical')).value, 0);
+    model.sourceAudit.alertsComplete = false;
+    assert.equal(ui.score(model), null);
+    ui.evidence('observedAlertScore');
+    assert.match(element.innerHTML, /Verified email alert coverage is unavailable/);
+    assert.doesNotMatch(element.innerHTML, /83%|Collected alert/);
+
+    model.sourceAudit.alertsComplete = true;
     model.evidence.affectedUsers.push({ user: 'fixture@example.test', threatCount: 2 });
     assert.equal(ui.chart(model)[0].value, 2);
 });
