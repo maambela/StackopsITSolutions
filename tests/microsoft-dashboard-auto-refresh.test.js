@@ -104,13 +104,15 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
         normalizeSunbirdDashboardData: data => data,
         normalizeSunbirdIdentityUser: user => user,
         buildUserRolesMap() {},
-        saveSunbirdIdentitySnapshot() {},
+        saveSunbirdIdentitySnapshot: data => { identityCard.roles = data.roleAssignments; },
         updateIdentityProjectCardFromDashboard: data => { identityCard.updatedAt = data.fetchedAt; },
         renderSunbirdIdentityDashboard() {}
     });
     const incoming = {
         success: true,
         complete: true,
+        companyId: 7,
+        sourceTenantId: 'tenant-a',
         users: [{ id: 'new' }],
         fetchedAt: '2026-11-23T12:30:00Z'
     };
@@ -120,6 +122,11 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
     assert.equal(identityCard.updatedAt, incoming.fetchedAt);
     assert.equal(applier({ identity: { ...incoming, fetchedAt: '2026-11-23T11:00:00Z' } }), false);
     assert.equal(applier({ identity: { ...incoming, complete: false, fetchedAt: '2026-11-23T13:00:00Z' } }), false);
+    const roles = { ...incoming, roleAssignments: [{ id: 'role' }], roleAssignmentsFetchedAt: '2026-11-23T13:00:00Z' };
+    assert.equal(applier({ identity: { ...roles, sourceTenantId: 'different-tenant' } }), false);
+    assert.equal(applier({ identity: roles }), true);
+    assert.equal(identityCard.roles[0].id, 'role');
+    assert.equal(identityCard.updatedAt, incoming.fetchedAt);
 });
 
 test('saved snapshot route is authenticated, company-scoped, and never invokes Graph collection', () => {

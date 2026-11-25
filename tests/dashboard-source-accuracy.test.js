@@ -127,7 +127,9 @@ test('Identity cache-only refresh serves the authenticated company snapshot, nev
         },
         verifySunbirdUser: async () => ({ clientId: 'sunbird', companyId: 25 }),
         async assertSharedGraphTenantForCompany(companyId) { assert.equal(companyId, 25); },
-        pool, identityAdapter, buildSavedIdentityDashboard,
+        pool, identityAdapter,
+        readIdentityDashboardMetrics: (_company, tenantId, users, metrics) =>
+            buildSavedIdentityDashboard(users, metrics, tenantId),
         readIdentityBackfill: async () => null,
         mergeBackfillUsers: rows => rows,
         async getCachedRoleAssignments(companyId) { assert.equal(companyId, 25); return { roleAssignments: [] }; },
@@ -176,6 +178,32 @@ test('saved Identity display restores scoped, verified MFA with its original tim
     assert.equal(buildSavedIdentityDashboard([saved], {}, 'tenant-b', now).metrics.mfaCoverage, null);
     assert.equal(buildSavedIdentityDashboard([{ ...saved, lastVerifiedMfa: null }], {}, 'tenant-a', now).metrics.securityScore, null);
     assert.equal(buildSavedIdentityDashboard([{ ...saved, rolesStatus: 'unavailable' }], {}, 'tenant-a', now).metrics.securityScore, null);
+});
+
+test('incomplete Identity snapshots keep earlier verified aggregates and their original timestamps', async () => {
+    const previousAt = '2026-11-23T12:00:00.000Z';
+    const fetchedAt = '2026-11-24T12:00:00.000Z';
+    const user = { id: 'a', userType: 'Member', isWorkforce: true, roles: [], rolesStatus: 'complete',
+        mfaEnabled: true, mfaStatus: 'complete', mfaObservedAt: previousAt,
+        lastSignIn: { observationStatus: 'no_recorded_sign_in' } };
+    const read = vm.runInNewContext(section(server, 'async function readIdentityDashboardMetrics', 'async function collectIdentityDashboardPayload') +
+        '\nreadIdentityDashboardMetrics;', {
+        buildSavedIdentityDashboard,
+        loadStoredIdentityUsers: async (company, tenant, options) => {
+            assert.equal(company, 25);
+            assert.equal(tenant, 'tenant-a');
+            assert.equal(options.requireTenant, true);
+            options.visitSnapshot([user], { activeUsers: 0, signInCollectionStatus: 'complete' }, previousAt);
+        },
+        console
+    });
+    const saved = await read(25, 'tenant-a', [{ ...user, mfaEnabled: null, rolesStatus: 'unavailable' }], {}, fetchedAt);
+    assert.equal(saved.metrics.mfaCoverage, 100);
+    assert.equal(saved.metrics.securityScore, 100);
+    assert.equal(saved.metrics.activeUsers, 0);
+    assert.equal(saved.metrics.verifiedMetricTimestamps.securityScore, previousAt);
+    assert.equal(saved.metrics.verifiedMetricTimestamps.privilegedUsers, previousAt);
+    assert.equal(saved.users[0].mfaEnabled, null);
 });
 
 test('Email targeted users never use mailbox activity and an empty alert set stays unscored', () => {

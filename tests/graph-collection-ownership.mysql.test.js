@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const mysql = require('mysql2/promise');
-const { acquireClaim, claimKey, releaseClaim, runWithCollectionOwnership, withCollectionPublication } =
+const { acquireClaim, claimKey, renewClaim, releaseClaim, runWithCollectionOwnership, withCollectionPublication } =
     require('../services/intelligence/graph-collection-ownership');
 
 test('isolated MySQL serializes claims, fences old writers and rolls back failed publication', {
@@ -46,6 +46,27 @@ test('isolated MySQL serializes claims, fences old writers and rolls back failed
         }
 
         const scope = { companyId: 1, tenantId: 'tenant-a', source: 'identity', ttlMs: 500 };
+        const lock = await pool.getConnection();
+        const renewal = await pool.getConnection();
+        try {
+            const key = claimKey(1, 'tenant-a', 'identity');
+            const claim = await acquireClaim(pool, key, 1, 'identity', 750, 'blocked-renewal');
+            assert.ok(claim);
+            await renewal.query('SET SESSION innodb_lock_wait_timeout = 1');
+            await lock.beginTransaction();
+            await lock.query('SELECT ID FROM StackCTRLIntelligenceScheduleRuns WHERE DeduplicationKey = ? FOR UPDATE', [key]);
+            await assert.rejects(renewClaim(renewal, claim, 60000), { code: 'ER_LOCK_WAIT_TIMEOUT' });
+            await lock.rollback();
+            assert.equal(await renewClaim(renewal, claim, 60000), false);
+            const recovered = await acquireClaim(pool, key, 1, 'identity', 60000, 'recovered-after-lock');
+            assert.ok(recovered);
+            await releaseClaim(pool, recovered);
+        } finally {
+            await lock.rollback();
+            await renewal.query('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+            renewal.release();
+            lock.release();
+        }
         let resume;
         const pause = new Promise(resolve => { resume = resolve; });
         let notifyStarted;

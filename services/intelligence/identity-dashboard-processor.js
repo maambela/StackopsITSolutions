@@ -102,8 +102,9 @@ async function buildIdentityDashboardPayload({
     const collectedAt = now();
     const enrichedUsers = await mapWithConcurrency(users, concurrency, async user => {
         const key = String(user.id || user.userPrincipalName || '');
+        const previousByName = previousByUpn.get(String(user.userPrincipalName || '').trim().toLowerCase());
         const previous = (user.id && previousById.get(String(user.id))) ||
-            previousByUpn.get(String(user.userPrincipalName || '').trim().toLowerCase());
+            ((!user.id || !previousByName?.id) ? previousByName : null);
         const previousLastSignIn = previous?.lastSignIn;
         const assignedRoles = user.id ? userRoleMap.get(String(user.id)) : null;
         const rolesStatus = roleAssignmentsStatus === 'complete'
@@ -225,8 +226,12 @@ async function buildIdentityDashboardPayload({
         : null;
     const highRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'HIGH').length;
     const mediumRiskUsers = enrichedUsers.filter(user => user.riskLevel === 'MEDIUM').length;
+    const activityCutoff = collectedAt.getTime() - 86400000;
     const activeUsers24h = signInCollectionStatus === 'complete'
-        ? enrichedUsers.filter(user => user.lastSignIn.daysSince !== null && user.lastSignIn.daysSince <= 1).length
+        ? enrichedUsers.filter(user => {
+            const observedAt = Date.parse(latestSignInMap.get(String(user.id || user.userPrincipalName || ''))?.dateTime);
+            return observedAt >= activityCutoff && observedAt <= collectedAt.getTime();
+        }).length
         : null;
     const usersWithCompleteProfile = enrichedUsers.filter(user =>
         user.jobTitle !== 'No Title' && user.mobilePhone !== 'N/A'

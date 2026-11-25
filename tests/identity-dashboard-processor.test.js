@@ -24,6 +24,8 @@ test('Identity saves verified inventory before checking MFA and can retry after 
             return [{ id: 'user', userType: 'Member' }];
         },
         fetchMicrosoftRoleAssignments: async () => [],
+        processMicrosoftRoleAssignments: roles => roles,
+        upsertRoleAssignmentsCache: async () => calls.push('saved roles'),
         fetchMicrosoftSignIns: async () => ({ status: 'complete', records: [] }),
         loadStoredIdentityUsers: async () => [],
         readVerifiedIdentityMfa: () => null,
@@ -48,11 +50,11 @@ test('Identity saves verified inventory before checking MFA and can retry after 
     await assert.rejects(collect(1, 'test'), /users timeout/);
     failUsers = false;
     await collect(1, 'test');
-    assert.deepEqual(calls, ['users', 'failed', 'users', 'saved inventory', 'mfa']);
+    assert.deepEqual(calls, ['users', 'saved roles', 'failed', 'users', 'saved roles', 'saved inventory', 'mfa']);
     refreshMfa = true;
     calls.length = 0;
     await collect(1, 'test');
-    assert.deepEqual(calls, ['users', 'saved inventory', 'mfa', 'saved MFA']);
+    assert.deepEqual(calls, ['users', 'saved roles', 'saved inventory', 'mfa', 'saved MFA']);
 });
 
 test('the client does not request full history and missing dates use a short label', () => {
@@ -76,6 +78,27 @@ function build(users, options = {}) {
         ...options
     });
 }
+
+test('24-hour activity excludes older events and a reused username never inherits another ID', async () => {
+    const users = [
+        { id: 'recent', userType: 'Member' },
+        { id: 'older', userType: 'Member' },
+        { id: 'new-id', userPrincipalName: 'reused@example.test', userType: 'Member' }
+    ];
+    const result = await build(users, {
+        signInWindowDays: 1,
+        signIns: [
+            { userId: 'recent', createdDateTime: '2026-11-22T12:00:00Z' },
+            { userId: 'older', createdDateTime: '2026-11-22T11:59:59Z' }
+        ],
+        previousUsers: [{ id: 'old-id', userPrincipalName: 'reused@example.test',
+            lastSignIn: { dateTime: '2026-11-23T11:00:00Z' },
+            failedSignIn: { dateTime: '2026-11-23T11:00:00Z' } }]
+    });
+    assert.equal(result.summary.activeUsers24h, 1);
+    assert.equal(result.users[2].lastSignIn.dateTime, null);
+    assert.equal(result.users[2].failedSignIn, null);
+});
 
 test('24-hour partial refresh preserves newer verified events and rejects conflicting user IDs', async () => {
     const user = { id: 'user-1', userPrincipalName: 'user@example.com', userType: 'Member' };

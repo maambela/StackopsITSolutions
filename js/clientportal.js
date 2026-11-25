@@ -2585,10 +2585,13 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
                 workforceUsers.length && !mfaUnknownUsers.length && !unknownUserTypes
                 ? Math.round((mfaEnabledUsers.length / workforceUsers.length) * 100)
                 : null,
-            mfaOutdated: data?.metrics?.mfaOutdated === true,
-            mfaObservedAt: data?.metrics?.mfaObservedAt,
+            mfaOutdated: Boolean(data?.metrics?.verifiedMetricTimestamps?.mfaCoverage) || data?.metrics?.mfaOutdated === true,
+            mfaObservedAt: data?.metrics?.verifiedMetricTimestamps?.mfaCoverage || data?.metrics?.mfaObservedAt,
             mfaAssessmentStatus: mfaUnknownUsers.length || unknownUserTypes ? 'incomplete' : 'complete',
-            privilegedUsers: privilegedUsers.length,
+            privilegedUsers: Object.hasOwn(data?.metrics || {}, 'privilegedUsers')
+                ? data.metrics.privilegedUsers : privilegedUsers.length,
+            privilegedUsersVerifiedAt: data?.metrics?.verifiedMetricTimestamps?.privilegedUsers,
+            rolesComplete: users.every(user => user.rolesStatus === 'complete'),
             highRiskUsers: highRiskUsers.length,
             mediumRiskUsers: mediumRiskUsers.length,
             safeUsers,
@@ -2978,7 +2981,7 @@ function renderSunbirdIdentityMetrics(model) {
     const metrics = [
         { key: 'total-users', label: 'Total Users', value: model.metrics.totalUsers, tone: 'neutral', evidence: 'allUsers' },
         { key: 'mfa-coverage', label: model.metrics.mfaOutdated ? 'MFA Coverage · Outdated' : 'MFA Coverage', value: model.metrics.mfaCoverage === null ? 'Temporarily unavailable' : `${model.metrics.mfaCoverage}%`, title: model.metrics.mfaOutdated ? microsoftDashboardUpdateText({ fetchedAt: model.metrics.mfaObservedAt }, Infinity) : '', tone: model.metrics.mfaCoverage === null || model.metrics.mfaOutdated ? 'neutral' : model.metrics.mfaCoverage >= 90 ? 'good' : model.metrics.mfaCoverage >= 70 ? 'warn' : 'bad', evidence: 'mfaMissingUsers' },
-        { key: 'privileged-users', label: 'Privileged Users', value: model.metrics.privilegedUsers, tone: model.metrics.privilegedUsers > 5 ? 'warn' : 'neutral', evidence: 'privilegedUsers' },
+        { key: 'privileged-users', label: model.metrics.privilegedUsersVerifiedAt ? 'Privileged Users · Outdated' : 'Privileged Users', value: model.metrics.privilegedUsers ?? 'Unknown', title: model.metrics.privilegedUsersVerifiedAt ? microsoftDashboardUpdateText({ fetchedAt: model.metrics.privilegedUsersVerifiedAt }, Infinity) : '', tone: model.metrics.privilegedUsers > 5 ? 'warn' : 'neutral', evidence: 'privilegedUsers' },
         { key: 'high-risk-users', label: 'High Risk Users', value: model.metrics.highRiskUsers, tone: model.metrics.highRiskUsers > 0 ? 'bad' : 'good', evidence: 'highRiskUsers' }
     ];
 
@@ -3132,7 +3135,7 @@ function renderSunbirdPieChart(title, items, total, extraClass = '', toneColor =
 
 function renderSunbirdHealthGraph(model) {
     const mfa = model.metrics.mfaCoverage;
-    const privilegedMfa = model.metrics.mfaAssessmentStatus !== 'complete'
+    const privilegedMfa = model.metrics.mfaAssessmentStatus !== 'complete' || !model.metrics.rolesComplete
         ? null
         : model.metrics.privilegedUsers
         ? Math.round(((model.metrics.privilegedUsers - model.metrics.adminsWithoutMfa) / model.metrics.privilegedUsers) * 100)
@@ -10911,6 +10914,18 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
             saveSunbirdIdentitySnapshot(sunbirdDashboardData);
             if (document.getElementById('sunbird-identity-dashboard')) renderSunbirdIdentityDashboard();
         }
+        if (identity?.complete && identity.companyId && identity.sourceTenantId &&
+            identity.companyId === sunbirdDashboardData?.companyId && identity.sourceTenantId === sunbirdDashboardData?.sourceTenantId &&
+            Array.isArray(identity.roleAssignments) && Date.parse(identity.roleAssignmentsFetchedAt) >
+                (Date.parse(sunbirdDashboardData.roleAssignmentsFetchedAt) || 0)) {
+            sunbirdDashboardData = { ...sunbirdDashboardData, roleAssignments: identity.roleAssignments,
+                roleAssignmentsFetchedAt: identity.roleAssignmentsFetchedAt };
+            microsoftRolesData = identity.roleAssignments;
+            buildUserRolesMap();
+            saveSunbirdIdentitySnapshot(sunbirdDashboardData);
+            if (document.getElementById('sunbird-identity-dashboard')) renderSunbirdIdentityDashboard();
+            changed = true;
+        }
 
         const devices = snapshots.devices;
         const currentDevices = sunbirdDevicesDashboardData || latestDevicesCardData;
@@ -11213,11 +11228,18 @@ function updateIdentityProjectCardFromDashboard(data) {
     const scope = data.companyId && data.sourceTenantId ? JSON.stringify([data.companyId, data.sourceTenantId]) : null;
     const saved = project.identityVerifiedCounts || readProjectCardCache()[project.id]?.identityVerifiedCounts;
     const prior = scope && saved?.scope === scope ? saved : {};
-    const active = identityCardCount(summary.activeUsers24h ?? metrics.activeUsers24h, prior.active, data.fetchedAt);
-    const admins = identityCardCount(summary.adminUsers ?? metrics.adminUsers, prior.admins, data.fetchedAt);
+    const timestamps = metrics.verifiedMetricTimestamps || {};
+    const activityCount = summary.activeUsers24h ?? metrics.activeUsers24h ?? metrics.activeUsers;
+    const adminCount = summary.adminUsers ?? metrics.adminUsers ?? metrics.privilegedUsers;
+    const active = timestamps.activeUsers
+        ? identityCardCount(null, { value: activityCount, fetchedAt: timestamps.activeUsers })
+        : identityCardCount(activityCount, prior.active, data.fetchedAt);
+    const admins = timestamps.privilegedUsers
+        ? identityCardCount(null, { value: adminCount, fetchedAt: timestamps.privilegedUsers })
+        : identityCardCount(adminCount, prior.admins, data.fetchedAt);
     project.identityVerifiedCounts = { scope, active: active.verified, admins: admins.verified };
     const securityScore = summary.securityScore ?? metrics.securityScore ?? 'Temporarily unavailable';
-    const scoreOutdated = Number.isFinite(securityScore) && metrics.mfaOutdated === true;
+    const scoreOutdated = Number.isFinite(securityScore) && (timestamps.securityScore || metrics.mfaOutdated === true);
 
     project.status = 'active';
     project.securityScore = securityScore;
@@ -11231,7 +11253,7 @@ function updateIdentityProjectCardFromDashboard(data) {
         { label: "Active (24h)", value: `: ${active.text}`, title: active.title, icon: "fas fa-user-check" },
         { label: "Admin Roles", value: `: ${admins.text}`, title: admins.title, icon: "fas fa-crown" },
         { label: "Security Score", value: `: ${securityScore}${scoreOutdated ? '*' : ''}`, title: scoreOutdated
-            ? `Outdated · ${microsoftDashboardUpdateText({ fetchedAt: metrics.mfaObservedAt }, Infinity)}` : undefined, icon: "fas fa-shield-alt" }
+            ? `Outdated · ${microsoftDashboardUpdateText({ fetchedAt: timestamps.securityScore || metrics.mfaObservedAt }, Infinity)}` : undefined, icon: "fas fa-shield-alt" }
     ];
     project.cardFooter = `Users: ${totalUsers} | Active: ${active.text}${data.cachedFallback ? ' | Saved snapshot' : ''}`;
     updateMicrosoftDashboardCardTimestamp(project, data);

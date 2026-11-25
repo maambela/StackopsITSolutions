@@ -218,6 +218,7 @@ function buildSavedIdentityDashboard(users, metrics, tenantId, now = Date.now())
         users: displayUsers,
         metrics: {
             ...metrics, mfaCoverage, securityScore, mfaOutdated,
+            privilegedUsers: displayUsers.every(user => user.rolesStatus === 'complete') ? derived.privilegedUsers : null,
             mfaObservedAt: oldest === null ? null : new Date(oldest).toISOString(),
             mfaEnabled: enabled,
             mfaMissing: workforce.filter(user => user.mfaEnabled === false).length

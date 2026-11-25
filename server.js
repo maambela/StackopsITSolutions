@@ -12388,7 +12388,8 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
                 return null;
             });
-            const dashboard = buildSavedIdentityDashboard(identityUsers, identity.metrics, sourceTenantId);
+            const dashboard = await readIdentityDashboardMetrics(companyId, sourceTenantId, identityUsers, identity.metrics, fetchedAt);
+            const cachedRoles = await getCachedRoleAssignments(companyId).catch(() => null);
             snapshots.identity = {
                 success: true,
                 source: 'db',
@@ -12397,7 +12398,8 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 summary: { ...dashboard.metrics, totalUsers: identityUsers.length },
                 metrics: dashboard.metrics,
                 users: mergeBackfillUsers(dashboard.users, history?.state, fetchedAt, signInCollection),
-                roleAssignments: identity.evidence?.find(item => item.evidenceType === 'role_assignments')?.data || []
+                roleAssignmentsFetchedAt: cachedRoles?.fetchedAt ?? null,
+                roleAssignments: cachedRoles?.roleAssignments ?? null
             };
         }
 
@@ -13961,23 +13963,23 @@ async function serveSavedSunbirdIdentity(req, res) {
             operation.finish('unavailable', { statusCode: 503, reason: 'complete_identity_snapshot_missing' });
             return res.status(503).json({ success: false, message: 'No complete Identity snapshot is available for this company.' });
         }
-        const dashboard = buildSavedIdentityDashboard(users, snapshot.metrics, sourceTenantId);
+        const fetchedAt = snapshot.sourceLineage.sourceFetchedAt || snapshot.freshness.lastUpdated;
+        const dashboard = await readIdentityDashboardMetrics(tenant.companyId, sourceTenantId, users, snapshot.metrics, fetchedAt);
         const summary = {
             ...dashboard.metrics,
             totalUsers: users.length,
-            activeUsers24h: snapshot.metrics.activeUsers,
-            adminUsers: snapshot.metrics.privilegedUsers,
+            activeUsers24h: dashboard.metrics.activeUsers,
+            adminUsers: dashboard.metrics.privilegedUsers,
             mfaEnabledPercentage: dashboard.metrics.mfaCoverage,
             mfaEnabledUsers: dashboard.metrics.mfaEnabled,
             mfaMissingUsers: dashboard.metrics.mfaMissing,
             privilegedUsersWithoutMFA: snapshot.metrics.adminsWithoutMfa
         };
         operation.step('role_cache_load_start');
-        const cachedRoles = await getCachedRoleAssignments(tenant.companyId);
+        const cachedRoles = await getCachedRoleAssignments(tenant.companyId).catch(() => null);
         operation.step('role_cache_load_complete', {
             roleCount: Array.isArray(cachedRoles?.roleAssignments) ? cachedRoles.roleAssignments.length : 0
         });
-        const fetchedAt = snapshot.sourceLineage.sourceFetchedAt || snapshot.freshness.lastUpdated;
         const signInCollection = snapshot.dashboardSourceMetrics?.signInCollection;
         operation.step('backfill_load_start');
         const backfill = await readIdentityBackfill(pool, Number(tenant.companyId), sourceTenantId).catch(error => {
@@ -14000,7 +14002,8 @@ async function serveSavedSunbirdIdentity(req, res) {
             stackctrlMetrics: { ...snapshot.dashboardSourceMetrics, ...dashboard.metrics },
             signInCollection,
             users: mergeBackfillUsers(dashboard.users, backfill?.state, fetchedAt, signInCollection),
-            roleAssignments: cachedRoles?.roleAssignments || []
+            roleAssignmentsFetchedAt: cachedRoles?.fetchedAt ?? null,
+            roleAssignments: cachedRoles?.roleAssignments ?? null
         });
         operation.finish('success', { statusCode: 200, userCount: users.length });
     } catch (error) {
@@ -16757,9 +16760,9 @@ async function readIdentityBackfill(connection, companyId, tenantId, allowNew = 
     return rows[0] ? { id: rows[0].ID, state: parseReportJson(rows[0].Backfill, null) } : null;
 }
 
-async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = false } = {}) {
+async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = false, visitSnapshot = null } = {}) {
     const [snapshots] = await pool.query(
-        `SELECT ID, TenantKey, EvidenceRecordCount, SourceAuditJson
+        `SELECT ID, TenantKey, EvidenceRecordCount, SourceAuditJson, DashboardMetricsJson, SourceFetchedAt
          FROM StackCTRLIdentityEvidenceSnapshots
          WHERE CompanyID = ? AND TenantKey = ? AND IsComplete = 1 AND CollectionStatus = 'complete'
          ORDER BY CollectedAt DESC, ID DESC
@@ -16780,10 +16783,53 @@ async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = fa
         );
         if (rows.length !== Number(snapshot.EvidenceRecordCount)) continue;
         const users = rows.map(row => parseReportJson(row.ProcessedEvidenceJson, null)).filter(Boolean);
+        if (users.length !== rows.length) continue;
+        if (visitSnapshot) {
+            if (visitSnapshot(users, parseReportJson(snapshot.DashboardMetricsJson, {}),
+                sourceAudit.dashboardFetchedAt || snapshot.SourceFetchedAt)) break;
+            continue;
+        }
         const history = await readIdentityBackfill(pool, companyId, tenantId).catch(() => null);
         return mergeBackfillUsers(users, history?.state);
     }
     return [];
+}
+
+async function readIdentityDashboardMetrics(companyId, tenantId, users, metrics, fetchedAt) {
+    const dashboard = buildSavedIdentityDashboard(users, metrics, tenantId);
+    const keys = ['mfaCoverage', 'securityScore', 'privilegedUsers', 'activeUsers'];
+    const savedMetrics = dashboard.metrics;
+    const pending = keys.filter(key => !Number.isFinite(savedMetrics[key]));
+    savedMetrics.verifiedMetricTimestamps = {};
+    if (!pending.length) return dashboard;
+    try {
+        await loadStoredIdentityUsers(companyId, tenantId, {
+            requireTenant: true,
+            visitSnapshot(previousUsers, previousMetrics, previousAt) {
+                if (!Number.isFinite(new Date(previousAt || '').getTime()) || new Date(previousAt) >= new Date(fetchedAt)) return false;
+                const candidate = buildSavedIdentityDashboard(previousUsers, previousMetrics, tenantId).metrics;
+                for (const key of pending) {
+                    if (Number.isFinite(savedMetrics[key]) || !Number.isFinite(candidate[key])) continue;
+                    if (key === 'activeUsers') {
+                        if (candidate.signInCollectionStatus !== 'complete' || !previousUsers.every(user =>
+                            ['observed', 'no_recent_sign_in', 'no_recorded_sign_in'].includes(user.lastSignIn?.observationStatus))) continue;
+                        const cutoff = new Date(previousAt).getTime() - 86400000;
+                        candidate.activeUsers = previousUsers.filter(user =>
+                            user.lastSignIn?.observationStatus === 'observed' &&
+                            Date.parse(user.lastSignIn.dateTime) >= cutoff &&
+                            Date.parse(user.lastSignIn.dateTime) <= cutoff + 86400000).length;
+                    }
+                    savedMetrics[key] = candidate[key];
+                    savedMetrics.verifiedMetricTimestamps[key] = ['mfaCoverage', 'securityScore'].includes(key)
+                        ? candidate.mfaObservedAt || previousAt : previousAt;
+                }
+                return pending.every(key => Number.isFinite(savedMetrics[key]));
+            }
+        });
+    } catch (error) {
+        console.warn('[Identity Dashboard] Prior verified metrics unavailable:', error.message);
+    }
+    return dashboard;
 }
 
 async function collectIdentityDashboardPayload(companyId, signal = null, publish = null) {
@@ -16791,18 +16837,32 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
     const collectionStartedAt = new Date();
     const token = await getMicrosoftGraphToken();
     signal?.throwIfAborted();
-    const users = await fetchMicrosoftUsers(token);
-    signal?.throwIfAborted();
     const warnings = [];
-    const [roleResult, signInCollection, previousUsers] = await Promise.all([
-        fetchMicrosoftRoleAssignments(token).then(
-            assignments => ({ assignments, status: 'complete' }),
+    const usersRequest = fetchMicrosoftUsers(token);
+    const rolesRequest = fetchMicrosoftRoleAssignments(token).then(
+            async assignments => {
+                if (publish && !signal?.aborted) {
+                    await upsertRoleAssignmentsCache(companyId, processMicrosoftRoleAssignments(assignments), collectionStartedAt)
+                        .catch(error => console.warn('[Identity Evidence] Verified role cache publication failed:', error.message));
+                }
+                return { assignments, status: 'complete' };
+            },
             error => {
                 console.warn('[Identity Evidence] Role assignment enrichment unavailable:', error.message);
                 warnings.push('Administrator role assignments are unavailable; previously verified roles are retained when possible.');
                 return { assignments: [], status: 'unavailable' };
             }
-        ),
+        );
+    let users;
+    try {
+        users = await usersRequest;
+        signal?.throwIfAborted();
+    } catch (error) {
+        await rolesRequest;
+        throw error;
+    }
+    const [roleResult, signInCollection, previousUsers] = await Promise.all([
+        rolesRequest,
         fetchMicrosoftSignIns(token, 1, { withStatus: true }),
         loadStoredIdentityUsers(companyId, tenantId).catch(error => {
             console.warn('[Identity Evidence] Previous verified sign-in data could not be loaded:', error.message);
