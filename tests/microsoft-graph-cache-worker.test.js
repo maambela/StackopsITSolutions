@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
-const { hasVerifiedEmailSource, mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
+const { hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailReportRefreshDate } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 function section(start, end) {
@@ -17,12 +17,13 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     const starts = [];
     const writes = new Map();
     const failures = [];
+    const events = [];
     let failIdentity;
     let finishDevices;
     const email = {
         success: true,
         summary: { activeThreats: 1, highSeverityAlerts: 2, affectedUsersCount: 3, activeIncidents: 4 },
-        sourceAudit: { alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
+        sourceAudit: { attemptId: 'email-fixture', alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
     };
     const refresh = vm.runInNewContext([
         section('async function mapWithConcurrency', 'async function getMicrosoftGraphCredentials'),
@@ -32,6 +33,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         section('async function upsertDashboardMetricCaches', 'let dashboardMetricRefreshRunning'),
         'upsertDashboardMetricCaches;'
     ].join('\n'), {
+        crypto, readEmailReportRefreshDate, logRuntimeOperation: (event, details) => events.push({ event, ...details }),
         pool: {
             async query(sql, parameters) {
                 if (sql.includes('SELECT')) return [[{ CompanyID: 7 }]];
@@ -84,6 +86,11 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     const savedEmail = writes.get('EmailSecurityPayloadCache');
     assert.deepEqual(savedEmail.summary, email.summary);
     assert.ok(savedEmail.sourceAudit.sourceTimestamps.alerts);
+    const publication = events.find(event => event.event === 'email_cache_publication');
+    assert.equal(publication.outcome, 'saved');
+    assert.equal(publication.cacheVersion, 'email-fixture');
+    assert.equal(publication.sourceAttemptIds.alerts, 'email-fixture');
+    assert.equal(publication.sourceTimestamps.alerts, savedEmail.sourceAudit.sourceTimestamps.alerts);
 });
 
 test('retired threat feed reports unavailable without an HTTP status or Graph request', async () => {

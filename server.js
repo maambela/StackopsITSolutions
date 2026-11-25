@@ -59,7 +59,10 @@ const { backfillPlan, nextBackfillRange, finishBackfillRange, withBackfillLock, 
 const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('./services/intelligence/device-dashboard-processor');
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
-const { buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts, readEmailReportRefreshDate } = require('./services/intelligence/email-dashboard-processor');
+const {
+    buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts,
+    readEmailReportRefreshDate, getReusableEmailReport, readEmailAlertTargets, countEmailAlertTargets
+} = require('./services/intelligence/email-dashboard-processor');
 const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');
 const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');
 const { buildNetworkDashboardPayload } = require('./services/intelligence/network-dashboard-processor');
@@ -256,6 +259,7 @@ async function validateMicrosoftGraphCredentialsAtStartup() {
 }
 
 const graphTokenDiagnosticContext = new AsyncLocalStorage();
+const identityCollectionTrace = new AsyncLocalStorage();
 const observedGraphTokenSockets = new WeakSet();
 
 function startGraphTokenDiagnostics(deadlineMs) {
@@ -447,7 +451,15 @@ function runtimeSnapshot() {
 }
 
 function logRuntimeOperation(event, details = {}) {
-    console.log('[Runtime]', JSON.stringify({ event, at: new Date().toISOString(), ...runtimeSnapshot(), ...details }));
+    const trace = event.startsWith('graph_') ? identityCollectionTrace.getStore() : null;
+    if (trace) {
+        const { error, ...safeDetails } = details;
+        details = safeDetails;
+        if (details.label?.startsWith('Microsoft Graph authentication methods for ')) {
+            details.label = 'Microsoft Graph authentication methods';
+        }
+    }
+    console.log('[Runtime]', JSON.stringify({ event, at: new Date().toISOString(), ...runtimeSnapshot(), ...trace, ...details }));
 }
 
 const collectorRuntimeLogger = {
@@ -11165,8 +11177,8 @@ async function fetchApplicationsPayloadFromApi(tokenOverride = null, options = {
     );
 }
 
-async function fetchEmailMetricsFromApi() {
-    const payload = await fetchEmailSecurityPayloadFromApi();
+async function fetchEmailMetricsFromApi(companyId, tenantId) {
+    const payload = await fetchEmailSecurityPayloadFromApi(null, { collectorContext: { companyId, tenantId, collectionTrigger: 'metrics_cache_miss' } });
     if (!hasCompleteEmailThreatCoverage(payload)) {
         throw new Error('Email threat collection is incomplete');
     }
@@ -11178,22 +11190,52 @@ function hasCompleteEmailThreatCoverage(payload) {
 }
 
 async function writeVerifiedEmailDashboard(companyId, payload, collectionStartedAt) {
-    if (!hasVerifiedEmailSource(payload)) return;
-    return withCollectionPublication(pool, companyId, async connection => {
-        await connection.query(
-            'INSERT INTO EmailSecurityPayloadCache (CompanyID) VALUES (?) ON DUPLICATE KEY UPDATE CompanyID = CompanyID',
-            [companyId]
-        );
-        const [rows] = await connection.query(
-            'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ? FOR UPDATE', [companyId]
-        );
-        const merged = mergeVerifiedEmailSources(parseReportJson(rows[0]?.Payload, null), payload, collectionStartedAt);
-        if (!merged) return;
-        await connection.query(
-            'UPDATE EmailSecurityPayloadCache SET Payload = ?, LastUpdated = ? WHERE CompanyID = ?',
-            [JSON.stringify(merged), new Date(merged.fetchedAt), companyId]
-        );
-    }, { transaction: true });
+    const attemptId = payload?.sourceAudit?.attemptId || null;
+    const trace = { companyId, attemptId };
+    if (!hasVerifiedEmailSource(payload)) {
+        logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'skipped', reason: 'no_verified_source' });
+        return;
+    }
+    try {
+        const saved = await withCollectionPublication(pool, companyId, async connection => {
+            await connection.query(
+                'INSERT INTO EmailSecurityPayloadCache (CompanyID) VALUES (?) ON DUPLICATE KEY UPDATE CompanyID = CompanyID',
+                [companyId]
+            );
+            const [rows] = await connection.query(
+                'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ? FOR UPDATE', [companyId]
+            );
+            const merged = mergeVerifiedEmailSources(parseReportJson(rows[0]?.Payload, null), payload, collectionStartedAt);
+            if (!merged) return null;
+            merged.sourceAudit.cacheVersion = attemptId || crypto.randomUUID();
+            await connection.query(
+                'UPDATE EmailSecurityPayloadCache SET Payload = ?, LastUpdated = ? WHERE CompanyID = ?',
+                [JSON.stringify(merged), new Date(merged.fetchedAt), companyId]
+            );
+            return merged;
+        }, { transaction: true });
+        if (saved) logEmailDashboardCache('email_cache_publication', companyId, saved, { attemptId, outcome: 'saved' });
+        else logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'skipped', reason: 'no_newer_verified_source' });
+    } catch (error) {
+        logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'rejected', errorCode: error.code || null });
+        throw error;
+    }
+}
+
+function emailDashboardMatchesTenant(payload, tenantId) {
+    return !payload?.sourceAudit?.sourceTenantId || payload.sourceAudit.sourceTenantId === tenantId;
+}
+
+function logEmailDashboardCache(event, companyId, payload, details = {}) {
+    const audit = payload.sourceAudit || {};
+    logRuntimeOperation(event, {
+        companyId, ...details, cacheVersion: audit.cacheVersion || null,
+        sourceTimestamps: audit.sourceTimestamps || {},
+        sourceAttemptIds: audit.sourceAttemptIds || {},
+        alertsComplete: audit.alertsComplete === true, incidentsComplete: audit.incidentsComplete === true,
+        mailActivityComplete: audit.mailActivityOk === true,
+        reportRefreshDate: readEmailReportRefreshDate(payload.mailActivity?.users)
+    });
 }
 
 function hasCompleteSecurityDashboard(payload) {
@@ -11219,7 +11261,7 @@ async function fetchEmailActivityReport(token, { signal = null, collectorContext
             collectorContext,
             label: 'Email activity Graph report'
         });
-        if (!response.ok) {
+        if (!response.ok || response.status !== 200) {
             const error = new Error(`Email activity Graph report returned HTTP ${response.status}`);
             error.status = response.status;
             throw error;
@@ -11279,7 +11321,16 @@ function normalizeGraphCollectionPayload(value, preferredKey = null) {
 }
 
 async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal = null, collectorContext = {} } = {}) {
-    const token = tokenOverride || await getMicrosoftGraphToken({ securityAlerts: true });
+    const attemptId = crypto.randomUUID();
+    const trace = { attemptId, companyId: collectorContext.companyId ?? null };
+    logRuntimeOperation('email_collection_attempt', { ...trace, trigger: collectorContext.collectionTrigger || null });
+    let token;
+    try {
+        token = tokenOverride || await getMicrosoftGraphToken({ securityAlerts: true });
+    } catch (error) {
+        logRuntimeOperation('email_collection_failed', { ...trace, stage: 'token', errorCode: error.code || null });
+        throw error;
+    }
     const fetchedAt = new Date().toISOString();
 
     function cleanWarning(value) {
@@ -11304,6 +11355,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                     recordsFetched: Number(result?.recordsFetched || 0),
                     ok: result?.ok !== false,
                     complete: result?.ok === true && !result.hasMore && !result.warnings?.length,
+                    httpStatus: result?.httpStatus ?? null, errorCode: result?.errorCode ?? null,
                     sourceFunction: 'fetchSecurityAlertRows'
                 };
             }
@@ -11347,6 +11399,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                     recordsFetched: Number(result?.recordsFetched || 0),
                     ok: result?.ok !== false,
                     complete: result?.ok === true && !result.hasMore && !result.warnings?.length,
+                    httpStatus: result?.httpStatus ?? null, errorCode: result?.errorCode ?? null,
                     sourceFunction: 'fetchSecurityIncidentRows'
                 };
             }
@@ -11381,8 +11434,19 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
     }
 
     async function fetchEmailActivitySafe() {
+        let saved = null;
+        if (collectorContext.companyId) {
+            try {
+                const [rows] = await pool.query(
+                    'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [collectorContext.companyId]
+                );
+                saved = getReusableEmailReport(parseReportJson(rows[0]?.Payload, null), Date.now(), collectorContext.tenantId);
+            } catch (error) {
+                logRuntimeOperation('email_report_reuse_failed', { ...trace, errorCode: error.code || null });
+            }
+        }
         try {
-            const result = await fetchEmailActivityReport(token, { signal, collectorContext });
+            const result = saved || await fetchEmailActivityReport(token, { signal, collectorContext });
             const users = Array.isArray(result?.users) ? result.users : [];
 
             return {
@@ -11391,6 +11455,8 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                 warnings: Array.isArray(result?.warnings) ? result.warnings : [],
                 recordsFetched: users.length,
                 ok: true,
+                reused: Boolean(saved),
+                httpStatus: saved ? null : 200,
                 sourceFunction: 'fetchEmailActivityReport'
             };
         } catch (error) {
@@ -11400,6 +11466,8 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
                 warnings: [`Email activity report failed: ${error.message || error}`],
                 recordsFetched: 0,
                 ok: false,
+                httpStatus: error.status || null,
+                errorCode: error.code || null,
                 sourceFunction: 'fetchEmailActivityReport'
             };
         }
@@ -11442,6 +11510,17 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
             sourceFunction: 'activity_settled_failure'
         };
 
+    const sourceOutcomes = {};
+    for (const [source, result] of Object.entries({ alerts: alertsResult, incidents: incidentsResult, mailActivity })) {
+        const complete = source === 'mailActivity' ? result.ok === true : result.complete === true;
+        const status = result.reused ? 'reused' : complete ? 'complete' : result.ok && result.recordsFetched > 0 ? 'partial' : 'failed';
+        sourceOutcomes[source] = { status };
+        logRuntimeOperation('email_source_result', {
+            ...trace, source, status, complete, records: result.recordsFetched || 0,
+            httpStatus: result.httpStatus ?? null, errorCode: result.errorCode ?? null
+        });
+    }
+
     const alerts = normalizeCollection(alertsResult.records, 'alerts');
     const incidents = normalizeCollection(incidentsResult.records, 'incidents');
 
@@ -11482,7 +11561,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
     });
 
     const processedAlerts = emailAlerts.map((alert, index) => {
-        const userStates = Array.isArray(alert.userStates) ? alert.userStates : [];
+        const userStates = readEmailAlertTargets(alert);
         const firstUser = userStates[0] || {};
 
         return {
@@ -11499,10 +11578,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
             source: alert.serviceSource || alert.vendorInformation?.provider || 'Microsoft Security',
             vendorInformation: alert.vendorInformation?.provider || 'Microsoft Security',
             detectionSource: alert.detectionSource || null,
-            userStates: userStates.map(user => ({
-                aadUserId: user.aadUserId || user.userId || null,
-                accountName: user.accountName || user.userPrincipalName || 'Unknown'
-            }))
+            userStates
         };
     });
 
@@ -11539,29 +11615,9 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
         ? Math.round((resolvedAlerts / processedAlerts.length) * 100)
         : 100;
 
-    const affectedUsersSet = new Set();
-    const userThreatCount = {};
-
-    processedAlerts.forEach(alert => {
-        const users = Array.isArray(alert.userStates) && alert.userStates.length
-            ? alert.userStates
-            : [{ accountName: alert.recipient }];
-
-        users.forEach(user => {
-            const name = user.accountName || user.userPrincipalName || alert.recipient;
-            if (!name || name === 'Unknown user') return;
-
-            affectedUsersSet.add(name);
-            userThreatCount[name] = (userThreatCount[name] || 0) + 1;
-        });
-    });
-
-    const affectedUsers = Array.from(affectedUsersSet);
-
-    const mostTargeted = Object.entries(userThreatCount)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([user, threatCount]) => ({ user, threatCount }));
+    const targets = countEmailAlertTargets(processedAlerts);
+    const affectedUsers = targets.map(target => target.user);
+    const mostTargeted = targets.slice(0, 10);
 
     const byType = {};
     const bySeverity = { high: 0, medium: 0, low: 0 };
@@ -11699,6 +11755,9 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
         insights,
         sourceAudit: {
             source: 'stackctrl_email_security_graph_collection',
+            attemptId,
+            ...(collectorContext.tenantId ? { sourceTenantId: collectorContext.tenantId } : {}),
+            sourceOutcomes,
             fetchedAt,
             alertsFunction: alertsResult.sourceFunction,
             incidentsFunction: incidentsResult.sourceFunction,
@@ -11973,7 +12032,9 @@ async function upsertDashboardMetricCaches() {
             },
             async email() {
                 const collectionStartedAt = new Date();
-                const emailSecurity = await fetchEmailSecurityPayloadFromApi();
+                const emailSecurity = await fetchEmailSecurityPayloadFromApi(null, {
+                    collectorContext: { companyId, tenantId, collectionTrigger: 'dashboard_cache_worker' }
+                });
                 const email = emailMetricsFromPayload(emailSecurity);
                 await writeMicrosoftDashboardCache(pool,
                     'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
@@ -12148,14 +12209,14 @@ app.get('/api/db/email-metrics', authenticateToken, async (req, res) => {
         const [rows] = await pool.query('SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [context.companyId]);
         if (rows.length > 0 && rows[0].Payload) {
             const payload = JSON.parse(rows[0].Payload);
-            if (hasCompleteEmailThreatCoverage(payload)) {
+            if (emailDashboardMatchesTenant(payload, tenantId) && hasCompleteEmailThreatCoverage(payload)) {
                 return res.json({ success: true, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, metrics: emailMetricsFromPayload(payload) });
             }
         }
         if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
         return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
             const collectionStartedAt = new Date();
-            const api = await fetchEmailMetricsFromApi();
+            const api = await fetchEmailMetricsFromApi(context.companyId, tenantId);
             await writeMicrosoftDashboardCache(pool,
                 'EmailMetricsCache', 'CompanyID, ActiveThreats, HighSeverity, UsersTargeted, OpenIncidents',
                 [context.companyId, api.activeThreats, api.highSeverity, api.usersTargeted, api.openIncidents], collectionStartedAt
@@ -12182,7 +12243,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
         if (rows.length > 0 && rows[0].Payload) {
             try {
                 const payload = JSON.parse(rows[0].Payload);
-                if (payload && payload.success) {
+                if (payload && payload.success && emailDashboardMatchesTenant(payload, tenantId)) {
                     const summary = payload.summary || {};
                     const hasMailActivityShape = Array.isArray(payload.mailActivity?.users);
                     const hasSignals = (payload.alerts || []).length > 0 ||
@@ -12198,6 +12259,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         ? hasVerifiedEmailSource(payload)
                         : (hasSignals || verifiedThreatCoverage) && hasMailActivityShape;
                     if (canServeSavedEmail) {
+                        logEmailDashboardCache('email_cache_selected', context.companyId, payload, { route: 'cache' });
                         return res.json({
                             ...payload,
                             source: 'db',
@@ -12211,7 +12273,9 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
         if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
         return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
             const collectionStartedAt = new Date();
-            const api = await fetchEmailSecurityPayloadFromApi();
+            const api = await fetchEmailSecurityPayloadFromApi(null, {
+                collectorContext: { companyId: context.companyId, tenantId, collectionTrigger: 'dashboard_cache_miss' }
+            });
             await writeVerifiedEmailDashboard(context.companyId, api, collectionStartedAt);
             return res.json({ ...api, source: 'api-fallback' });
         });
@@ -12331,12 +12395,15 @@ app.get('/api/db/backup-recovery', authenticateToken, async (req, res) => {
 
 async function serveSavedMicrosoftPayload(res, companyId, table, validate, tenant) {
     try {
-        await assertSharedGraphTenantForCompany(companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(companyId);
         const [rows] = await pool.query(
             `SELECT Payload, LastUpdated FROM ${table} WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1`, [companyId]
         );
         const payload = parseReportJson(rows[0]?.Payload, null);
-        if (!validate(payload)) return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        if (!validate(payload) || (table === 'EmailSecurityPayloadCache' && !emailDashboardMatchesTenant(payload, tenantId))) {
+            return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
+        }
+        if (table === 'EmailSecurityPayloadCache') logEmailDashboardCache('email_cache_selected', companyId, payload, { route: 'direct' });
         res.set('Cache-Control', 'no-store');
         return res.json({ ...payload, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, ...(tenant ? { tenant } : {}) });
     } catch (error) {
@@ -12383,6 +12450,10 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
         const identityUsers = identity.evidence?.find(item => item.evidenceType === 'users')?.data;
         if (identity.sourceLineage?.isComplete === true && Array.isArray(identityUsers)) {
             const fetchedAt = identity.sourceLineage.sourceFetchedAt || identity.sourceLineage.collectedAt;
+            logRuntimeOperation('identity_snapshot_selected', {
+                route: 'auto_refresh', companyId, snapshotId: identity.sourceLineage.evidenceSnapshotId ?? null,
+                collectionStartedAt: identity.sourceLineage.collectedAt ?? null, sourceFetchedAt: fetchedAt ?? null
+            });
             const signInCollection = identity.dashboardSourceMetrics?.signInCollection;
             const history = await readIdentityBackfill(pool, companyId, sourceTenantId).catch(error => {
                 console.warn('[Identity Backfill] Checkpoint read failed:', error.message);
@@ -12415,7 +12486,7 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 );
             }],
             ['email', 'EmailSecurityPayloadCache', async payload => (
-                hasVerifiedEmailSource(payload) ? payload : null
+                hasVerifiedEmailSource(payload) && emailDashboardMatchesTenant(payload, sourceTenantId) ? payload : null
             )],
             ['applications', 'ApplicationPayloadCache', async payload => (
                 payload?.success === true && Array.isArray(payload.applications) ? payload : null
@@ -12432,7 +12503,10 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
             if (!rows[0]?.Payload) continue;
             const payload = JSON.parse(rows[0].Payload);
             const verified = await validate(payload);
-            if (verified) snapshots[key] = { ...verified, source: 'db', fetchedAt: verified.fetchedAt || payload.fetchedAt || rows[0].LastUpdated };
+            if (verified) {
+                if (key === 'email') logEmailDashboardCache('email_cache_selected', companyId, verified, { route: 'auto_refresh' });
+                snapshots[key] = { ...verified, source: 'db', fetchedAt: verified.fetchedAt || payload.fetchedAt || rows[0].LastUpdated };
+            }
         }
 
         res.set('Cache-Control', 'no-store');
@@ -13957,7 +14031,10 @@ async function serveSavedSunbirdIdentity(req, res) {
         const users = snapshot.evidence.find(item => item.evidenceType === 'users')?.data;
         operation.step('identity_snapshot_load_complete', {
             isComplete: Boolean(snapshot.sourceLineage?.isComplete),
-            userCount: Array.isArray(users) ? users.length : null
+            userCount: Array.isArray(users) ? users.length : null,
+            snapshotId: snapshot.sourceLineage?.evidenceSnapshotId ?? null,
+            collectionStartedAt: snapshot.sourceLineage?.collectedAt ?? null,
+            sourceFetchedAt: snapshot.sourceLineage?.sourceFetchedAt ?? null
         });
         if (!snapshot.sourceLineage?.isComplete || !Array.isArray(users)) {
             operation.finish('unavailable', { statusCode: 503, reason: 'complete_identity_snapshot_missing' });
@@ -16832,7 +16909,7 @@ async function readIdentityDashboardMetrics(companyId, tenantId, users, metrics,
     return dashboard;
 }
 
-async function collectIdentityDashboardPayload(companyId, signal = null, publish = null) {
+async function collectIdentityDashboardPayload(companyId, signal = null, publish = null, logTrace = () => {}) {
     const tenantId = await assertSharedGraphTenantForCompany(companyId);
     const collectionStartedAt = new Date();
     const token = await getMicrosoftGraphToken();
@@ -16841,6 +16918,7 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
     const usersRequest = fetchMicrosoftUsers(token);
     const rolesRequest = fetchMicrosoftRoleAssignments(token).then(
             async assignments => {
+                logTrace('identity_source_received', { source: 'roles', records: assignments.length, complete: true });
                 if (publish && !signal?.aborted) {
                     await upsertRoleAssignmentsCache(companyId, processMicrosoftRoleAssignments(assignments), collectionStartedAt)
                         .catch(error => console.warn('[Identity Evidence] Verified role cache publication failed:', error.message));
@@ -16848,6 +16926,7 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
                 return { assignments, status: 'complete' };
             },
             error => {
+                logTrace('identity_source_received', { source: 'roles', complete: false, errorCode: error.code || null });
                 console.warn('[Identity Evidence] Role assignment enrichment unavailable:', error.message);
                 warnings.push('Administrator role assignments are unavailable; previously verified roles are retained when possible.');
                 return { assignments: [], status: 'unavailable' };
@@ -16856,8 +16935,10 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
     let users;
     try {
         users = await usersRequest;
+        logTrace('identity_source_received', { source: 'users', records: users.length, complete: true });
         signal?.throwIfAborted();
     } catch (error) {
+        if (!users) logTrace('identity_source_received', { source: 'users', complete: false, errorCode: error.code || null });
         await rolesRequest;
         throw error;
     }
@@ -16870,6 +16951,11 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
             return [];
         })
     ]);
+    logTrace('identity_source_received', {
+        source: 'sign_ins', records: signInCollection.records.length,
+        complete: signInCollection.status === 'complete', status: signInCollection.status,
+        errorCode: signInCollection.errorCode || null
+    });
     if (signInCollection.status !== 'complete') {
         warnings.push(signInCollection.status === 'partial'
             ? 'The 24-hour sign-in collection is incomplete.'
@@ -16916,31 +17002,52 @@ async function collectIdentityDashboardPayload(companyId, signal = null, publish
         signal?.throwIfAborted();
         return resolveIdentityDashboardMfa(token, user, savedMfaUsers.get(String(user.id)), tenantId);
     });
+    logTrace('identity_source_received', {
+        source: 'mfa', records: payload.users.length - payload.mfaCollection.failedUserCount,
+        complete: payload.mfaCollection.status === 'complete', status: payload.mfaCollection.status
+    });
     signal?.throwIfAborted();
     if (checkpoint && payload.users.every((user, index) =>
         user.mfaObservedAt === checkpoint.users[index].mfaObservedAt)) return null;
     return payload;
 }
 
-async function performIdentityEvidenceCollection(companyId, collectionTrigger, { signal } = {}) {
+async function performIdentityEvidenceCollection(companyId, collectionTrigger, { signal, logTrace = () => {} } = {}) {
     if (!identityEvidenceService) throw new Error('Identity evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Identity Protection';
+    let publicationAttempted = false;
     try {
         let published;
         const publish = async payload => {
             signal?.throwIfAborted();
-            published = await identityEvidenceService.persistProcessedEvidence({
-                companyId,
-                tenantKey: 'sunbird',
-                payload,
-                collectionTrigger,
-                sourceEndpoint
+            publicationAttempted = true;
+            logTrace('identity_publication', { outcome: 'attempted', records: payload.users.length });
+            try {
+                published = await identityEvidenceService.persistProcessedEvidence({
+                    companyId,
+                    tenantKey: 'sunbird',
+                    payload,
+                    collectionTrigger,
+                    sourceEndpoint
+                });
+            } catch (error) {
+                logTrace('identity_publication', { outcome: 'rejected', reason: error.code || 'publication_failed' });
+                throw error;
+            }
+            logTrace('identity_publication', {
+                outcome: 'saved', snapshotId: published.snapshotId ?? null, complete: published.isComplete ?? null
             });
         };
-        const payload = await collectIdentityDashboardPayload(companyId, signal, publish);
+        const payload = await collectIdentityDashboardPayload(companyId, signal, publish, logTrace);
         if (payload) await publish(payload);
+        else logTrace('identity_publication', {
+            outcome: 'skipped', reason: 'no_new_mfa_evidence', snapshotId: published?.snapshotId ?? null
+        });
         return published;
     } catch (error) {
+        if (!publicationAttempted) logTrace('identity_publication', {
+            outcome: 'skipped', reason: error.code || (signal?.aborted ? 'collector_aborted' : 'collection_failed')
+        });
         await identityEvidenceService.recordCollectionFailure({
             companyId,
             tenantKey: 'sunbird',
@@ -16955,7 +17062,37 @@ async function performIdentityEvidenceCollection(companyId, collectionTrigger, {
 }
 
 async function collectAndPersistIdentityEvidence(companyId, collectionTrigger = 'scheduled_30_minute', collectorContext = {}) {
-    return identityEvidenceCollectors.run({ companyId, sourceKey: 'identity', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => runOwnedDashboardCollection(companyId, "identity", signal, collectorContext.timeoutMs, () => performIdentityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
+    const trace = { attemptId: crypto.randomUUID(), companyId: Number(companyId), sourceKey: 'identity' };
+    const logTrace = (event, details) => logRuntimeOperation(event, { ...trace, ...details });
+    return identityEvidenceCollectors.run({
+        ...trace, collectionTrigger, runId: collectorContext.runId || null,
+        pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null,
+        timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS,
+        execute: ({ signal }) => identityCollectionTrace.run(trace, async () => {
+            let acquired = false;
+            try {
+                const result = await runOwnedDashboardCollection(companyId, 'identity', signal, collectorContext.timeoutMs, () => {
+                    acquired = true;
+                    logTrace('identity_ownership', { outcome: 'acquired' });
+                    return performIdentityEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal, logTrace });
+                });
+                if (result?.status === 'already_running') {
+                    logTrace('identity_ownership', { outcome: 'already_running' });
+                    logTrace('identity_publication', { outcome: 'skipped', reason: 'already_running' });
+                }
+                return result;
+            } catch (error) {
+                if (error.code === 'GRAPH_COLLECTION_OWNERSHIP_LOST' || !acquired) {
+                    logTrace('identity_ownership', {
+                        outcome: error.code === 'GRAPH_COLLECTION_OWNERSHIP_LOST' ? 'expired' : 'failed',
+                        reason: error.code || 'claim_failed'
+                    });
+                }
+                if (!acquired) logTrace('identity_publication', { outcome: 'skipped', reason: error.code || 'claim_failed' });
+                throw error;
+            }
+        })
+    });
 }
 
 async function getIdentityEvidenceCompanies() {
@@ -17109,9 +17246,9 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
     if (!emailEvidenceService) throw new Error('Email evidence storage is not initialized');
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Email Security';
     try {
-        await assertSharedGraphTenantForCompany(companyId);
+        const tenantId = await assertSharedGraphTenantForCompany(companyId);
         const collectionStartedAt = new Date();
-        const payload = await fetchEmailSecurityPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, sourceKey: 'email_security' } });
+        const payload = await fetchEmailSecurityPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, tenantId, collectionTrigger, sourceKey: 'email_security' } });
         const dashboardPayload = buildEmailDashboardPayload({
             tenantKey: 'sunbird',
             payload
@@ -17634,7 +17771,9 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
                     throw refreshError;
                 }
             }
-            const payload = await fetchEmailSecurityPayloadFromApi();
+            const payload = await fetchEmailSecurityPayloadFromApi(null, {
+                collectorContext: { companyId, tenantId: await assertSharedGraphTenantForCompany(companyId), collectionTrigger: 'enterprise_refresh' }
+            });
             const metrics = {
                 activeThreats: payload.summary?.activeThreats || 0,
                 highSeverity: payload.summary?.highSeverityAlerts || 0,

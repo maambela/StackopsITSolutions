@@ -4,7 +4,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { identityAdapter } = require('../services/intelligence/source-adapters');
 const { buildSavedIdentityDashboard } = require('../services/intelligence/identity-dashboard-source');
-const { mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
+const { mergeVerifiedEmailSources, readEmailAlertTargets, countEmailAlertTargets } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 const client = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
@@ -206,6 +206,40 @@ test('incomplete Identity snapshots keep earlier verified aggregates and their o
     assert.equal(saved.users[0].mfaEnabled, null);
 });
 
+test('Email targets combine native Graph user and mailbox evidence with legacy formats', () => {
+    const first = { evidence: [
+        { '@odata.type': '#microsoft.graph.security.userEvidence', userAccount: {
+            azureAdUserId: 'object-id-A', userPrincipalName: 'target@example.test'
+        } },
+        { '@odata.type': '#microsoft.graph.security.mailboxEvidence', primaryAddress: 'Target@example.test' },
+        { '@odata.type': '#microsoft.graph.security.ipEvidence' }
+    ] };
+    const second = { userStates: [{ aadUserId: 'object-id-a', accountName: 'new-name@example.test' }] };
+    const third = { evidence: [{ '@odata.type': '#microsoft.graph.security.mailboxEvidence', primaryAddress: 'second@example.test' }] };
+    const targets = countEmailAlertTargets([first, second, third].map(alert => ({ userStates: readEmailAlertTargets(alert) })));
+    assert.deepEqual(targets, [
+        { user: 'new-name@example.test', threatCount: 2 },
+        { user: 'second@example.test', threatCount: 1 }
+    ]);
+});
+
+test('reused Exchange data keeps its old provenance as Defender source evidence advances', () => {
+    const activityAt = '2026-11-24T17:00:00.000Z';
+    const incomingAt = '2026-11-24T17:05:00.000Z';
+    const previous = { success: true, fetchedAt: activityAt, mailActivity: { users: [{ reportRefreshDate: '2026-11-23' }] },
+        sourceAudit: { sourceTenantId: 'tenant-a', mailActivityOk: true, sourceTimestamps: { mailActivity: activityAt },
+            sourceAttemptIds: { mailActivity: 'previous' } } };
+    const incoming = { success: true, sourceAudit: { sourceTenantId: 'tenant-a', attemptId: 'new', mailActivityOk: true,
+        alertsComplete: true, sourceOutcomes: { alerts: { status: 'complete' }, mailActivity: { status: 'reused' } } } };
+    const merged = mergeVerifiedEmailSources(previous, incoming, new Date(incomingAt));
+    assert.equal(merged.sourceAudit.sourceTimestamps.mailActivity, activityAt);
+    assert.equal(merged.sourceAudit.sourceAttemptIds.mailActivity, 'previous');
+    assert.equal(merged.sourceAudit.sourceAttemptIds.alerts, 'new');
+    const isolated = mergeVerifiedEmailSources(previous, { ...incoming, sourceAudit: { ...incoming.sourceAudit, sourceTenantId: 'tenant-b' } }, new Date(incomingAt));
+    assert.equal(isolated.sourceAudit.mailActivityOk, false);
+    assert.equal(isolated.mailActivity, undefined);
+});
+
 test('Email targeted users never use mailbox activity and an empty alert set stays unscored', () => {
     const element = {};
     const ui = vm.runInNewContext([
@@ -223,6 +257,17 @@ test('Email targeted users never use mailbox activity and an empty alert set sta
     assert.doesNotMatch(element.innerHTML, /100%/);
     model.evidence.affectedUsers.push({ user: 'fixture@example.test', threatCount: 2 });
     assert.equal(ui.chart(model)[0].value, 2);
+});
+
+test('Email charts distinguish verified zero, missing coverage, and an incomplete refresh', () => {
+    const chart = vm.runInNewContext(section(client, 'function emailAlertChartStatus', 'function renderSunbirdEmailRiskTrendChart') +
+        '\nemailAlertChartStatus;', { microsoftDashboardUpdateText: () => 'Outdated · Updated 23 Nov' });
+    assert.equal(chart({}).verified, false);
+    assert.equal(chart({ sourceAudit: { sourceOutcomes: { alerts: { status: 'failed' } } } }).label, 'Collection failed');
+    assert.equal(chart({ sourceAudit: { alertsComplete: true, sourceTimestamps: { alerts: '2026-11-23T10:00Z' } } }).verified, true);
+    assert.match(chart({ fetchedAt: '2026-11-23T10:00Z', sourceAudit: {
+        alertsComplete: true, sourceOutcomes: { alerts: { status: 'partial' } }
+    } }).label, /^Refresh incomplete · Outdated/);
 });
 
 test('Email snapshots publish each verified source independently and reject late results', () => {

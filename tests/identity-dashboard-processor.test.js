@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { createTrackedCollectorRegistry } = require('../services/intelligence/collector-runtime');
 
 const { buildIdentityDashboardPayload } = require('../services/intelligence/identity-dashboard-processor');
 const { deriveIdentityEvidence } = require('../services/intelligence/identity-evidence-store');
@@ -11,11 +14,23 @@ const FIXED_NOW = new Date('2026-11-23T12:00:00.000Z');
 test('Identity saves verified inventory before checking MFA and can retry after a failed users request', async () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
     const start = source.indexOf('async function collectIdentityDashboardPayload');
-    const end = source.indexOf('async function collectAndPersistIdentityEvidence', start);
+    const end = source.indexOf('async function getIdentityEvidenceCompanies', start);
     const calls = [];
+    const events = [];
     let failUsers = true;
     let refreshMfa = false;
-    const collect = vm.runInNewContext(source.slice(start, end) + '\nperformIdentityEvidenceCollection;', {
+    let claimStatus = 'acquired';
+    let rejectPublication = false;
+    const identityCollectionTrace = new AsyncLocalStorage();
+    const loggerStart = source.indexOf('function logRuntimeOperation');
+    const loggerEnd = source.indexOf('const collectorRuntimeLogger', loggerStart);
+    const { collect, log } = vm.runInNewContext(source.slice(loggerStart, loggerEnd) + source.slice(start, end) +
+        '\n({ collect: collectAndPersistIdentityEvidence, log: logRuntimeOperation });', {
+        crypto, identityCollectionTrace, STACKCTRL_COLLECTOR_TIMEOUT_MS: 6000,
+        identityEvidenceCollectors: createTrackedCollectorRegistry({ logger: { info: (_prefix, data) => events.push(data) } }),
+        runOwnedDashboardCollection: async (_company, _source, _signal, _timeout, run) =>
+            claimStatus === 'acquired' ? run() : { status: claimStatus },
+        runtimeSnapshot: () => ({}),
         assertSharedGraphTenantForCompany: async () => 'tenant-fixture',
         getMicrosoftGraphToken: async () => 'fixture',
         fetchMicrosoftUsers: async () => {
@@ -31,20 +46,22 @@ test('Identity saves verified inventory before checking MFA and can retry after 
         readVerifiedIdentityMfa: () => null,
         resolveIdentityDashboardMfa: async () => {
             calls.push('mfa');
+            log('graph_request_failed', { label: 'Microsoft Graph authentication methods for private-user', error: 'private details' });
             if (!refreshMfa) throw new Error('MFA timeout');
             return { enabled: true, count: 1, observedAt: FIXED_NOW.toISOString() };
         },
         identityEvidenceService: {
             recordCollectionFailure: async () => calls.push('failed'),
             persistProcessedEvidence: async ({ payload }) => {
+                if (rejectPublication) throw Object.assign(new Error('ownership lost'), { code: 'GRAPH_COLLECTION_OWNERSHIP_LOST' });
                 calls.push(payload.users[0].mfaEnabled === true ? 'saved MFA' : 'saved inventory');
-                return payload;
+                return { snapshotId: 11746, isComplete: true };
             }
         },
         buildIdentityDashboardPayload,
         hasRealMfaMethod: () => true,
         mapWithConcurrency: (items, _limit, worker) => Promise.all(items.map(worker)),
-        console,
+        console: { ...console, log: (_prefix, data) => events.push(JSON.parse(data)) },
         process
     });
     await assert.rejects(collect(1, 'test'), /users timeout/);
@@ -55,6 +72,32 @@ test('Identity saves verified inventory before checking MFA and can retry after 
     calls.length = 0;
     await collect(1, 'test');
     assert.deepEqual(calls, ['users', 'saved roles', 'saved inventory', 'mfa', 'saved MFA']);
+    assert.ok(events.some(event => event.outcome === 'saved' && event.snapshotId === 11746 && event.attemptId));
+    assert.ok(events.some(event => event.event === 'snapshot_source_refresh_failed' && event.attemptId));
+    const graphEvent = events.find(event => event.event === 'graph_request_failed');
+    assert.equal(graphEvent.label, 'Microsoft Graph authentication methods');
+    assert.equal(graphEvent.error, undefined);
+    assert.ok(graphEvent.attemptId);
+    assert.equal(identityCollectionTrace.getStore(), undefined);
+    log('graph_request_start', { label: 'Unrelated Graph request' });
+    assert.equal(events.at(-1).attemptId, undefined);
+
+    claimStatus = 'already_running';
+    const beforeSkip = events.length;
+    assert.equal((await collect(1, 'test')).status, 'already_running');
+    const skipped = events.slice(beforeSkip);
+    assert.deepEqual(skipped.map(event => event.event), [
+        'snapshot_source_refresh_started', 'identity_ownership', 'identity_publication', 'snapshot_source_refresh_skipped'
+    ]);
+    assert.equal(skipped.at(-1).reason, 'already_running');
+    assert.ok(skipped.every(event => event.attemptId === skipped[0].attemptId));
+    assert.notEqual(skipped[0].attemptId, graphEvent.attemptId);
+
+    claimStatus = 'acquired';
+    rejectPublication = true;
+    await assert.rejects(collect(1, 'test'), { code: 'GRAPH_COLLECTION_OWNERSHIP_LOST' });
+    assert.ok(events.some(event => event.event === 'identity_publication' && event.outcome === 'rejected'));
+    assert.ok(events.some(event => event.event === 'identity_ownership' && event.outcome === 'expired'));
 });
 
 test('the client does not request full history and missing dates use a short label', () => {

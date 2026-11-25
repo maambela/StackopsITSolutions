@@ -19,20 +19,21 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
         ...details
     });
 
-    async function run({ companyId, sourceKey, collectionTrigger, runId = null, pipelineExecutionId = null, signal = null, execute, timeout = timeoutMs } = {}) {
+    async function run({ companyId, sourceKey, collectionTrigger, runId = null, pipelineExecutionId = null, signal = null, execute, timeout = timeoutMs, attemptId = null } = {}) {
         const key = String(companyId);
+        const trace = attemptId ? { attemptId } : {};
         const deadlineMs = Math.max(1000, Number(timeout) || timeoutMs);
         const existing = entries.get(key);
         if (existing) {
             const ageMs = Math.max(0, now() - existing.startedAt);
             if (ageMs < existing.timeoutMs) {
-                emit('snapshot_source_refresh_joined', { companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, ageMs, ownerRunId: existing.runId, ownerPipelineExecutionId: existing.pipelineExecutionId });
+                emit('snapshot_source_refresh_joined', { ...trace, ...(existing.attemptId ? { ownerAttemptId: existing.attemptId } : {}), companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, ageMs, ownerRunId: existing.runId, ownerPipelineExecutionId: existing.pipelineExecutionId });
                 return existing.promise;
             }
             const error = timeoutError({ sourceKey: existing.sourceKey, companyId, timeoutMs: existing.timeoutMs, runId: existing.runId, pipelineExecutionId: existing.pipelineExecutionId });
             existing.controller.abort(error);
             entries.delete(key);
-            emit('snapshot_source_refresh_timeout', { companyId: Number(companyId), runId: existing.runId, pipelineExecutionId: existing.pipelineExecutionId, sourceKey: existing.sourceKey, collectionTrigger: existing.collectionTrigger, elapsedMs: ageMs, timeoutMs: existing.timeoutMs, reusedStalePromise: true, error: error.message });
+            emit('snapshot_source_refresh_timeout', { ...(existing.attemptId ? { attemptId: existing.attemptId } : {}), companyId: Number(companyId), runId: existing.runId, pipelineExecutionId: existing.pipelineExecutionId, sourceKey: existing.sourceKey, collectionTrigger: existing.collectionTrigger, elapsedMs: ageMs, timeoutMs: existing.timeoutMs, reusedStalePromise: true, error: error.message });
         }
 
         const controller = new AbortController();
@@ -40,25 +41,33 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
         else if (signal?.addEventListener) signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
         const startedAt = now();
         let timer = null;
-        const entry = { controller, startedAt, timeoutMs: deadlineMs, sourceKey, collectionTrigger, runId, pipelineExecutionId, promise: null };
+        const entry = { controller, startedAt, timeoutMs: deadlineMs, sourceKey, collectionTrigger, runId, pipelineExecutionId, attemptId, promise: null };
         const deadline = new Promise((_, reject) => {
             timer = setTimeout(() => {
                 const error = timeoutError({ sourceKey, companyId, timeoutMs: deadlineMs, runId, pipelineExecutionId });
                 controller.abort(error);
-                emit('snapshot_source_refresh_timeout', { companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: Math.max(0, now() - startedAt), timeoutMs: deadlineMs, error: error.message });
+                emit('snapshot_source_refresh_timeout', { ...trace, companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: Math.max(0, now() - startedAt), timeoutMs: deadlineMs, error: error.message });
                 reject(error);
             }, deadlineMs);
         });
-        emit('snapshot_source_refresh_started', { companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: 0 });
+        emit('snapshot_source_refresh_started', { ...trace, companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: 0 });
         const operation = Promise.resolve().then(() => execute({ signal: controller.signal, controller }));
         entry.promise = Promise.race([operation, deadline])
             .then(result => {
-                emit('snapshot_source_refresh_completed', { companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: Math.max(0, now() - startedAt) });
+                const skipped = attemptId && result?.status === 'already_running';
+                emit(skipped ? 'snapshot_source_refresh_skipped' : 'snapshot_source_refresh_completed', {
+                    ...trace, ...(skipped ? { reason: result.status } : {}), companyId: Number(companyId), runId,
+                    pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: Math.max(0, now() - startedAt)
+                });
                 return result;
             })
             .catch(error => {
                 if (error?.code !== 'STACKCTRL_COLLECTOR_TIMEOUT') {
-                    emit('snapshot_source_refresh_failed', { companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: Math.max(0, now() - startedAt), error: String(error?.message || error) });
+                    emit('snapshot_source_refresh_failed', {
+                        ...trace, companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger,
+                        elapsedMs: Math.max(0, now() - startedAt),
+                        ...(attemptId ? { errorCode: error?.code || 'IDENTITY_COLLECTION_FAILED' } : { error: String(error?.message || error) })
+                    });
                 }
                 throw error;
             })

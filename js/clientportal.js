@@ -4675,6 +4675,18 @@ function renderSunbirdEmailInsightEvidencePreview(item, model, index) {
     `;
 }
 
+function emailAlertChartStatus(model) {
+    const audit = model.sourceAudit || {};
+    const status = audit.sourceOutcomes?.alerts?.status;
+    if (audit.alertsComplete !== true) return {
+        label: status === 'failed' ? 'Collection failed' : status === 'partial' ? 'Coverage incomplete' : 'Unknown',
+        verified: false
+    };
+    const fetchedAt = audit.sourceTimestamps?.alerts || model.fetchedAt;
+    const label = fetchedAt ? microsoftDashboardUpdateText({ fetchedAt }, 60 * 60000) : 'Collection time unknown';
+    return { label: ['failed', 'partial'].includes(status) ? `Refresh incomplete · ${label}` : label, verified: true };
+}
+
 function renderSunbirdEmailCharts(model) {
     const el = document.getElementById('sunbird-email-charts');
     if (!el) return;
@@ -4682,6 +4694,11 @@ function renderSunbirdEmailCharts(model) {
     const threats = model.threats.byType || {};
     const severity = model.threats.bySeverity || {};
     const targeted = getSunbirdEmailTargetedUserChartItems(model);
+    const alertStatus = emailAlertChartStatus(model);
+    const renderAlertChart = (title, items) => alertStatus.verified && model.alerts.length > 0
+        ? renderSunbirdPieChart(`${title} · ${alertStatus.label}`, items, total)
+        : renderSunbirdDeviceBars(title, [], 1, alertStatus.verified
+            ? `0 collected alerts · ${alertStatus.label}` : alertStatus.label);
     const reportDate = model.evidence.mailActivityUsers.reduce((latest, user) =>
         /^\d{4}-\d{2}-\d{2}$/.test(user.reportRefreshDate) && user.reportRefreshDate > latest
             ? user.reportRefreshDate : latest, '');
@@ -4697,18 +4714,18 @@ function renderSunbirdEmailCharts(model) {
         ${detections ? renderSunbirdDeviceBars(
             `Email detections (${detections.windowDays === 30 ? '30 days' : '24 hours'}) · ${microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit.sourceTimestamps?.emailDetections }, 60 * 60000)}`,
             detectionItems, Math.max(1, ...detectionItems.map(item => item.value))
-        ) : renderSunbirdPieChart('Email alert types', [
+        ) : renderAlertChart('Email alert types', [
             { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },
             { label: 'Malware', value: threats.Malware || model.evidence.malwareAlerts.length, tone: 'warn' },
             { label: 'Spam', value: threats.Spam || model.evidence.spamAlerts.length, tone: 'neutral' },
             { label: 'Other', value: threats.Other || 0, tone: 'good' }
-        ], total)}
-        ${renderSunbirdPieChart('Severity distribution', [
+        ])}
+        ${renderAlertChart('Severity distribution', [
             { label: 'High', value: severity.high || 0, tone: 'bad' },
             { label: 'Medium', value: severity.medium || 0, tone: 'warn' },
             { label: 'Low', value: severity.low || 0, tone: 'good' }
-        ], total)}
-        ${renderSunbirdDeviceBars('Most targeted users', targeted, Math.max(1, ...targeted.map(item => item.value)), getEmailThreatDisplayMetrics(model).alertsAvailable ? 'No targeted users in collected alerts.' : 'Unknown')}
+        ])}
+        ${renderSunbirdDeviceBars('Most targeted users', targeted, Math.max(1, ...targeted.map(item => item.value)), alertStatus.verified ? `No targeted users in collected alerts · ${alertStatus.label}` : alertStatus.label)}
         ${renderSunbirdDeviceBars(mailFlowTitle, model.sourceAudit?.mailActivityOk === true ? [
             { label: 'Sent', value: model.summary.mailActivity?.sendCount || 0, tone: 'neutral' },
             { label: 'Received', value: model.summary.mailActivity?.receiveCount || 0, tone: 'good' },
@@ -4720,6 +4737,9 @@ function renderSunbirdEmailCharts(model) {
 }
 
 function renderSunbirdEmailRiskTrendChart(model) {
+    const status = emailAlertChartStatus(model);
+    if (!status.verified || !model.alerts.length) return renderSunbirdDeviceBars('Email alert trend', [], 1,
+        status.verified ? `0 collected alerts · ${status.label}` : status.label);
     const trend = buildSunbirdEmailRiskTrend(model.alerts);
     const width = 720;
     const height = 190;

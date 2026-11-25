@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
-const { readEmailReportRefreshDate } = require('../services/intelligence/email-dashboard-processor');
+const { readEmailReportRefreshDate, getReusableEmailReport } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 
@@ -13,7 +13,7 @@ function section(start, end) {
     return server.slice(from, to);
 }
 
-function emailActivity(fetchGraphResponseWithDeadline, rows = []) {
+function emailActivity(fetchGraphResponseWithDeadline, rows = [], context = {}) {
     return vm.runInNewContext([
         section('async function fetchEmailActivityReport', 'function isEmailSecuritySignal'),
         section('    async function fetchEmailActivitySafe', '    const [alertsSettled'),
@@ -25,13 +25,44 @@ function emailActivity(fetchGraphResponseWithDeadline, rows = []) {
         fetchGraphResponseWithDeadline,
         readEmailReportRefreshDate,
         parseGraphReportCSV: () => rows,
-        console: { warn() {}, info() {} }
+        console: { warn() {}, info() {} },
+        ...context
     });
 }
+
+test('equivalent five-minute refreshes reuse the Exchange report for the verified company and tenant', async () => {
+    const start = Date.parse('2026-11-25T01:00:00Z');
+    const rows = [{ 'User Principal Name': 'fixture@example.test', 'Report Refresh Date': '2026-11-24' }];
+    let baselineDownloads = 0;
+    let newDownloads = 0;
+    let saved;
+    for (let tick = 0; tick < 12; tick++) {
+        const now = start + tick * 5 * 60000;
+        const response = { response: { ok: true, status: 200 }, body: 'fixture CSV' };
+        await emailActivity(async () => { baselineDownloads++; return response; }, rows)();
+        const report = await emailActivity(async () => { newDownloads++; return response; }, rows, {
+            collectorContext: { companyId: 7, tenantId: 'tenant-a' },
+            pool: { query: async (_sql, args) => {
+                assert.equal(args[0], 7);
+                return [[{ Payload: saved }]];
+            } },
+            parseReportJson: payload => payload,
+            getReusableEmailReport: (payload, _now, tenant) => getReusableEmailReport(payload, now, tenant)
+        })();
+        if (!report.reused) saved = { mailActivity: { users: report.users, summary: report.summary },
+            sourceAudit: { mailActivityOk: true, sourceTenantId: 'tenant-a', mailActivityTenantId: 'tenant-a',
+                sourceTimestamps: { mailActivity: new Date(now).toISOString() } } };
+    }
+    assert.equal(baselineDownloads, 12);
+    assert.equal(newDownloads, 1);
+    assert.equal(getReusableEmailReport(saved, start + 5 * 60000, 'tenant-b'), null);
+    assert.equal(getReusableEmailReport(saved, start + 60 * 60000, 'tenant-a'), null);
+});
 
 test('Email Activity reports HTTP errors and local deadlines as unavailable', async () => {
     const cases = [
         [async () => ({ response: { ok: false, status: 403 }, body: '' }), /returned HTTP 403/],
+        [async () => ({ response: { ok: true, status: 206 }, body: 'partial CSV' }), /returned HTTP 206/],
         [async () => { throw new Error('Email activity Graph report exceeded 15000ms.'); }, /exceeded 15000ms/]
     ];
     for (const [request, warning] of cases) {
