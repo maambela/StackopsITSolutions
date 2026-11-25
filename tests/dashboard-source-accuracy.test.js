@@ -17,7 +17,7 @@ function section(source, start, end) {
 
 test('Email evidence keeps Defender alerts, mailbox activity and targeted users separate', () => {
     const elements = new Map();
-    const state = { threat: 'all', search: '', severity: 'all', status: 'all', sort: 'newest' };
+    const state = { threat: 'auto', search: '', severity: 'all', status: 'all', sort: 'newest' };
     let model;
     const { renderTable, renderVip, openUserEvidence } = vm.runInNewContext([
         section(client, 'function renderSunbirdEmailTable', 'function applySunbirdEmailTableFilter'),
@@ -60,7 +60,18 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
     assert.match(modal, /No collected alerts match this mailbox/);
     assert.doesNotMatch(modal, /Mail activity|2026-11-22/);
 
+    const savedAlerts = model.alerts;
+    model.alerts = [];
+    renderTable(model);
+    assert.match(body(), /Mailbox A/);
+    assert.equal(elements.get('sunbird-email-alert-heading').hidden, true);
+    state.threat = 'all';
+    renderTable(model);
+    assert.match(body(), /No email alerts match the current filters/);
+    assert.doesNotMatch(body(), /Mailbox A/);
+
     state.threat = 'mailflow';
+    model.alerts = savedAlerts;
     renderTable(model);
     assert.match(body(), /Mailbox A[\s\S]*2026-11-22[\s\S]*2026-11-23[\s\S]*data-label="Sent">0</);
     assert.doesNotMatch(body(), /Severity|Status|Defender phishing alert/);
@@ -328,7 +339,7 @@ test('Email Observed Alert Score uses only verified saved alert evidence and the
         evidence: { affectedUsers: [], mailActivityUsers: [{ sendCount: 1258 }] } };
     assert.equal(ui.chart(model).length, 0);
     ui.metrics(model);
-    assert.match(element.innerHTML, /Unknown/);
+    assert.match(element.innerHTML, /No alerts[\s\S]*Observed Alert Score/);
     assert.doesNotMatch(element.innerHTML, /100%/);
     assert.match(ui.health(model), /No collected alerts to resolve/);
     ui.evidence('observedAlertScore');
@@ -359,6 +370,8 @@ test('Email Observed Alert Score uses only verified saved alert evidence and the
     assert.equal(score(Array(7).fill('critical')).value, 0);
     model.sourceAudit.alertsComplete = false;
     assert.equal(ui.score(model), null);
+    ui.metrics(model);
+    assert.match(element.innerHTML, /Unknown<\/div>\s*<div[^>]+>Observed Alert Score/);
     ui.evidence('observedAlertScore');
     assert.match(element.innerHTML, /Verified email alert coverage is unavailable/);
     assert.doesNotMatch(element.innerHTML, /83%|Collected alert/);
