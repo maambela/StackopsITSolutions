@@ -60,8 +60,8 @@ const { buildDeviceDashboardPayload, normalizeDeviceAlertsPayload } = require('.
 const { createDeviceEvidenceStore } = require('./services/intelligence/device-evidence-store');
 const { createDeviceEvidenceAutomation } = require('./services/intelligence/device-evidence-automation');
 const {
-    buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts,
-    readEmailReportRefreshDate, getReusableEmailReport, readEmailAlertTargets, countEmailAlertTargets
+    buildEmailDashboardPayload, hasVerifiedEmailSource, hasEmailDashboardState, mergeVerifiedEmailSources, readEmailDetectionCounts,
+    readEmailReportRefreshDate, getReusableEmailReport, readEmailAlertTargets, countEmailAlertTargets, selectScopedEmailDashboard
 } = require('./services/intelligence/email-dashboard-processor');
 const { createEmailEvidenceStore } = require('./services/intelligence/email-evidence-store');
 const { createEmailEvidenceAutomation } = require('./services/intelligence/email-evidence-automation');
@@ -84,7 +84,7 @@ const { buildSecurityFindings, buildCloudflareFindings } = require('./services/i
 const { createSecurityFindingAiAssessment } = require('./services/intelligence/security-finding-ai-assessment');
 const { createCloudflareLogpushStore } = require('./services/intelligence/cloudflare-logpush-store');
 const { buildCloudflareLogpushFindings, buildCloudflareLogpushRawAlerts, buildCloudflareApiFindings } = require('./services/intelligence/cloudflare-logpush');
-const { runMicrosoftSecurityHuntingQuery } = require('./services/intelligence/microsoft-security-hunting');
+const { runMicrosoftSecurityHuntingQuery, SECURITY_HUNTING_QUERIES } = require('./services/intelligence/microsoft-security-hunting');
 const { fetchGraphCollectionWithRetry, fetchGraphCollectionPagesWithRetry, parseRetryAfterMs } = require('./services/intelligence/microsoft-graph-collection');
 const { graphCoordinator } = require('./services/intelligence/microsoft-graph-coordinator');
 const { getExplicitSecurityIocs, getMicrosoftThreatIndicatorIocs } = require('./services/intelligence/security-ioc');
@@ -11192,12 +11192,20 @@ function hasCompleteEmailThreatCoverage(payload) {
 async function writeVerifiedEmailDashboard(companyId, payload, collectionStartedAt) {
     const attemptId = payload?.sourceAudit?.attemptId || null;
     const trace = { companyId, attemptId };
-    if (!hasVerifiedEmailSource(payload)) {
+    if (!hasEmailDashboardState(payload)) {
         logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'skipped', reason: 'no_verified_source' });
         return;
     }
     try {
         const saved = await withCollectionPublication(pool, companyId, async connection => {
+            const [mappings] = await connection.query(
+                `SELECT mt.TenantID FROM CompanyMicrosoftMapping cm
+                 INNER JOIN MicrosoftTenants mt ON mt.ID = cm.MicrosoftTenantID
+                 WHERE cm.CompanyID = ? AND cm.IsActive = 1 LIMIT 1 FOR SHARE`, [companyId]
+            );
+            if (mappings[0]?.TenantID !== payload.sourceAudit.sourceTenantId) {
+                throw Object.assign(new Error('Email cache tenant mapping changed before publication'), { code: 'EMAIL_CACHE_TENANT_MISMATCH' });
+            }
             await connection.query(
                 'INSERT INTO EmailSecurityPayloadCache (CompanyID) VALUES (?) ON DUPLICATE KEY UPDATE CompanyID = CompanyID',
                 [companyId]
@@ -11205,12 +11213,14 @@ async function writeVerifiedEmailDashboard(companyId, payload, collectionStarted
             const [rows] = await connection.query(
                 'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ? FOR UPDATE', [companyId]
             );
-            const merged = mergeVerifiedEmailSources(parseReportJson(rows[0]?.Payload, null), payload, collectionStartedAt);
+            const previous = parseReportJson(rows[0]?.Payload, null);
+            const merged = mergeVerifiedEmailSources(previous, payload, collectionStartedAt);
             if (!merged) return null;
             merged.sourceAudit.cacheVersion = attemptId || crypto.randomUUID();
+            merged.sourceAudit.cacheSequence = (previous?.sourceAudit?.cacheSequence || 0) + 1;
             await connection.query(
                 'UPDATE EmailSecurityPayloadCache SET Payload = ?, LastUpdated = ? WHERE CompanyID = ?',
-                [JSON.stringify(merged), new Date(merged.fetchedAt), companyId]
+                [JSON.stringify(merged), merged.fetchedAt ? new Date(merged.fetchedAt) : collectionStartedAt, companyId]
             );
             return merged;
         }, { transaction: true });
@@ -11223,7 +11233,7 @@ async function writeVerifiedEmailDashboard(companyId, payload, collectionStarted
 }
 
 function emailDashboardMatchesTenant(payload, tenantId) {
-    return !payload?.sourceAudit?.sourceTenantId || payload.sourceAudit.sourceTenantId === tenantId;
+    return Boolean(tenantId) && payload?.sourceAudit?.sourceTenantId === tenantId;
 }
 
 function logEmailDashboardCache(event, companyId, payload, details = {}) {
@@ -11232,6 +11242,7 @@ function logEmailDashboardCache(event, companyId, payload, details = {}) {
         companyId, ...details, cacheVersion: audit.cacheVersion || null,
         sourceTimestamps: audit.sourceTimestamps || {},
         sourceAttemptIds: audit.sourceAttemptIds || {},
+        sourceOutcomes: audit.sourceOutcomes || {},
         alertsComplete: audit.alertsComplete === true, incidentsComplete: audit.incidentsComplete === true,
         mailActivityComplete: audit.mailActivityOk === true,
         reportRefreshDate: readEmailReportRefreshDate(payload.mailActivity?.users)
@@ -11322,13 +11333,22 @@ function normalizeGraphCollectionPayload(value, preferredKey = null) {
 
 async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal = null, collectorContext = {} } = {}) {
     const attemptId = crypto.randomUUID();
+    const collectedAt = new Date();
     const trace = { attemptId, companyId: collectorContext.companyId ?? null };
+    const publishFailure = async sourceOutcomes => {
+        if (!collectorContext.companyId || !collectorContext.tenantId || signal?.aborted) return;
+        await writeVerifiedEmailDashboard(collectorContext.companyId, {
+            success: true, sourceAudit: { attemptId, sourceTenantId: collectorContext.tenantId, sourceOutcomes }
+        }, collectedAt).catch(() => {});
+    };
     logRuntimeOperation('email_collection_attempt', { ...trace, trigger: collectorContext.collectionTrigger || null });
     let token;
     try {
         token = tokenOverride || await getMicrosoftGraphToken({ securityAlerts: true });
     } catch (error) {
         logRuntimeOperation('email_collection_failed', { ...trace, stage: 'token', errorCode: error.code || null });
+        const failed = { status: 'failed' };
+        await publishFailure({ alerts: failed, incidents: failed, mailActivity: failed });
         throw error;
     }
     const fetchedAt = new Date().toISOString();
@@ -11677,6 +11697,7 @@ async function fetchEmailSecurityPayloadFromApi(tokenOverride = null, { signal =
         error.emailSecurityStage = 'email_security_source_collection';
         error.emailSecurityWarnings = warnings;
 
+        await publishFailure(sourceOutcomes);
         throw error;
     }
 
@@ -12208,7 +12229,7 @@ app.get('/api/db/email-metrics', authenticateToken, async (req, res) => {
         const tenantId = await assertSharedGraphTenantForCompany(context.companyId);
         const [rows] = await pool.query('SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [context.companyId]);
         if (rows.length > 0 && rows[0].Payload) {
-            const payload = JSON.parse(rows[0].Payload);
+            const payload = selectScopedEmailDashboard(parseReportJson(rows[0]?.Payload, null), tenantId);
             if (emailDashboardMatchesTenant(payload, tenantId) && hasCompleteEmailThreatCoverage(payload)) {
                 return res.json({ success: true, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, metrics: emailMetricsFromPayload(payload) });
             }
@@ -12239,10 +12260,15 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
             'SELECT Payload, LastUpdated FROM EmailSecurityPayloadCache WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1',
             [context.companyId]
         );
+        if (req.query?.cacheOnly === '1') {
+            const payload = selectScopedEmailDashboard(parseReportJson(rows[0]?.Payload, null), tenantId);
+            logEmailDashboardCache('email_cache_selected', context.companyId, payload, { route: 'cache' });
+            return res.json({ ...payload, source: 'db' });
+        }
 
         if (rows.length > 0 && rows[0].Payload) {
             try {
-                const payload = JSON.parse(rows[0].Payload);
+                const payload = selectScopedEmailDashboard(parseReportJson(rows[0]?.Payload, null), tenantId);
                 if (payload && payload.success && emailDashboardMatchesTenant(payload, tenantId)) {
                     const summary = payload.summary || {};
                     const hasMailActivityShape = Array.isArray(payload.mailActivity?.users);
@@ -12255,9 +12281,7 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
                         Number(summary.activeIncidents || 0) +
                         Number(summary.mailActivity?.totalMailActivity || 0) > 0;
                     const verifiedThreatCoverage = payload.sourceAudit?.alertsComplete === true && payload.sourceAudit?.incidentsComplete === true;
-                    const canServeSavedEmail = req.query?.cacheOnly === '1'
-                        ? hasVerifiedEmailSource(payload)
-                        : (hasSignals || verifiedThreatCoverage) && hasMailActivityShape;
+                    const canServeSavedEmail = (hasSignals || verifiedThreatCoverage) && hasMailActivityShape;
                     if (canServeSavedEmail) {
                         logEmailDashboardCache('email_cache_selected', context.companyId, payload, { route: 'cache' });
                         return res.json({
@@ -12270,7 +12294,6 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
             } catch (_) {}
         }
 
-        if (req.query?.cacheOnly === '1') return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
         return await runOwnedDashboardCacheMiss(res, context.companyId, 'email_security', tenantId, async () => {
             const collectionStartedAt = new Date();
             const api = await fetchEmailSecurityPayloadFromApi(null, {
@@ -12281,6 +12304,9 @@ app.get('/api/db/email-security', authenticateToken, async (req, res) => {
         });
     } catch (error) {
         console.warn('[Dashboard Cache] Request failed', { route: req.path, error: error.message });
+        if (error.code === 'SECURITY_ALERTS_TENANT_MISMATCH') {
+            return res.json({ success: true, fetchedAt: null, sourceAudit: { scopeUnavailable: true } });
+        }
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 });
@@ -12399,15 +12425,20 @@ async function serveSavedMicrosoftPayload(res, companyId, table, validate, tenan
         const [rows] = await pool.query(
             `SELECT Payload, LastUpdated FROM ${table} WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1`, [companyId]
         );
-        const payload = parseReportJson(rows[0]?.Payload, null);
-        if (!validate(payload) || (table === 'EmailSecurityPayloadCache' && !emailDashboardMatchesTenant(payload, tenantId))) {
+        const saved = parseReportJson(rows[0]?.Payload, null);
+        const isEmail = table === 'EmailSecurityPayloadCache';
+        const payload = isEmail ? selectScopedEmailDashboard(saved, tenantId) : saved;
+        if (!isEmail && !validate(payload)) {
             return res.status(503).json({ success: false, status: 'unavailable', message: 'Temporarily unavailable' });
         }
-        if (table === 'EmailSecurityPayloadCache') logEmailDashboardCache('email_cache_selected', companyId, payload, { route: 'direct' });
+        if (isEmail) logEmailDashboardCache('email_cache_selected', companyId, payload, { route: 'direct' });
         res.set('Cache-Control', 'no-store');
-        return res.json({ ...payload, source: 'db', fetchedAt: payload.fetchedAt || rows[0].LastUpdated, ...(tenant ? { tenant } : {}) });
+        return res.json({ ...payload, source: 'db', fetchedAt: isEmail ? payload.fetchedAt : payload.fetchedAt || rows[0].LastUpdated, ...(tenant ? { tenant } : {}) });
     } catch (error) {
         console.warn('[Dashboard] Saved Microsoft data unavailable:', error.message);
+        if (table === 'EmailSecurityPayloadCache' && error.code === 'SECURITY_ALERTS_TENANT_MISMATCH') {
+            return res.json({ success: true, fetchedAt: null, sourceAudit: { scopeUnavailable: true } });
+        }
         return res.status(error.statusCode || 503).json({ success: false, message: 'Temporarily unavailable' });
     }
 }
@@ -12485,9 +12516,7 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                     canViewSecurityDiagnostics(req.user)
                 );
             }],
-            ['email', 'EmailSecurityPayloadCache', async payload => (
-                hasVerifiedEmailSource(payload) && emailDashboardMatchesTenant(payload, sourceTenantId) ? payload : null
-            )],
+            ['email', 'EmailSecurityPayloadCache', async payload => selectScopedEmailDashboard(payload, sourceTenantId)],
             ['applications', 'ApplicationPayloadCache', async payload => (
                 payload?.success === true && Array.isArray(payload.applications) ? payload : null
             )],
@@ -12500,12 +12529,12 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
                 `SELECT Payload, LastUpdated FROM ${table} WHERE CompanyID = ? ORDER BY LastUpdated DESC LIMIT 1`,
                 [companyId]
             );
-            if (!rows[0]?.Payload) continue;
-            const payload = JSON.parse(rows[0].Payload);
+            if (!rows[0]?.Payload && key !== 'email') continue;
+            const payload = key === 'email' ? parseReportJson(rows[0]?.Payload, null) : JSON.parse(rows[0].Payload);
             const verified = await validate(payload);
             if (verified) {
                 if (key === 'email') logEmailDashboardCache('email_cache_selected', companyId, verified, { route: 'auto_refresh' });
-                snapshots[key] = { ...verified, source: 'db', fetchedAt: verified.fetchedAt || payload.fetchedAt || rows[0].LastUpdated };
+                snapshots[key] = { ...verified, source: 'db', fetchedAt: key === 'email' ? verified.fetchedAt : verified.fetchedAt || payload.fetchedAt || rows[0].LastUpdated };
             }
         }
 
@@ -12519,7 +12548,10 @@ app.get('/api/db/microsoft-dashboard-snapshots', authenticateToken, async (req, 
         return res.json({ success: true, companyId, snapshots: completeSnapshots });
     } catch (error) {
         console.warn('[Dashboard Snapshots] Read-only refresh failed:', error.message);
-        return res.status(error.statusCode || 503).json({ success: false, message: 'Saved dashboard data is temporarily unavailable.' });
+        return res.status(error.statusCode || 503).json({
+            success: false, message: 'Saved dashboard data is temporarily unavailable.',
+            ...(error.code === 'SECURITY_ALERTS_TENANT_MISMATCH' ? { emailScopeUnavailable: true } : {})
+        });
     }
 });
 
@@ -16289,6 +16321,9 @@ app.post('/api/security-events/audit', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/security-events/hunting-query', authenticateToken, async (req, res) => {
+    if (String(req.user?.role || '').toLowerCase() !== 'admin' || !req.user?.id) {
+        return res.status(403).json({ success: false, message: 'Administrator access is required' });
+    }
     const tenant = getTenantByEmail(req.user?.email);
     if (!tenant || tenant.clientId !== 'sunbird') {
         return res.status(403).json({
@@ -16298,11 +16333,22 @@ app.post('/api/security-events/hunting-query', authenticateToken, async (req, re
         });
     }
 
-    const queryId = String(req.body?.queryId || '');
+    const queryId = req.body?.queryId;
+    if (typeof queryId !== 'string' || !Object.hasOwn(SECURITY_HUNTING_QUERIES, queryId)) {
+        return res.status(400).json({ success: false, error: 'UNSUPPORTED_SECURITY_HUNTING_QUERY' });
+    }
+    if (queryId !== 'identityLogons30d' && process.env.EMAIL_SECURITY_HUNTING_ENABLED !== 'true') {
+        return res.status(503).json({ success: false, message: 'Email Security hunting is disabled' });
+    }
+    const rateKey = `security_hunting_${req.user.id}`;
+    const now = Date.now();
+    if ((rateLimitStore.get(rateKey)?.[0] ?? -Infinity) > now - RATE_LIMIT_WINDOW) {
+        res.set('Retry-After', '60');
+        return res.status(429).json({ success: false, message: 'Try again in one minute' });
+    }
+    rateLimitStore.set(rateKey, [now]);
     try {
-        const token = ['emailDetections24h', 'emailDetections30d'].includes(queryId)
-            ? await getSecurityAlertsGraphTokenForCompany(tenant.companyId)
-            : await getMicrosoftGraphToken({ securityAlerts: true });
+        const token = await getSecurityAlertsGraphTokenForCompany(tenant.companyId);
         const result = await runMicrosoftSecurityHuntingQuery({
             token,
             queryId
@@ -17215,12 +17261,13 @@ async function collectDeviceEvidenceForConfiguredTenants({ trigger = 'scheduled_
 async function refreshEmailDetectionSnapshot(companyId, signal) {
     const startedAt = new Date();
     try {
+        const tenantId = await assertSharedGraphTenantForCompany(companyId);
         const [rows] = await pool.query(
             'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [companyId]
         );
         const saved = parseReportJson(rows[0]?.Payload, null);
         const age = startedAt.getTime() - Date.parse(saved?.sourceAudit?.sourceTimestamps?.emailDetections);
-        if (saved?.emailDetections?.windowDays === 30 && age >= 0 && age < 60 * 60000) return;
+        if (emailDashboardMatchesTenant(saved, tenantId) && saved?.emailDetections?.windowDays === 30 && age >= 0 && age < 60 * 60000) return;
         signal?.throwIfAborted();
         const token = await getSecurityAlertsGraphTokenForCompany(companyId);
         signal?.throwIfAborted();
@@ -17232,7 +17279,8 @@ async function refreshEmailDetectionSnapshot(companyId, signal) {
         }
         signal?.throwIfAborted();
         await writeVerifiedEmailDashboard(companyId, {
-            success: true, emailDetections: { ...emailDetections, windowDays: 30 }, sourceAudit: { emailDetectionsComplete: true }
+            success: true, emailDetections: { ...emailDetections, windowDays: 30 },
+            sourceAudit: { sourceTenantId: tenantId, emailDetectionsComplete: true }
         }, startedAt);
         console.info('[Email Security] Hunting detection counts saved', { companyId, ...emailDetections });
     } catch (error) {

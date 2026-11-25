@@ -49,12 +49,12 @@ async function runMicrosoftSecurityHuntingQuery({
     if (!token) throw new Error('A Microsoft Graph access token is required');
     if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required');
 
-    const queryDefinition = SECURITY_HUNTING_QUERIES[queryId];
-    if (!queryDefinition) {
+    if (!Object.hasOwn(SECURITY_HUNTING_QUERIES, queryId)) {
         const error = new Error('Unsupported security hunting query');
         error.code = 'UNSUPPORTED_SECURITY_HUNTING_QUERY';
         throw error;
     }
+    const queryDefinition = SECURITY_HUNTING_QUERIES[queryId];
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

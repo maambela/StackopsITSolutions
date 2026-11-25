@@ -1,10 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vm = require('node:vm');
 const { randomUUID } = require('node:crypto');
 const mysql = require('mysql2/promise');
 const { acquireClaim, claimKey, renewClaim, releaseClaim, runWithCollectionOwnership, withCollectionPublication } =
     require('../services/intelligence/graph-collection-ownership');
+const { hasEmailDashboardState, mergeVerifiedEmailSources, readEmailReportRefreshDate } =
+    require('../services/intelligence/email-dashboard-processor');
 
 test('isolated MySQL serializes claims, fences old writers and rolls back failed publication', {
     skip: process.env.STACKCTRL_ISOLATED_MYSQL_TEST !== '1'
@@ -40,6 +43,8 @@ test('isolated MySQL serializes claims, fences old writers and rolls back failed
             const otherTenant = await acquireClaim(secondConnection, claimKey(1, 'tenant-b', 'identity'), 1, 'identity', 60000, 'other-tenant');
             assert.ok(otherCompany && otherTenant);
             await releaseClaim(firstConnection, owned[0]);
+            await releaseClaim(secondConnection, otherCompany);
+            await releaseClaim(secondConnection, otherTenant);
         } finally {
             firstConnection.release();
             secondConnection.release();
@@ -98,6 +103,42 @@ test('isolated MySQL serializes claims, fences old writers and rolls back failed
         await assert.rejects(runWithCollectionOwnership(pool, scope, () => publish(2, 'wrong-company')), {
             code: 'GRAPH_COLLECTION_OWNERSHIP_LOST'
         });
+
+        await pool.query('CREATE TABLE MicrosoftTenants (ID INT PRIMARY KEY, TenantID VARCHAR(50)) ENGINE=InnoDB');
+        await pool.query('CREATE TABLE CompanyMicrosoftMapping (CompanyID INT PRIMARY KEY, MicrosoftTenantID INT, IsActive TINYINT) ENGINE=InnoDB');
+        await pool.query('CREATE TABLE EmailSecurityPayloadCache (CompanyID INT PRIMARY KEY, Payload LONGTEXT, LastUpdated DATETIME(3)) ENGINE=InnoDB');
+        await pool.query("INSERT INTO MicrosoftTenants VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+        await pool.query('INSERT INTO CompanyMicrosoftMapping VALUES (1, 1, 1)');
+        const from = source.indexOf('async function writeVerifiedEmailDashboard');
+        const to = source.indexOf('function hasCompleteSecurityDashboard', from);
+        const writeEmail = vm.runInNewContext(source.slice(from, to) + '\nwriteVerifiedEmailDashboard;', {
+            pool, hasEmailDashboardState, mergeVerifiedEmailSources, readEmailReportRefreshDate,
+            withCollectionPublication, parseReportJson: (payload, fallback) => payload ? JSON.parse(payload) : fallback,
+            crypto: { randomUUID }, logRuntimeOperation() {}
+        });
+        const email = (tenant, status) => ({ success: true, summary: { activeThreats: status === 'complete' ? 3 : 0 },
+            sourceAudit: { sourceTenantId: tenant, alertsComplete: status === 'complete', sourceOutcomes: { alerts: { status } } } });
+        const write = (tenant, status, minute) => runWithCollectionOwnership(pool, { ...scope, tenantId: tenant, ttlMs: 10000 },
+            () => writeEmail(1, email(tenant, status), new Date(`2026-11-25T10:${minute}:00Z`)));
+        const read = async () => {
+            const [[row]] = await pool.query('SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = 1');
+            return JSON.parse(row.Payload);
+        };
+        await write('tenant-a', 'complete', '00');
+        await write('tenant-a', 'failed', '01');
+        const retained = await read();
+        assert.equal(retained.summary.activeThreats, 3);
+        assert.equal(retained.sourceAudit.cacheSequence, 2);
+        assert.equal(retained.sourceAudit.sourceOutcomes.alerts.status, 'failed');
+        await write('tenant-a', 'failed', '02');
+        assert.equal((await read()).sourceAudit.cacheSequence, 2);
+        await pool.query('UPDATE CompanyMicrosoftMapping SET MicrosoftTenantID = 2 WHERE CompanyID = 1');
+        await assert.rejects(write('tenant-a', 'complete', '03'), { code: 'EMAIL_CACHE_TENANT_MISMATCH' });
+        await write('tenant-b', 'failed', '04');
+        const isolated = await read();
+        assert.equal(isolated.summary.activeThreats, undefined);
+        assert.equal(isolated.sourceAudit.alertsComplete, false);
+        assert.equal(isolated.sourceAudit.cacheSequence, 3);
     } finally {
         await pool?.end();
         if (created) await admin.query('DROP DATABASE ??', [database]);

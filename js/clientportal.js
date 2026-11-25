@@ -1726,7 +1726,7 @@ async function fetchEmailCardData() {
             throw new Error(data.message || 'Failed to fetch email metrics');
         }
 
-        if (isOlderMicrosoftDashboardData(data, latestEmailCardData)) return;
+        if (shouldIgnoreEmailDashboard(data, latestEmailCardData)) return;
         if (retainVerifiedEmailDashboard(latestEmailCardData, data)) {
             project.lastUpdate = microsoftDashboardUpdateText(latestEmailCardData);
             displayCurrentProject();
@@ -4251,7 +4251,7 @@ window.applySunbirdDeviceTableFilter = applySunbirdDeviceTableFilter;
 window.toggleSunbirdDeviceInsightEvidenceLock = toggleSunbirdDeviceInsightEvidenceLock;
 window.handleSunbirdDeviceInsightEvidenceKey = handleSunbirdDeviceInsightEvidenceKey;
 
-const SUNBIRD_EMAIL_CACHE_KEY = 'sunbirdEmailSecurityDashboardSnapshot';
+const SUNBIRD_EMAIL_CACHE_KEY = 'sunbirdEmailSecurityDashboardSnapshotScoped';
 let sunbirdEmailDashboardData = null;
 let sunbirdEmailTableState = {
     search: '',
@@ -4283,7 +4283,7 @@ function openSunbirdEmailSecurityDashboard() {
     setupSunbirdEmailDashboard();
 
     const cached = readSunbirdEmailSnapshot();
-    if (cached && !isOlderMicrosoftDashboardData(cached, sunbirdEmailDashboardData)
+    if (cached && !shouldIgnoreEmailDashboard(cached, sunbirdEmailDashboardData)
         && !retainVerifiedEmailDashboard(sunbirdEmailDashboardData, cached)) {
         sunbirdEmailDashboardData = normalizeSunbirdEmailData(cached);
     } else if (!sunbirdEmailDashboardData && latestEmailCardData) {
@@ -4415,7 +4415,7 @@ function setupSunbirdEmailDashboard() {
 function readSunbirdEmailSnapshot() {
     try {
         const parsed = readMicrosoftDashboardCache(SUNBIRD_EMAIL_CACHE_KEY);
-        return parsed?.summary || parsed?.alerts ? parsed : null;
+        return parsed?.sourceAudit?.sourceTenantId && (parsed.summary || parsed.alerts) ? parsed : null;
     } catch (error) {
         return null;
     }
@@ -4423,6 +4423,11 @@ function readSunbirdEmailSnapshot() {
 
 function saveSunbirdEmailSnapshot(data) {
     if (!data?.summary && !data?.alerts) return;
+    const prior = readSunbirdEmailSnapshot();
+    if (prior && (data.sourceAudit?.scopeUnavailable ||
+        (data.sourceAudit?.sourceTenantId && data.sourceAudit.sourceTenantId !== prior.sourceAudit.sourceTenantId))) {
+        sessionStorage.removeItem(SUNBIRD_EMAIL_CACHE_KEY);
+    }
     writeMicrosoftDashboardCache(SUNBIRD_EMAIL_CACHE_KEY, {
         ...data,
         savedAt: new Date().toISOString()
@@ -4441,7 +4446,7 @@ async function loadSunbirdEmailDashboardData() {
         });
         const cachedData = await cachedResponse.json();
         if (!cachedResponse.ok || !cachedData.success) throw new Error(cachedData.message || 'Cached email security unavailable');
-        if (isOlderMicrosoftDashboardData(cachedData, sunbirdEmailDashboardData)
+        if (shouldIgnoreEmailDashboard(cachedData, sunbirdEmailDashboardData)
             || retainVerifiedEmailDashboard(sunbirdEmailDashboardData, cachedData)) return;
         sunbirdEmailDashboardData = normalizeSunbirdEmailData(cachedData);
         saveSunbirdEmailSnapshot(sunbirdEmailDashboardData);
@@ -4461,6 +4466,7 @@ function getEmailThreatDisplayMetrics(data = {}) {
         alertsAvailable,
         incidentsAvailable,
         sourceTimestamps: audit.sourceTimestamps || {},
+        sourceOutcomes: audit.sourceOutcomes || {},
         activeThreats: (alertsAvailable ? summary.activeThreats : null) ?? 'Unknown',
         highSeverity: (alertsAvailable ? summary.highSeverityAlerts : null) ?? 'Unknown',
         targetedUsers: (alertsAvailable ? summary.affectedUsersCount : null) ?? 'Unknown',
@@ -4489,8 +4495,12 @@ function canReplaceSecurityDashboard(incoming, previous) {
 }
 
 function emailCardMetrics(threats) {
-    const updated = source => threats.sourceTimestamps?.[source]
-        ? microsoftDashboardUpdateText({ fetchedAt: threats.sourceTimestamps[source] }) : undefined;
+    const updated = source => {
+        const status = threats.sourceOutcomes?.[source]?.status;
+        const verifiedAt = threats.sourceTimestamps?.[source];
+        const label = verifiedAt ? microsoftDashboardUpdateText({ fetchedAt: verifiedAt }) : '';
+        return ['failed', 'partial'].includes(status) ? ['Refresh incomplete', label].filter(Boolean).join(' · ') : label;
+    };
     return [
         { label: 'Active Threats', value: `: ${threats.activeThreats}`, title: updated('alerts'), icon: 'fas fa-exclamation-triangle' },
         { label: 'High Severity', value: `: ${threats.highSeverity}`, title: updated('alerts'), icon: 'fas fa-circle-exclamation' },
@@ -10757,6 +10767,12 @@ async function refreshMicrosoftDashboardSnapshots() {
             const data = await response.json();
             if (!response.ok || !data.success || !Number.isInteger(Number(data.companyId))) {
                 if (response.status === 401 || response.status === 403) {
+                    if (data.emailScopeUnavailable && token === localStorage.getItem('authToken') &&
+                        scope === microsoftDashboardRefreshScopeKey() && isSessionValid()) {
+                        applyMicrosoftDashboardSnapshots({
+                            email: { success: true, fetchedAt: null, sourceAudit: { scopeUnavailable: true } }
+                        });
+                    }
                     stopAfterRequest = true;
                     stopMicrosoftDashboardAutoRefresh();
                     return;
@@ -10988,10 +11004,8 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
         }
 
         const email = snapshots.email;
-        if (isNewerVerifiedMicrosoftDashboardSnapshot(email, latestEmailCardData,
-            data => data?.success === true
-                && (data.sourceAudit?.alertsComplete === true || data.sourceAudit?.incidentsComplete === true
-                    || data.sourceAudit?.mailActivityOk === true || data.sourceAudit?.emailDetectionsComplete === true))
+        if (email?.success === true && (email.sourceAudit?.sourceTenantId || email.sourceAudit?.scopeUnavailable)
+            && !shouldIgnoreEmailDashboard(email, latestEmailCardData, true)
             && !retainVerifiedEmailDashboard(latestEmailCardData, email)) {
             latestEmailCardData = normalizeSunbirdEmailData(email);
             sunbirdEmailDashboardData = latestEmailCardData;
@@ -11060,8 +11074,28 @@ function microsoftProjectCardFooter(project, fallback) {
     return start >= 0 ? lastUpdate.slice(start) : fallback;
 }
 
+function shouldIgnoreEmailDashboard(incoming, current, requireNewer = false) {
+    if (!current) return false;
+    const next = incoming?.sourceAudit || {};
+    const prior = current.sourceAudit || {};
+    if (next.scopeUnavailable) return Boolean(requireNewer && prior.scopeUnavailable);
+    if (prior.scopeUnavailable && next.sourceTenantId) return false;
+    if (next.sourceTenantId && next.sourceTenantId !== prior.sourceTenantId) {
+        return Number.isInteger(next.cacheSequence) && Number.isInteger(prior.cacheSequence) &&
+            next.cacheSequence < prior.cacheSequence;
+    }
+    if (Number.isInteger(next.cacheSequence)) {
+        if (!Number.isInteger(prior.cacheSequence)) return false;
+        return requireNewer ? next.cacheSequence <= prior.cacheSequence : next.cacheSequence < prior.cacheSequence;
+    }
+    if (Number.isInteger(prior.cacheSequence)) return true;
+    if (requireNewer && next.sourceTenantId && !Number.isFinite(microsoftDashboardSourceTime(incoming))) return true;
+    return isOlderMicrosoftDashboardData(incoming, current);
+}
+
 function retainVerifiedEmailDashboard(previous, incoming) {
     if (!previous) return false;
+    if (incoming?.sourceAudit?.sourceTenantId || incoming?.sourceAudit?.scopeUnavailable) return false;
     const prior = getEmailThreatDisplayMetrics(previous);
     const next = getEmailThreatDisplayMetrics(incoming);
     return (prior.alertsAvailable && !next.alertsAvailable)
@@ -11085,10 +11119,20 @@ function readProjectCardCache() {
 }
 
 function saveProjectCardToCache(project) {
-    if (!project || !hasRealProjectMetrics(project)) return;
+    if (!project) return;
+    if (!hasRealProjectMetrics(project)) {
+        if (project.id === 5) {
+            const snapshot = readProjectCardCache();
+            if (Object.hasOwn(snapshot, project.id)) {
+                delete snapshot[project.id];
+                writeMicrosoftDashboardCache(PROJECT_CARD_CACHE_KEY, snapshot);
+            }
+        }
+        return;
+    }
     const snapshot = readProjectCardCache();
     snapshot[project.id] = {
-        ...(project.id === 5 ? { emailCoverageAware: 2 } : {}),
+        ...(project.id === 5 ? { emailCoverageAware: 3 } : {}),
         status: project.status,
         securityScore: project.securityScore,
         risks: project.risks,
@@ -11107,7 +11151,7 @@ function applyCachedProjectCards() {
     mockProjects.forEach(project => {
         const cached = snapshot[project.id];
         if (!cached || !Array.isArray(cached.cardMetrics)) return;
-        if (project.id === 5 && cached.emailCoverageAware !== 2) return;
+        if (project.id === 5 && cached.emailCoverageAware !== 3) return;
         if (hasRealProjectMetrics(project)) return;
 
         project.status = cached.status || 'active';

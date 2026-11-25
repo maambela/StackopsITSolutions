@@ -1,11 +1,49 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
 const {
     GRAPH_HUNTING_ENDPOINT,
+    SECURITY_HUNTING_QUERIES,
     runMicrosoftSecurityHuntingQuery
 } = require('../services/intelligence/microsoft-security-hunting');
 const { readEmailDetectionCounts, mergeVerifiedEmailSources } = require('../services/intelligence/email-dashboard-processor');
+
+test('hunting route authorizes an operator, validates selectors and limits calls before acquiring a token', async () => {
+    const server = fs.readFileSync(require.resolve('../server'), 'utf8');
+    const start = server.indexOf("app.post('/api/security-events/hunting-query'");
+    const end = server.indexOf('\n});', start) + 4;
+    const env = {};
+    let handler;
+    let tokenRequests = 0;
+    vm.runInNewContext(server.slice(start, end), {
+        app: { post: (_path, _auth, route) => { handler = route; } },
+        authenticateToken() {},
+        getTenantByEmail: () => ({ companyId: 7, clientId: 'sunbird' }),
+        SECURITY_HUNTING_QUERIES, process: { env }, rateLimitStore: new Map(), RATE_LIMIT_WINDOW: 60000,
+        getSecurityAlertsGraphTokenForCompany: async companyId => {
+            assert.equal(companyId, 7);
+            tokenRequests++;
+            return 'mock-token';
+        },
+        runMicrosoftSecurityHuntingQuery: async () => ({ results: [] })
+    });
+    async function request(queryId, role = 'admin', id = 1) {
+        const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json() {}, set() {} };
+        await handler({ user: { id, role }, body: { queryId } }, res);
+        return res.statusCode;
+    }
+    assert.equal(await request('emailDetections30d', 'client'), 403);
+    assert.equal(await request('constructor'), 400);
+    assert.equal(await request('emailDetections30d'), 503);
+    assert.equal(tokenRequests, 0);
+    env.EMAIL_SECURITY_HUNTING_ENABLED = 'true';
+    assert.equal(await request('emailDetections30d'), 200);
+    assert.equal(await request('emailDetections30d'), 429);
+    assert.equal(await request('emailDetections30d', 'admin', 2), 200);
+    assert.equal(tokenRequests, 2);
+});
 
 function graphResponse({ status = 200, body = {} } = {}) {
     return {
@@ -61,10 +99,11 @@ test('email hunting publishes aggregate detections without changing alert or inc
     assert.equal(readEmailDetectionCounts({ ...result, results: [{ ...row, Observed: 0 }] }), null);
     assert.equal(readEmailDetectionCounts({ ...result, results: [] }), null);
     const prior = { success: true, fetchedAt: '2026-11-24T10:00:00Z',
-        sourceAudit: { alertsComplete: true, incidentsComplete: true },
+        sourceAudit: { sourceTenantId: 'tenant-a', alertsComplete: true, incidentsComplete: true,
+            sourceAttemptIds: { alerts: 'verified-alerts', incidents: 'verified-incidents' } },
         summary: { activeThreats: 0, activeIncidents: 2 } };
     const saved = mergeVerifiedEmailSources(prior, {
-        success: true, emailDetections, sourceAudit: { emailDetectionsComplete: true }
+        success: true, emailDetections, sourceAudit: { sourceTenantId: 'tenant-a', emailDetectionsComplete: true }
     }, new Date('2026-11-24T11:00:00Z'));
     assert.equal(saved.summary.activeThreats, 0);
     assert.equal(saved.summary.activeIncidents, 2);

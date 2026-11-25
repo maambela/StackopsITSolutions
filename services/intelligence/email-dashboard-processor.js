@@ -79,11 +79,47 @@ function hasVerifiedEmailSource(payload) {
         payload.sourceAudit?.[coverage] === true);
 }
 
+function hasEmailDashboardState(payload) {
+    return payload?.success === true && Boolean(payload.sourceAudit?.sourceTenantId) &&
+        (hasVerifiedEmailSource(payload) || Object.keys(payload.sourceAudit.sourceOutcomes || {}).length > 0);
+}
+
+function selectScopedEmailDashboard(payload, tenantId) {
+    const audit = payload?.sourceAudit;
+    if (!tenantId || audit?.sourceTenantId !== tenantId || !hasEmailDashboardState(payload)) {
+        return { success: true, fetchedAt: null, sourceAudit: { sourceTenantId: tenantId } };
+    }
+    const scoped = { ...payload, summary: { ...payload.summary }, sourceAudit: {
+        ...audit, sourceTimestamps: { ...audit.sourceTimestamps }, sourceAttemptIds: { ...audit.sourceAttemptIds }
+    } };
+    let stripped = false;
+    for (const [source, { coverage, fields, metrics }] of Object.entries(emailSources)) {
+        if (audit[coverage] !== true) continue;
+        // The previous version tagged the row, but only newly collected sources received an attempt ID.
+        const sourceTenant = audit.sourceTenantIds?.[source];
+        if (sourceTenant === tenantId || (!sourceTenant && audit.sourceAttemptIds?.[source])) continue;
+        scoped.sourceAudit[coverage] = false;
+        delete scoped.sourceAudit.sourceTimestamps[source];
+        delete scoped.sourceAudit.sourceAttemptIds[source];
+        for (const field of fields) delete scoped[field];
+        for (const metric of metrics) delete scoped.summary[metric];
+        stripped = true;
+    }
+    if (stripped) {
+        const times = Object.values(scoped.sourceAudit.sourceTimestamps).map(Date.parse).filter(Number.isFinite);
+        scoped.fetchedAt = times.length ? new Date(Math.max(...times)).toISOString() : null;
+        scoped.sourceAudit.fetchedAt = scoped.fetchedAt;
+        delete scoped.dashboardMetrics;
+    }
+    return scoped;
+}
+
 function getReusableEmailReport(payload, now = Date.now(), tenantId) {
     const savedAt = Date.parse(payload?.sourceAudit?.sourceTimestamps?.mailActivity);
     const age = now - savedAt;
     const report = payload?.mailActivity;
-    return Boolean(tenantId) && payload?.sourceAudit?.mailActivityTenantId === tenantId &&
+    return Boolean(tenantId) && payload?.sourceAudit?.sourceTenantId === tenantId &&
+        payload.sourceAudit.mailActivityTenantId === tenantId &&
         payload?.sourceAudit?.mailActivityOk === true && age >= 0 && age < 60 * 60000 &&
         Array.isArray(report?.users) && report.summary && readEmailReportRefreshDate(report.users)
         ? report : null;
@@ -135,15 +171,15 @@ function countEmailAlertTargets(alerts) {
 }
 
 function mergeVerifiedEmailSources(previous, incoming, startedAt) {
-    if (!hasVerifiedEmailSource(incoming)) return null;
-    if (incoming.sourceAudit.sourceTenantId && previous?.sourceAudit?.sourceTenantId &&
-        previous.sourceAudit.sourceTenantId !== incoming.sourceAudit.sourceTenantId) previous = null;
+    if (!hasEmailDashboardState(incoming)) return null;
+    if (previous?.sourceAudit?.sourceTenantId !== incoming.sourceAudit.sourceTenantId) previous = null;
+    else previous = selectScopedEmailDashboard(previous, incoming.sourceAudit.sourceTenantId);
     const merged = {
         ...previous,
         ...incoming,
         summary: { ...previous?.summary, ...incoming.summary },
         sourceAudit: { ...previous?.sourceAudit, ...incoming.sourceAudit, sourceTimestamps: {},
-            sourceAttemptIds: {}, sourceOutcomes: { ...previous?.sourceAudit?.sourceOutcomes } }
+            sourceAttemptIds: {}, sourceTenantIds: {}, sourceOutcomes: { ...previous?.sourceAudit?.sourceOutcomes } }
     };
     let updated = false;
     for (const [source, { coverage, fields, metrics }] of Object.entries(emailSources)) {
@@ -154,8 +190,10 @@ function mergeVerifiedEmailSources(previous, incoming, startedAt) {
         const newReportDate = priorReportDate ? readEmailReportRefreshDate(incoming.mailActivity?.users) : null;
         const received = incoming.sourceAudit.sourceOutcomes?.[source];
         const latestAttempt = previous?.sourceAudit?.sourceOutcomes?.[source];
-        if (received && (!latestAttempt || startedAt.getTime() > Date.parse(latestAttempt.at))) {
+        const attemptIsNewer = startedAt.getTime() > Math.max(Date.parse(priorTime) || 0, Date.parse(latestAttempt?.at) || 0);
+        if (received && received.status !== 'reused' && attemptIsNewer && received.status !== latestAttempt?.status) {
             merged.sourceAudit.sourceOutcomes[source] = { ...received, at: startedAt.toISOString() };
+            updated = true;
         }
         const update = incoming.sourceAudit[coverage] === true && received?.status !== 'reused' &&
             (!priorReportDate || (newReportDate && newReportDate >= priorReportDate)) &&
@@ -166,6 +204,7 @@ function mergeVerifiedEmailSources(previous, incoming, startedAt) {
             merged.sourceAudit.sourceTimestamps[source] = update ? startedAt.toISOString() : priorTime;
             merged.sourceAudit.sourceAttemptIds[source] = update
                 ? incoming.sourceAudit.attemptId : previous.sourceAudit.sourceAttemptIds?.[source];
+            merged.sourceAudit.sourceTenantIds[source] = incoming.sourceAudit.sourceTenantId;
         }
         if (source === 'mailActivity') {
             merged.sourceAudit.mailActivityTenantId = update
@@ -177,7 +216,7 @@ function mergeVerifiedEmailSources(previous, incoming, startedAt) {
     }
     if (!updated) return null;
     const timestamps = Object.values(merged.sourceAudit.sourceTimestamps);
-    merged.fetchedAt = new Date(Math.max(...timestamps.map(Date.parse))).toISOString();
+    merged.fetchedAt = timestamps.length ? new Date(Math.max(...timestamps.map(Date.parse))).toISOString() : null;
     merged.sourceAudit.fetchedAt = merged.fetchedAt;
     delete merged.dashboardMetrics;
     return merged;
@@ -194,6 +233,6 @@ function readEmailDetectionCounts(result) {
 }
 
 module.exports = {
-    buildEmailDashboardPayload, hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailDetectionCounts,
-    readEmailReportRefreshDate, getReusableEmailReport, readEmailAlertTargets, countEmailAlertTargets
+    buildEmailDashboardPayload, hasVerifiedEmailSource, hasEmailDashboardState, mergeVerifiedEmailSources, readEmailDetectionCounts,
+    readEmailReportRefreshDate, getReusableEmailReport, readEmailAlertTargets, countEmailAlertTargets, selectScopedEmailDashboard
 };

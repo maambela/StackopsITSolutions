@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const test = require('node:test');
 const vm = require('node:vm');
-const { hasVerifiedEmailSource, mergeVerifiedEmailSources, readEmailReportRefreshDate } = require('../services/intelligence/email-dashboard-processor');
+const { hasEmailDashboardState, mergeVerifiedEmailSources, readEmailReportRefreshDate } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 function section(start, end) {
@@ -23,7 +23,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     const email = {
         success: true,
         summary: { activeThreats: 1, highSeverityAlerts: 2, affectedUsersCount: 3, activeIncidents: 4 },
-        sourceAudit: { attemptId: 'email-fixture', alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
+        sourceAudit: { attemptId: 'email-fixture', sourceTenantId: 'tenant-fixture', alertsComplete: true, incidentsComplete: true, mailActivityOk: true }
     };
     const refresh = vm.runInNewContext([
         section('async function mapWithConcurrency', 'async function getMicrosoftGraphCredentials'),
@@ -36,6 +36,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         crypto, readEmailReportRefreshDate, logRuntimeOperation: (event, details) => events.push({ event, ...details }),
         pool: {
             async query(sql, parameters) {
+                if (sql.includes('FOR SHARE')) return [[{ TenantID: 'tenant-fixture' }]];
                 if (sql.includes('SELECT')) return [[{ CompanyID: 7 }]];
                 if (sql.startsWith('UPDATE EmailSecurityPayloadCache')) {
                     writes.set('EmailSecurityPayloadCache', JSON.parse(parameters[0]));
@@ -44,7 +45,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
                 writes.set(sql.match(/INSERT INTO (\w+)/)[1], Array.from(parameters));
             }
         },
-        hasVerifiedEmailSource,
+        hasEmailDashboardState,
         mergeVerifiedEmailSources,
         parseReportJson: (value, fallback) => value ? JSON.parse(value) : fallback,
         console: { warn() {}, error: (...args) => failures.push(args.join(' ')) },

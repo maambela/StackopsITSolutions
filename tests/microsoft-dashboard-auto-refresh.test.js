@@ -83,6 +83,7 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
     const identityCard = {};
     const applier = vm.runInNewContext([
         section(client, 'function isNewerVerifiedMicrosoftDashboardSnapshot', 'function updateMicrosoftDashboardFreshnessStatus'),
+        section(client, 'function shouldIgnoreEmailDashboard', 'function hasRealProjectMetrics'),
         section(client, 'function applyMicrosoftDashboardSnapshots', 'function microsoftProjectCardFooter'),
         'applyMicrosoftDashboardSnapshots;'
     ].join('\n'), {
@@ -95,6 +96,7 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
         sunbirdDevicesDashboardData: null,
         sunbirdSecurityDashboardData: null,
         latestEmailCardData: null,
+        sunbirdEmailDashboardData: null,
         sunbirdApplicationsPayload: null,
         cachedSunbirdBackupData: null,
         microsoftUsersData: [],
@@ -102,6 +104,8 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
         microsoftDashboardRefreshScopeKey: () => 'session-A:token-A',
         microsoftDashboardSourceTime: data => Date.parse(data?.collectionStartedAt || data?.fetchedAt || data?.metrics?.LastUpdated || ''),
         normalizeSunbirdDashboardData: data => data,
+        normalizeSunbirdEmailData: data => data,
+        saveSunbirdEmailSnapshot: data => { identityCard.email = data; },
         normalizeSunbirdIdentityUser: user => user,
         buildUserRolesMap() {},
         saveSunbirdIdentitySnapshot: data => { identityCard.roles = data.roleAssignments; },
@@ -118,6 +122,21 @@ test('polling checks saved snapshots and applies newer verified data only', asyn
     };
     assert.equal(applier({ identity: incoming }), true);
     assert.equal(identityCard.updatedAt, incoming.fetchedAt);
+    const email = { success: true, fetchedAt: incoming.fetchedAt, summary: { activeThreats: 3 },
+        sourceAudit: { sourceTenantId: 'tenant-a', cacheSequence: 1, alertsComplete: true } };
+    assert.equal(applier({ email }), true);
+    const failed = { ...email, sourceAudit: { ...email.sourceAudit, cacheSequence: 2,
+        sourceOutcomes: { alerts: { status: 'failed' } } } };
+    assert.equal(applier({ email: failed }), true);
+    assert.equal(identityCard.email.sourceAudit.sourceOutcomes.alerts.status, 'failed');
+    assert.equal(identityCard.email.fetchedAt, email.fetchedAt);
+    assert.equal(identityCard.email.summary.activeThreats, 3);
+    assert.equal(applier({ email }), false);
+    assert.equal(applier({ email: { success: true, fetchedAt: null, sourceAudit: { sourceTenantId: 'tenant-b' } } }), true);
+    assert.equal(identityCard.email.summary, undefined);
+    const unavailable = { success: true, fetchedAt: null, sourceAudit: { scopeUnavailable: true } };
+    assert.equal(applier({ email: unavailable }), true);
+    assert.equal(applier({ email: unavailable }), false);
     assert.equal(applier({ identity: incoming }), false);
     assert.equal(identityCard.updatedAt, incoming.fetchedAt);
     assert.equal(applier({ identity: { ...incoming, fetchedAt: '2026-11-23T11:00:00Z' } }), false);
@@ -135,7 +154,7 @@ test('saved snapshot route is authenticated, company-scoped, and never invokes G
     assert.match(route, /CompanyID = \?/);
     assert.match(route, /refreshMode: 'stored_only'/);
     assert.match(route, /complete: key !== 'email' \|\| \(hasCompleteEmailThreatCoverage\(snapshot\)/);
-    assert.match(route, /hasVerifiedEmailSource\(payload\)/);
+    assert.match(route, /selectScopedEmailDashboard\(payload, sourceTenantId\)/);
     assert.doesNotMatch(route, /fetch[A-Za-z]*FromApi|fetchGraph/);
 });
 

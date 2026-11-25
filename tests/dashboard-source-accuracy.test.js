@@ -4,7 +4,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { identityAdapter } = require('../services/intelligence/source-adapters');
 const { buildSavedIdentityDashboard } = require('../services/intelligence/identity-dashboard-source');
-const { mergeVerifiedEmailSources, readEmailAlertTargets, countEmailAlertTargets } = require('../services/intelligence/email-dashboard-processor');
+const { mergeVerifiedEmailSources, readEmailAlertTargets, countEmailAlertTargets, selectScopedEmailDashboard } = require('../services/intelligence/email-dashboard-processor');
 
 const server = fs.readFileSync(require.resolve('../server'), 'utf8');
 const client = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
@@ -270,13 +270,48 @@ test('Email charts distinguish verified zero, missing coverage, and an incomplet
     } }).label, /^Refresh incomplete · Outdated/);
 });
 
+test('Email merge rejects legacy and remapped evidence and publishes failure transitions without changing verified values', () => {
+    const date = minute => new Date(`2026-11-24T17:${minute}:00Z`);
+    const incoming = (tenant, status, count) => ({
+        success: true, summary: { activeThreats: count },
+        sourceAudit: { sourceTenantId: tenant, alertsComplete: status === 'complete', sourceOutcomes: { alerts: { status } } }
+    });
+    const legacy = { success: true, fetchedAt: date('00').toISOString(),
+        sourceAudit: { alertsComplete: true }, summary: { activeThreats: 17 } };
+    const unknown = mergeVerifiedEmailSources(legacy, incoming('tenant-a', 'failed', 0), date('01'));
+    assert.equal(unknown.sourceAudit.alertsComplete, false);
+    assert.equal(unknown.summary.activeThreats, undefined);
+    assert.equal(unknown.fetchedAt, null);
+    const partiallyTagged = selectScopedEmailDashboard({ ...legacy, sourceAudit: {
+        ...legacy.sourceAudit, sourceTenantId: 'tenant-a', incidentsComplete: true, sourceAttemptIds: { incidents: 'known' }
+    }, summary: { ...legacy.summary, activeIncidents: 2 } }, 'tenant-a');
+    assert.equal(partiallyTagged.sourceAudit.alertsComplete, false);
+    assert.equal(partiallyTagged.summary.activeThreats, undefined);
+    assert.equal(partiallyTagged.summary.activeIncidents, 2);
+    const first = mergeVerifiedEmailSources(unknown, incoming('tenant-a', 'complete', 3), date('02'));
+    const failed = mergeVerifiedEmailSources(first, incoming('tenant-a', 'failed', 0), date('04'));
+    assert.equal(failed.summary.activeThreats, 3);
+    assert.equal(failed.fetchedAt, first.fetchedAt);
+    assert.equal(failed.sourceAudit.sourceTimestamps.alerts, date('02').toISOString());
+    assert.equal(failed.sourceAudit.sourceOutcomes.alerts.status, 'failed');
+    assert.equal(failed.sourceAudit.sourceOutcomes.alerts.at, date('04').toISOString());
+    assert.equal(mergeVerifiedEmailSources(failed, incoming('tenant-a', 'failed', 0), date('05')), null);
+    const recovered = mergeVerifiedEmailSources(failed, incoming('tenant-a', 'complete', 0), date('06'));
+    assert.equal(recovered.summary.activeThreats, 0);
+    assert.equal(recovered.sourceAudit.sourceOutcomes.alerts.status, 'complete');
+    assert.equal(mergeVerifiedEmailSources(recovered, incoming('tenant-a', 'failed', 0), date('05')), null);
+    const remapped = mergeVerifiedEmailSources(recovered, incoming('tenant-b', 'failed', 0), date('07'));
+    assert.equal(remapped.sourceAudit.alertsComplete, false);
+    assert.equal(remapped.summary.activeThreats, undefined);
+});
+
 test('Email snapshots publish each verified source independently and reject late results', () => {
     const date = minute => new Date(`2026-11-24T17:${minute}:00Z`);
-    const alerts = { success: true, sourceAudit: { alertsComplete: true },
+    const alerts = { success: true, sourceAudit: { sourceTenantId: 'tenant-a', alertsComplete: true },
         alerts: [], summary: { activeThreats: 0, highSeverityAlerts: 0 } };
-    const activity = { success: true, sourceAudit: { mailActivityOk: true },
+    const activity = { success: true, sourceAudit: { sourceTenantId: 'tenant-a', mailActivityOk: true },
         mailActivity: { users: [] }, summary: { activeMailboxes: 42 } };
-    const incidents = { success: true, sourceAudit: { incidentsComplete: true },
+    const incidents = { success: true, sourceAudit: { sourceTenantId: 'tenant-a', incidentsComplete: true },
         incidents: [], summary: { activeIncidents: 0 } };
     const first = mergeVerifiedEmailSources(null, activity, date('10'));
     const second = mergeVerifiedEmailSources(first, alerts, date('20'));
@@ -297,12 +332,12 @@ test('Email snapshots publish each verified source independently and reject late
 
 test('a late download of an older Exchange report cannot replace newer mailbox activity', () => {
     const report = (reportRefreshDate, activeMailboxes) => ({
-        success: true, sourceAudit: { mailActivityOk: true },
+        success: true, sourceAudit: { sourceTenantId: 'tenant-a', mailActivityOk: true },
         mailActivity: { users: [{ reportRefreshDate }] }, summary: { activeMailboxes }
     });
     const saved = mergeVerifiedEmailSources(null, report('2026-11-24', 42), new Date('2026-11-24T20:00:00Z'));
     const incoming = { ...report('2026-11-23', 40), alerts: [],
-        sourceAudit: { mailActivityOk: true, alertsComplete: true } };
+        sourceAudit: { sourceTenantId: 'tenant-a', mailActivityOk: true, alertsComplete: true } };
     const merged = mergeVerifiedEmailSources(saved, incoming, new Date('2026-11-24T21:00:00Z'));
     assert.equal(merged.summary.activeMailboxes, 42);
     assert.equal(merged.mailActivity.users[0].reportRefreshDate, '2026-11-24');
@@ -329,7 +364,7 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     const card = vm.runInNewContext([
         section(client, 'async function fetchEmailCardData', '// Calculate simple risk logic'),
         section(client, 'function getEmailThreatDisplayMetrics', 'function buildSunbirdEmailModel'),
-        section(client, 'function retainVerifiedEmailDashboard', 'function hasRealProjectMetrics'),
+        section(client, 'function shouldIgnoreEmailDashboard', 'function hasRealProjectMetrics'),
         'fetchEmailCardData;'
     ].join('\n'), {
         mockProjects: [project],
