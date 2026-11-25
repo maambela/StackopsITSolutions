@@ -15,6 +15,70 @@ function section(source, start, end) {
     return source.slice(from, to);
 }
 
+test('Email evidence keeps Defender alerts, mailbox activity and targeted users separate', () => {
+    const elements = new Map();
+    const state = { threat: 'all', search: '', severity: 'all', status: 'all', sort: 'newest' };
+    let model;
+    const { renderTable, renderVip, openUserEvidence } = vm.runInNewContext([
+        section(client, 'function renderSunbirdEmailTable', 'function applySunbirdEmailTableFilter'),
+        section(client, 'function renderSunbirdEmailVipPanel', 'function renderSunbirdEmailFeedPanel'),
+        section(client, 'function openSunbirdEmailUserEvidence', '\nfunction '),
+        '({ renderTable: renderSunbirdEmailTable, renderVip: renderSunbirdEmailVipPanel, openUserEvidence: openSunbirdEmailUserEvidence });'
+    ].join('\n'), {
+        document: { getElementById(id) {
+            if (!elements.has(id)) elements.set(id, { classList: { add() {} }, setAttribute() {} });
+            return elements.get(id);
+        } },
+        sunbirdEmailTableState: state,
+        escapeIdentityText: String,
+        formatSunbirdDeviceDate: String,
+        getSunbirdEmailThreatType: () => 'phishing',
+        getSunbirdEmailSender: () => 'Sender',
+        getSunbirdEmailTargetUser: () => 'Target',
+        getSunbirdEmailAction: () => 'Blocked',
+        buildSunbirdEmailModel: () => model,
+        getSunbirdEmailAlertsForUser: () => []
+    });
+    model = {
+        alerts: [{ title: 'Defender phishing alert', severity: 'high', status: 'resolved' }],
+        sourceAudit: { alertsComplete: true, mailActivityOk: true },
+        mailActivity: { reportRefreshDate: '2026-11-23' },
+        evidence: {
+            affectedUsers: [],
+            mailActivityUsers: [{ displayName: 'Mailbox A', lastActivityDate: '2026-11-22', sendCount: 0, receiveCount: 9, readCount: 3 }]
+        }
+    };
+    const body = () => elements.get('sunbird-email-body').innerHTML;
+    renderTable(model);
+    assert.match(body(), /Defender phishing alert/);
+    assert.doesNotMatch(body(), /Mailbox A/);
+    assert.equal(elements.get('sunbird-email-activity-heading').hidden, true);
+    assert.doesNotMatch(renderVip(model), /Mailbox A|mail activity event/);
+    assert.match(renderVip(model), /No targeted mailbox evidence in collected alerts/);
+    openUserEvidence('Mailbox A');
+    const modal = elements.get('sunbird-email-evidence-modal').innerHTML;
+    assert.match(modal, /No collected alerts match this mailbox/);
+    assert.doesNotMatch(modal, /Mail activity|2026-11-22/);
+
+    state.threat = 'mailflow';
+    renderTable(model);
+    assert.match(body(), /Mailbox A[\s\S]*2026-11-22[\s\S]*2026-11-23[\s\S]*data-label="Sent">0</);
+    assert.doesNotMatch(body(), /Severity|Status|Defender phishing alert/);
+    assert.equal(elements.get('sunbird-email-alert-heading').hidden, true);
+    assert.equal(elements.get('sunbird-email-status-filter').disabled, true);
+    model.sourceAudit.mailActivityOk = false;
+    renderTable(model);
+    assert.match(body(), /Mailbox activity is unavailable/);
+
+    state.threat = 'all';
+    model.alerts = [];
+    model.sourceAudit.alertsComplete = false;
+    renderTable(model);
+    assert.match(body(), /Email alert evidence is unavailable or incomplete/);
+    assert.match(renderVip(model), /Targeted mailbox evidence is unavailable/);
+    assert.equal(elements.get('sunbird-email-status-filter').disabled, false);
+});
+
 test('direct Microsoft dashboards read saved evidence, and browser fallback reads are cache-only', () => {
     const routes = {
         '/api/sunbird/identity-dashboard': /serveSavedSunbirdIdentity/,
@@ -240,21 +304,43 @@ test('reused Exchange data keeps its old provenance as Defender source evidence 
     assert.equal(isolated.mailActivity, undefined);
 });
 
-test('Email targeted users never use mailbox activity and an empty alert set stays unscored', () => {
-    const element = {};
+test('Email posture stays unscored without verified protection settings while threat counts remain visible', () => {
+    const element = { classList: { add() {} }, setAttribute() {} };
+    let model;
     const ui = vm.runInNewContext([
         section(client, 'function getEmailThreatDisplayMetrics', 'function getSecurityDashboardMetrics'),
         section(client, 'function getSunbirdEmailTargetedUserChartItems', 'function buildSunbirdEmailRecommendations'),
         section(client, 'function renderSunbirdEmailMetrics', 'function renderSunbirdEmailInsights'),
-        '({ chart: getSunbirdEmailTargetedUserChartItems, metrics: renderSunbirdEmailMetrics });'
-    ].join('\n'), { document: { getElementById: () => element }, escapeIdentityText: String });
-    const model = { sourceAudit: { alertsComplete: true, incidentsComplete: true }, alerts: [],
+        section(client, 'function renderSunbirdEmailHealthGraph', 'function renderSunbirdEmailPanels'),
+        section(client, 'function openSunbirdEmailEvidence', '\nfunction '),
+        '({ chart: getSunbirdEmailTargetedUserChartItems, metrics: renderSunbirdEmailMetrics, health: renderSunbirdEmailHealthGraph, evidence: openSunbirdEmailEvidence });'
+    ].join('\n'), {
+        document: { getElementById: () => element },
+        escapeIdentityText: String,
+        buildSunbirdEmailModel: () => model,
+        getSunbirdEmailEvidenceRows: () => [],
+        sunbirdEmailDashboardData: {}
+    });
+    model = { sourceAudit: { alertsComplete: true, incidentsComplete: true }, alerts: [],
         summary: { securityScore: 100, activeThreats: 0 },
         evidence: { affectedUsers: [], mailActivityUsers: [{ sendCount: 1258 }] } };
     assert.equal(ui.chart(model).length, 0);
     ui.metrics(model);
     assert.match(element.innerHTML, /Unknown/);
     assert.doesNotMatch(element.innerHTML, /100%/);
+    assert.match(ui.health(model), /No collected alerts to resolve/);
+
+    model.alerts.push({ severity: 'high' });
+    Object.assign(model.summary, { securityScore: 88, activeThreats: 1, threatResolutionRate: 50 });
+    ui.metrics(model);
+    assert.match(element.innerHTML, /Unknown/);
+    assert.match(element.innerHTML, />1<\/div>\s*<div[^>]+>Active Threats/);
+    assert.doesNotMatch(element.innerHTML, /88%/);
+    assert.match(ui.health(model), /Resolved[\s\S]*50%/);
+    assert.doesNotMatch(ui.health(model), /88%|Exposure/);
+    ui.evidence('protectionScore');
+    assert.match(element.innerHTML, /verified anti-phishing.*mailbox coverage/);
+    assert.doesNotMatch(element.innerHTML, /View in Table/);
     model.evidence.affectedUsers.push({ user: 'fixture@example.test', threatCount: 2 });
     assert.equal(ui.chart(model)[0].value, 2);
 });
@@ -381,7 +467,6 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
         getSunbirdMetricNumber: (values, keys, fallback) => fallback,
         buildSunbirdEmailThreatBreakdown: () => ({}),
         calculateSunbirdEmailResolutionRate: () => 0,
-        calculateSunbirdEmailSecurityScore: () => 0,
         saveSunbirdEmailSnapshot() {},
         saveProjectCardToCache() {},
         displayCurrentProject() {},

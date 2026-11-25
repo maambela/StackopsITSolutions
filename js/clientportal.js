@@ -4329,8 +4329,8 @@ function renderSunbirdEmailShell() {
                         <option value="low">Low</option>
                     </select>
                     <select id="sunbird-email-threat-filter" class="sunbird-id-select">
-                        <option value="all">All threats</option>
-                        <option value="mailflow">Mail flow</option>
+                        <option value="all">All alerts</option>
+                        <option value="mailflow">Mailbox activity</option>
                         <option value="phishing">Phishing</option>
                         <option value="malware">Malware</option>
                         <option value="spam">Spam</option>
@@ -4356,7 +4356,7 @@ function renderSunbirdEmailShell() {
                 <div class="sunbird-id-table-wrap">
                     <table class="sunbird-id-table sunbird-email-table">
                         <thead>
-                            <tr>
+                            <tr id="sunbird-email-alert-heading">
                                 <th>Time</th>
                                 <th>Threat</th>
                                 <th>Severity</th>
@@ -4367,6 +4367,14 @@ function renderSunbirdEmailShell() {
                                 <th>Action</th>
                                 <th>Category</th>
                                 <th>Evidence</th>
+                            </tr>
+                            <tr id="sunbird-email-activity-heading" hidden>
+                                <th>Mailbox</th>
+                                <th>Last activity</th>
+                                <th>Report refresh date</th>
+                                <th>Sent</th>
+                                <th>Received</th>
+                                <th>Read</th>
                             </tr>
                         </thead>
                         <tbody id="sunbird-email-body"></tbody>
@@ -4542,8 +4550,7 @@ function normalizeSunbirdEmailData(data = {}) {
             affectedUsersCount,
             activeIncidents,
             mailActivity: summary.mailActivity || mailActivity.summary || {},
-            threatResolutionRate: summary.threatResolutionRate ?? calculateSunbirdEmailResolutionRate(alerts),
-            securityScore: summary.securityScore ?? calculateSunbirdEmailSecurityScore(alerts)
+            threatResolutionRate: summary.threatResolutionRate ?? calculateSunbirdEmailResolutionRate(alerts)
         }
     };
 }
@@ -4563,28 +4570,9 @@ function buildSunbirdEmailModel(data = sunbirdEmailDashboardData) {
     const affectedUserRows = getSunbirdEmailAffectedUserRows(normalized, alerts);
     const recommendations = buildSunbirdEmailRecommendations(normalized, { highSeverityAlerts, phishingAlerts, malwareAlerts, affectedUserRows, quarantinedAlerts });
     const mailActivityUsers = Array.isArray(normalized.mailActivity?.users) ? normalized.mailActivity.users : [];
-    const tableRows = [
-        ...alerts.map(alert => ({ ...alert, rowType: 'threat' })),
-        ...mailActivityUsers.map(user => ({
-            rowType: 'mailActivity',
-            id: `mail-${user.userPrincipalName}`,
-            title: 'Exchange mailbox activity',
-            severity: 'low',
-            status: user.lastActivityDate ? 'active' : 'inactive',
-            created: user.lastActivityDate || user.reportRefreshDate,
-            category: 'Exchange Activity Report',
-            sender: user.userPrincipalName,
-            recipient: user.userPrincipalName,
-            action: `${user.sendCount || 0} sent | ${user.receiveCount || 0} received | ${user.readCount || 0} read`,
-            description: `Last activity: ${user.lastActivityDate || 'No recent activity'}`,
-            userStates: [{ accountName: user.userPrincipalName }]
-        }))
-    ];
-
     return {
         ...normalized,
         alerts,
-        tableRows,
         recommendations,
         evidence: {
             allAlerts: alerts,
@@ -4617,12 +4605,11 @@ function renderSunbirdEmailMetrics(model) {
     const el = document.getElementById('sunbird-email-metrics');
     if (!el) return;
     const threats = getEmailThreatDisplayMetrics(model);
-    const scoreAvailable = threats.alertsAvailable && model.alerts.length > 0;
     const metrics = [
         { key: 'active-threats', label: 'Active Threats', value: threats.activeThreats, tone: !threats.alertsAvailable ? 'neutral' : threats.activeThreats ? 'bad' : 'good', evidence: 'allAlerts' },
         { key: 'high-severity', label: 'High Severity', value: threats.highSeverity, tone: !threats.alertsAvailable ? 'neutral' : threats.highSeverity ? 'bad' : 'good', evidence: 'highSeverityAlerts' },
         { key: 'users-targeted', label: 'Users Targeted', value: threats.targetedUsers, tone: threats.targetedUsers > 5 ? 'warn' : 'neutral', evidence: 'affectedUsers' },
-        { key: 'security-score', label: 'Email Security Score', value: scoreAvailable ? `${model.summary.securityScore}%` : 'Unknown', tone: !scoreAvailable ? 'neutral' : model.summary.securityScore >= 80 ? 'good' : model.summary.securityScore >= 60 ? 'warn' : 'bad', evidence: 'recommendations' }
+        { key: 'security-score', label: 'Email Security Score', value: 'Unknown', tone: 'neutral', evidence: 'protectionScore' }
     ];
     el.innerHTML = metrics.map(metric => `
         <article class="sunbird-id-metric-card tone-${metric.tone}">
@@ -4796,26 +4783,19 @@ function renderSunbirdEmailRiskTrendChart(model) {
 }
 
 function renderSunbirdEmailHealthGraph(model) {
-    if (!getEmailThreatDisplayMetrics(model).alertsAvailable || !model.alerts.length) {
-        return '<article class="sunbird-id-chart-card sunbird-id-health-card"><h3>Email posture</h3><p>Unknown</p></article>';
-    }
+    const { alertsAvailable } = getEmailThreatDisplayMetrics(model);
+    const hasVerifiedAlerts = alertsAvailable && model.alerts.length > 0;
     const resolved = model.summary.threatResolutionRate || 0;
-    const score = model.summary.securityScore || 0;
-    const exposure = model.alerts.length ? Math.max(0, 100 - Math.min(100, model.evidence.highSeverityAlerts.length * 12)) : 100;
     return `
         <article class="sunbird-id-chart-card sunbird-id-health-card">
-            <h3>Email posture</h3>
-            ${[
-                { label: 'Score', value: score, tone: score >= 80 ? 'good' : 'warn' },
-                { label: 'Resolution', value: resolved, tone: resolved >= 75 ? 'good' : 'warn' },
-                { label: 'Exposure', value: exposure, tone: exposure >= 80 ? 'good' : 'warn' }
-            ].map(item => `
+            <h3>Alert resolution</h3>
+            ${hasVerifiedAlerts ? `
                 <div class="sunbird-id-health-row">
-                    <span>${item.label}</span>
-                    <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${item.tone}" style="width:${item.value}%"></div></div>
-                    <strong>${item.value}%</strong>
+                    <span>Resolved</span>
+                    <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${resolved >= 75 ? 'good' : 'warn'}" style="width:${resolved}%"></div></div>
+                    <strong>${resolved}%</strong>
                 </div>
-            `).join('')}
+            ` : `<p>${alertsAvailable ? 'No collected alerts to resolve.' : 'Alert resolution is unavailable.'}</p>`}
         </article>
     `;
 }
@@ -4832,17 +4812,7 @@ function renderSunbirdEmailPanels(model) {
 }
 
 function renderSunbirdEmailVipPanel(model) {
-    const users = model.evidence.affectedUsers.length
-        ? model.evidence.affectedUsers.slice(0, 10)
-        : model.evidence.mailActivityUsers
-            .slice()
-            .sort((a, b) => ((b.sendCount || 0) + (b.receiveCount || 0) + (b.readCount || 0)) - ((a.sendCount || 0) + (a.receiveCount || 0) + (a.readCount || 0)))
-            .slice(0, 10)
-            .map(user => ({
-                user: user.userPrincipalName,
-                threatCount: (user.sendCount || 0) + (user.receiveCount || 0) + (user.readCount || 0),
-                isMailActivity: true
-            }));
+    const users = model.evidence.affectedUsers.slice(0, 10);
     return `
         <article class="sunbird-id-signin-card">
             <h3>VIP / user risk monitoring</h3>
@@ -4853,17 +4823,17 @@ function renderSunbirdEmailVipPanel(model) {
                         <div class="sunbird-id-signin-item sunbird-email-vip-item">
                             <div>
                                 <strong>${escapeIdentityText(user.user)}</strong>
-                                <span>${user.isMailActivity ? `${user.threatCount} mail activity event${user.threatCount === 1 ? '' : 's'}` : `${user.threatCount} email threat${user.threatCount === 1 ? '' : 's'}`}</span>
+                                <span>${user.threatCount} email threat${user.threatCount === 1 ? '' : 's'}</span>
                                 <div class="sunbird-email-vip-evidence-list">
                                     ${alerts.length ? alerts.slice(0, 3).map(alert => `
                                         <small>${escapeIdentityText(formatSunbirdDateTime(alert.created || alert.createdDateTime))} - ${escapeIdentityText(alert.title || getSunbirdEmailThreatLabel(alert))}</small>
-                                    `).join('') : '<small>Exchange email activity report evidence</small>'}
+                                    `).join('') : ''}
                                 </div>
                                 <button type="button" class="sunbird-email-vip-evidence-btn" onclick='openSunbirdEmailUserEvidence(${JSON.stringify(user.user)})'>Targeted mailbox evidence</button>
                             </div>
                         </div>
                     `;
-                }).join('') : '<div class="sunbird-id-empty compact">No targeted mailbox evidence.</div>'}
+                }).join('') : `<div class="sunbird-id-empty compact">${model.sourceAudit?.alertsComplete === true ? 'No targeted mailbox evidence in collected alerts.' : 'Targeted mailbox evidence is unavailable.'}</div>`}
             </div>
         </article>
     `;
@@ -4891,9 +4861,24 @@ function renderSunbirdEmailFeedPanel(title, rows) {
 function renderSunbirdEmailTable(model = buildSunbirdEmailModel()) {
     const body = document.getElementById('sunbird-email-body');
     if (!body) return;
+    const showActivity = sunbirdEmailTableState.threat === 'mailflow';
+    document.getElementById('sunbird-email-alert-heading').hidden = showActivity;
+    document.getElementById('sunbird-email-activity-heading').hidden = !showActivity;
+    const search = document.getElementById('sunbird-email-search');
+    search.placeholder = showActivity ? 'Search mailbox activity' : 'Search email alerts';
+    for (const id of ['sunbird-email-severity-filter', 'sunbird-email-status-filter', 'sunbird-email-sort']) {
+        document.getElementById(id).disabled = showActivity;
+    }
+    if (showActivity) {
+        renderSunbirdEmailActivityRows(body, model);
+        return;
+    }
     const rows = getFilteredSunbirdEmailRows(model);
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="10" class="sunbird-id-empty">No email evidence matches the current filters.</td></tr>';
+        const message = model.sourceAudit?.alertsComplete === true
+            ? 'No email alerts match the current filters.'
+            : 'Email alert evidence is unavailable or incomplete.';
+        body.innerHTML = `<tr><td colspan="10" class="sunbird-id-empty">${message}</td></tr>`;
         return;
     }
     body.innerHTML = rows.map(alert => {
@@ -4916,9 +4901,27 @@ function renderSunbirdEmailTable(model = buildSunbirdEmailModel()) {
     }).join('');
 }
 
+function renderSunbirdEmailActivityRows(body, model) {
+    const search = sunbirdEmailTableState.search.trim().toLowerCase();
+    const available = model.sourceAudit?.mailActivityOk === true;
+    const rows = available ? model.evidence.mailActivityUsers
+        .filter(user => [user.displayName, user.userPrincipalName, user.lastActivityDate].join(' ').toLowerCase().includes(search))
+        .sort((a, b) => String(b.lastActivityDate || '').localeCompare(String(a.lastActivityDate || ''))) : [];
+    body.innerHTML = rows.length ? rows.map(user => `
+        <tr>
+            <td data-label="Mailbox">${escapeIdentityText(user.displayName || user.userPrincipalName || 'Unknown')}</td>
+            <td data-label="Last activity">${escapeIdentityText(user.lastActivityDate || '—')}</td>
+            <td data-label="Report refresh date">${escapeIdentityText(user.reportRefreshDate || model.mailActivity?.reportRefreshDate || '—')}</td>
+            <td data-label="Sent">${escapeIdentityText(user.sendCount ?? '—')}</td>
+            <td data-label="Received">${escapeIdentityText(user.receiveCount ?? '—')}</td>
+            <td data-label="Read">${escapeIdentityText(user.readCount ?? '—')}</td>
+        </tr>
+    `).join('') : `<tr><td colspan="6" class="sunbird-id-empty">${available ? 'No mailbox activity matches the current search.' : 'Mailbox activity is unavailable.'}</td></tr>`;
+}
+
 function getFilteredSunbirdEmailRows(model = buildSunbirdEmailModel()) {
     const search = sunbirdEmailTableState.search.trim().toLowerCase();
-    return model.tableRows.filter(alert => {
+    return model.alerts.filter(alert => {
         const severity = String(alert.severity || 'low').toLowerCase();
         const threat = getSunbirdEmailThreatType(alert);
         const status = String(alert.status || '').toLowerCase();
@@ -4963,9 +4966,11 @@ function openSunbirdEmailEvidence(evidenceKey) {
     const model = buildSunbirdEmailModel();
     const threats = getEmailThreatDisplayMetrics(sunbirdEmailDashboardData || {});
     const rows = getSunbirdEmailEvidenceRows(evidenceKey, model);
+    const isProtectionScore = evidenceKey === 'protectionScore';
     const modal = document.getElementById('sunbird-email-evidence-modal');
     if (!modal) return;
     const titleMap = {
+        protectionScore: 'Email Security Score',
         allAlerts: 'Threat Mail Evidence',
         highSeverityAlerts: 'High Severity Email Threats',
         phishingAlerts: 'Phishing Detections',
@@ -4985,7 +4990,9 @@ function openSunbirdEmailEvidence(evidenceKey) {
         phishingAlerts: { threat: 'phishing' },
         malwareAlerts: { threat: 'malware' },
         spamAlerts: { threat: 'spam' },
-        becAlerts: { threat: 'bec' }
+        becAlerts: { threat: 'bec' },
+        mailActivityUsers: { threat: 'mailflow' },
+        activeMailboxes: { threat: 'mailflow' }
     };
     modal.innerHTML = `
         <div class="sunbird-id-modal-backdrop" onclick="closeSunbirdEmailEvidence()"></div>
@@ -4993,15 +5000,16 @@ function openSunbirdEmailEvidence(evidenceKey) {
             <div class="sunbird-id-modal-header">
                 <div>
                     <h3>${escapeIdentityText(titleMap[evidenceKey] || 'Email Evidence')}</h3>
-                    <p>${rows.length} evidence item${rows.length === 1 ? '' : 's'} matched this set.</p>
+                    <p>${isProtectionScore ? 'A score requires verified anti-phishing, anti-spam, anti-malware, Safe Links and Safe Attachments settings and their mailbox coverage.' : `${rows.length} evidence item${rows.length === 1 ? '' : 's'} matched this set.`}</p>
                 </div>
                 <button type="button" onclick="closeSunbirdEmailEvidence()" class="sunbird-id-modal-close">&times;</button>
             </div>
-            <div class="sunbird-id-evidence-summary">
+            ${isProtectionScore ? '' : `
+            ${filterMap[evidenceKey]?.threat === 'mailflow' ? '' : `<div class="sunbird-id-evidence-summary">
                 <span>Active threats: ${threats.activeThreats}</span>
                 <span>High severity: ${threats.highSeverity}</span>
                 <span>Users targeted: ${threats.targetedUsers}</span>
-            </div>
+            </div>`}
             <div class="sunbird-id-evidence-list">
                 ${rows.length ? rows.slice(0, 100).map(row => `
                     <div class="sunbird-id-evidence-user">
@@ -5013,7 +5021,7 @@ function openSunbirdEmailEvidence(evidenceKey) {
             </div>
             <div class="sunbird-id-modal-actions">
                 <button type="button" class="sunbird-id-evidence-btn" onclick='applySunbirdEmailTableFilter(${JSON.stringify(filterMap[evidenceKey] || {})}); closeSunbirdEmailEvidence();'>View in Table</button>
-            </div>
+            </div>`}
         </div>
     `;
     modal.classList.add('open');
@@ -5023,7 +5031,6 @@ function openSunbirdEmailEvidence(evidenceKey) {
 function openSunbirdEmailUserEvidence(userName) {
     const model = buildSunbirdEmailModel();
     const alerts = getSunbirdEmailAlertsForUser(model, userName);
-    const mailUser = model.evidence.mailActivityUsers.find(user => String(user.userPrincipalName || '').toLowerCase() === String(userName || '').toLowerCase());
     const modal = document.getElementById('sunbird-email-evidence-modal');
     if (!modal) return;
 
@@ -5033,14 +5040,13 @@ function openSunbirdEmailUserEvidence(userName) {
             <div class="sunbird-id-modal-header">
                 <div>
                     <h3>${escapeIdentityText(userName)} mailbox evidence</h3>
-                    <p>${alerts.length || (mailUser ? 1 : 0)} evidence item${(alerts.length || (mailUser ? 1 : 0)) === 1 ? '' : 's'} matched this user.</p>
+                    <p>${alerts.length} collected alert${alerts.length === 1 ? '' : 's'} matched this user.</p>
                 </div>
                 <button type="button" onclick="closeSunbirdEmailEvidence()" class="sunbird-id-modal-close">&times;</button>
             </div>
             <div class="sunbird-id-evidence-summary">
                 <span>User: ${escapeIdentityText(userName)}</span>
                 <span>Threat count: ${alerts.length}</span>
-                ${mailUser ? `<span>Mail activity: ${(mailUser.sendCount || 0) + (mailUser.receiveCount || 0) + (mailUser.readCount || 0)}</span>` : ''}
             </div>
             <div class="sunbird-id-evidence-list">
                 ${alerts.length ? alerts.map(alert => `
@@ -5049,13 +5055,7 @@ function openSunbirdEmailUserEvidence(userName) {
                         <span>${escapeIdentityText(formatSunbirdDateTime(alert.created || alert.createdDateTime))}</span>
                         <small>${escapeIdentityText(`${getSunbirdEmailThreatType(alert)} | ${alert.severity || 'low'} | ${getSunbirdEmailAction(alert)}`)}</small>
                     </div>
-                `).join('') : mailUser ? `
-                    <div class="sunbird-id-evidence-user">
-                        <strong>${escapeIdentityText(mailUser.displayName || mailUser.userPrincipalName)}</strong>
-                        <span>${escapeIdentityText(mailUser.userPrincipalName)}</span>
-                        <small>${escapeIdentityText(`${mailUser.sendCount || 0} sent | ${mailUser.receiveCount || 0} received | ${mailUser.readCount || 0} read | Last activity: ${mailUser.lastActivityDate || 'N/A'}`)}</small>
-                    </div>
-                ` : '<div class="sunbird-id-empty">No evidence found for this mailbox.</div>'}
+                `).join('') : '<div class="sunbird-id-empty">No collected alerts match this mailbox.</div>'}
             </div>
             <div class="sunbird-id-modal-actions">
                 <button type="button" class="sunbird-id-evidence-btn" onclick="closeSunbirdEmailEvidence()">Close</button>
@@ -5148,17 +5148,7 @@ function calculateSunbirdEmailResolutionRate(alerts) {
     return Math.round((resolved / alerts.length) * 100);
 }
 
-function calculateSunbirdEmailSecurityScore(alerts) {
-    let score = 100;
-    alerts.slice(0, 30).forEach(alert => {
-        const severity = String(alert.severity || 'low').toLowerCase();
-        score -= severity === 'critical' ? 18 : severity === 'high' ? 12 : severity === 'medium' ? 5 : 2;
-    });
-    return Math.max(0, Math.min(100, score));
-}
-
 function getSunbirdEmailThreatType(alert) {
-    if (alert.rowType === 'mailActivity') return 'mailflow';
     const text = `${alert.title || ''} ${alert.description || ''} ${alert.category || ''}`.toLowerCase();
     if (/business email|bec|impersonation|spoof/.test(text)) return text.includes('spoof') ? 'spoofing' : 'bec';
     if (text.includes('phish')) return 'phishing';
