@@ -52,7 +52,10 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
         mailActivity: { reportRefreshDate: '2026-11-23' },
         evidence: {
             affectedUsers: [],
-            mailActivityUsers: [{ displayName: 'Mailbox A', lastActivityDate: '2026-11-22', sendCount: 0, receiveCount: 9, readCount: 3 }]
+            mailActivityUsers: [
+                { displayName: 'Mailbox A', userPrincipalName: 'mailbox-a@example.test', lastActivityDate: '2026-11-22', sendCount: 0, receiveCount: 9, readCount: 3 },
+                { displayName: 'shared@example.test', userPrincipalName: 'shared@example.test' }
+            ]
         }
     };
     const body = () => elements.get('sunbird-email-body').innerHTML;
@@ -86,6 +89,11 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
     elements.get('sunbird-email-threat-filter').change({ target: { value: 'malware' } });
     assert.match(body(), /No email alerts match the current filters/);
     elements.get('sunbird-email-show-activity').click();
+    assert.match(body(), /Mailbox A \(mailbox-a@example\.test\)/);
+    assert.match(body(), /data-label="Mailbox">shared@example\.test<\/td>/);
+    elements.get('sunbird-email-search').input({ target: { value: 'mailbox-a@example.test' } });
+    assert.match(body(), /Mailbox A \(mailbox-a@example\.test\)/);
+    assert.doesNotMatch(body(), /shared@example\.test/);
     assert.match(body(), /Mailbox A[\s\S]*2026-11-22[\s\S]*2026-11-23[\s\S]*data-label="Sent">0</);
     assert.doesNotMatch(body(), /Severity|Status|Defender phishing alert/);
     assert.equal(elements.get('sunbird-email-alert-heading').hidden, true);

@@ -4926,16 +4926,22 @@ function renderSunbirdEmailActivityRows(body, model) {
     const rows = available ? model.evidence.mailActivityUsers
         .filter(user => [user.displayName, user.userPrincipalName, user.lastActivityDate].join(' ').toLowerCase().includes(search))
         .sort((a, b) => String(b.lastActivityDate || '').localeCompare(String(a.lastActivityDate || ''))) : [];
-    body.innerHTML = rows.length ? rows.map(user => `
+    body.innerHTML = rows.length ? rows.map(user => {
+        const name = user.displayName || '';
+        const account = user.userPrincipalName || '';
+        const mailbox = name && account && name.toLowerCase() !== account.toLowerCase()
+            ? `${name} (${account})` : name || account || 'Unknown';
+        return `
         <tr>
-            <td data-label="Mailbox">${escapeIdentityText(user.displayName || user.userPrincipalName || 'Unknown')}</td>
+            <td data-label="Mailbox">${escapeIdentityText(mailbox)}</td>
             <td data-label="Last activity">${escapeIdentityText(user.lastActivityDate || '—')}</td>
             <td data-label="Report refresh date">${escapeIdentityText(user.reportRefreshDate || model.mailActivity?.reportRefreshDate || '—')}</td>
             <td data-label="Sent">${escapeIdentityText(user.sendCount ?? '—')}</td>
             <td data-label="Received">${escapeIdentityText(user.receiveCount ?? '—')}</td>
             <td data-label="Read">${escapeIdentityText(user.readCount ?? '—')}</td>
         </tr>
-    `).join('') : `<tr><td colspan="6" class="sunbird-id-empty">${available ? 'No mailbox activity matches the current search.' : 'Mailbox activity is unavailable.'}</td></tr>`;
+    `;
+    }).join('') : `<tr><td colspan="6" class="sunbird-id-empty">${available ? 'No mailbox activity matches the current search.' : 'Mailbox activity is unavailable.'}</td></tr>`;
 }
 
 function getFilteredSunbirdEmailRows(model, threatFilter) {
