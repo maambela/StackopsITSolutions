@@ -4320,7 +4320,11 @@ function renderSunbirdEmailShell() {
 
             <section class="sunbird-id-table-section">
                 <div class="sunbird-id-table-toolbar sunbird-email-table-toolbar">
-                    <input id="sunbird-email-search" class="sunbird-id-search" type="search" placeholder="Search sender, user, title, threat, severity, status">
+                    <div class="sunbird-email-view-controls" role="group" aria-label="Email evidence view and search">
+                        <button id="sunbird-email-show-alerts" class="sunbird-id-clear-btn" type="button" aria-pressed="true">Threat alerts</button>
+                        <button id="sunbird-email-show-activity" class="sunbird-id-clear-btn" type="button" aria-pressed="false">Mailbox activity</button>
+                        <input id="sunbird-email-search" class="sunbird-id-search" type="search" aria-label="Search email evidence" placeholder="Search email alerts">
+                    </div>
                     <select id="sunbird-email-severity-filter" class="sunbird-id-select">
                         <option value="all">All severity</option>
                         <option value="critical">Critical</option>
@@ -4328,14 +4332,12 @@ function renderSunbirdEmailShell() {
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
                     </select>
-                    <select id="sunbird-email-threat-filter" class="sunbird-id-select">
-                        <option value="auto">Automatic</option>
+                    <select id="sunbird-email-threat-filter" class="sunbird-id-select" aria-label="Threat category">
                         <option value="all">All alerts</option>
-                        <option value="mailflow">Mailbox activity</option>
                         <option value="phishing">Phishing</option>
                         <option value="malware">Malware</option>
                         <option value="spam">Spam</option>
-                        <option value="bec">BEC</option>
+                        <option value="bec">BEC attempts</option>
                         <option value="spoofing">Spoofing</option>
                         <option value="other">Other</option>
                     </select>
@@ -4409,16 +4411,12 @@ function setupSunbirdEmailDashboard() {
         sunbirdEmailTableState.sort = event.target.value;
         renderSunbirdEmailTable();
     });
+    document.getElementById('sunbird-email-show-alerts')?.addEventListener('click', () => applySunbirdEmailTableFilter({ threat: 'all' }, false));
+    document.getElementById('sunbird-email-show-activity')?.addEventListener('click', () => applySunbirdEmailTableFilter({ threat: 'mailflow' }, false));
     document.getElementById('sunbird-email-clear')?.addEventListener('click', () => {
-        sunbirdEmailTableState = { search: '', severity: 'all', threat: 'auto', status: 'all', sort: 'newest' };
-        ['sunbird-email-search', 'sunbird-email-severity-filter', 'sunbird-email-threat-filter', 'sunbird-email-status-filter', 'sunbird-email-sort'].forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.value = id === 'sunbird-email-sort' ? 'newest' : 'all';
-            if (id === 'sunbird-email-search') el.value = '';
-            if (id === 'sunbird-email-threat-filter') el.value = 'auto';
-        });
-        renderSunbirdEmailTable();
+        const threat = sunbirdEmailTableState.threat === 'mailflow' ? 'mailflow'
+            : sunbirdEmailTableState.threat === 'auto' ? 'auto' : 'all';
+        applySunbirdEmailTableFilter({ threat }, false);
     });
 }
 
@@ -4879,21 +4877,25 @@ function renderSunbirdEmailTable(model = buildSunbirdEmailModel()) {
     const selected = sunbirdEmailTableState.threat;
     const hasMailboxActivity = model.sourceAudit?.mailActivityOk === true && model.evidence.mailActivityUsers.length > 0;
     const showActivity = selected === 'mailflow' || (selected === 'auto' && !model.alerts.length && hasMailboxActivity);
+    document.getElementById('sunbird-email-show-alerts').setAttribute('aria-pressed', String(!showActivity));
+    document.getElementById('sunbird-email-show-activity').setAttribute('aria-pressed', String(showActivity));
     document.getElementById('sunbird-email-alert-heading').hidden = showActivity;
     document.getElementById('sunbird-email-activity-heading').hidden = !showActivity;
     const search = document.getElementById('sunbird-email-search');
     search.placeholder = showActivity ? 'Search mailbox activity' : 'Search email alerts';
-    for (const id of ['sunbird-email-severity-filter', 'sunbird-email-status-filter', 'sunbird-email-sort']) {
+    const threatFilter = selected === 'auto' || selected === 'mailflow' ? 'all' : selected;
+    document.getElementById('sunbird-email-threat-filter').value = threatFilter;
+    for (const id of ['sunbird-email-severity-filter', 'sunbird-email-threat-filter', 'sunbird-email-status-filter', 'sunbird-email-sort']) {
         document.getElementById(id).disabled = showActivity;
     }
     if (showActivity) {
         renderSunbirdEmailActivityRows(body, model);
         return;
     }
-    const rows = getFilteredSunbirdEmailRows(model, selected === 'auto' ? 'all' : selected);
+    const rows = getFilteredSunbirdEmailRows(model, threatFilter);
     if (!rows.length) {
         const message = model.sourceAudit?.alertsComplete === true
-            ? 'No email alerts match the current filters.'
+            ? model.alerts.length ? 'No email alerts match the current filters.' : 'Defender returned no email alerts in the last verified collection.'
             : 'Email alert evidence is unavailable or incomplete.';
         body.innerHTML = `<tr><td colspan="10" class="sunbird-id-empty">${message}</td></tr>`;
         return;
@@ -4965,18 +4967,18 @@ function getFilteredSunbirdEmailRows(model, threatFilter) {
     });
 }
 
-function applySunbirdEmailTableFilter(filter = {}) {
-    sunbirdEmailTableState = { ...sunbirdEmailTableState, ...filter };
+function applySunbirdEmailTableFilter(filter = {}, scroll = true) {
+    sunbirdEmailTableState = { search: '', severity: 'all', threat: 'all', status: 'all', sort: 'newest', ...filter };
     const setValue = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.value = value;
     };
+    setValue('sunbird-email-search', sunbirdEmailTableState.search);
     setValue('sunbird-email-severity-filter', sunbirdEmailTableState.severity);
-    setValue('sunbird-email-threat-filter', sunbirdEmailTableState.threat);
     setValue('sunbird-email-status-filter', sunbirdEmailTableState.status);
     setValue('sunbird-email-sort', sunbirdEmailTableState.sort);
     renderSunbirdEmailTable();
-    document.querySelector('.sunbird-email-dashboard .sunbird-id-table-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (scroll) document.querySelector('.sunbird-email-dashboard .sunbird-id-table-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function openSunbirdEmailEvidence(evidenceKey) {

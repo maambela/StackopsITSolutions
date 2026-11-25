@@ -19,14 +19,20 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
     const elements = new Map();
     const state = { threat: 'auto', search: '', severity: 'all', status: 'all', sort: 'newest' };
     let model;
-    const { renderTable, renderVip, openUserEvidence } = vm.runInNewContext([
+    const { renderTable, renderVip, openUserEvidence, setup } = vm.runInNewContext([
+        section(client, 'function setupSunbirdEmailDashboard', 'function readSunbirdEmailSnapshot'),
         section(client, 'function renderSunbirdEmailTable', 'function applySunbirdEmailTableFilter'),
+        section(client, 'function applySunbirdEmailTableFilter', 'function openSunbirdEmailEvidence'),
         section(client, 'function renderSunbirdEmailVipPanel', 'function renderSunbirdEmailFeedPanel'),
         section(client, 'function openSunbirdEmailUserEvidence', '\nfunction '),
-        '({ renderTable: renderSunbirdEmailTable, renderVip: renderSunbirdEmailVipPanel, openUserEvidence: openSunbirdEmailUserEvidence });'
+        '({ renderTable: renderSunbirdEmailTable, renderVip: renderSunbirdEmailVipPanel, openUserEvidence: openSunbirdEmailUserEvidence, setup: setupSunbirdEmailDashboard });'
     ].join('\n'), {
         document: { getElementById(id) {
-            if (!elements.has(id)) elements.set(id, { classList: { add() {} }, setAttribute() {} });
+            if (!elements.has(id)) elements.set(id, {
+                classList: { add() {} },
+                setAttribute(name, value) { this[name] = value; },
+                addEventListener(name, handler) { this[name] = handler; }
+            });
             return elements.get(id);
         } },
         sunbirdEmailTableState: state,
@@ -36,6 +42,7 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
         getSunbirdEmailSender: () => 'Sender',
         getSunbirdEmailTargetUser: () => 'Target',
         getSunbirdEmailAction: () => 'Blocked',
+        goBackToProjects() {},
         buildSunbirdEmailModel: () => model,
         getSunbirdEmailAlertsForUser: () => []
     });
@@ -49,6 +56,7 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
         }
     };
     const body = () => elements.get('sunbird-email-body').innerHTML;
+    setup();
     renderTable(model);
     assert.match(body(), /Defender phishing alert/);
     assert.doesNotMatch(body(), /Mailbox A/);
@@ -65,23 +73,29 @@ test('Email evidence keeps Defender alerts, mailbox activity and targeted users 
     renderTable(model);
     assert.match(body(), /Mailbox A/);
     assert.equal(elements.get('sunbird-email-alert-heading').hidden, true);
-    state.threat = 'all';
-    renderTable(model);
-    assert.match(body(), /No email alerts match the current filters/);
+    assert.equal(elements.get('sunbird-email-show-activity')['aria-pressed'], 'true');
+    elements.get('sunbird-email-show-alerts').click();
+    assert.match(body(), /Defender returned no email alerts in the last verified collection/);
     assert.doesNotMatch(body(), /Mailbox A/);
+    assert.equal(elements.get('sunbird-email-show-alerts')['aria-pressed'], 'true');
+    assert.equal(elements.get('sunbird-email-threat-filter').disabled, false);
 
-    state.threat = 'mailflow';
     model.alerts = savedAlerts;
-    renderTable(model);
+    elements.get('sunbird-email-threat-filter').change({ target: { value: 'phishing' } });
+    assert.match(body(), /Defender phishing alert/);
+    elements.get('sunbird-email-threat-filter').change({ target: { value: 'malware' } });
+    assert.match(body(), /No email alerts match the current filters/);
+    elements.get('sunbird-email-show-activity').click();
     assert.match(body(), /Mailbox A[\s\S]*2026-11-22[\s\S]*2026-11-23[\s\S]*data-label="Sent">0</);
     assert.doesNotMatch(body(), /Severity|Status|Defender phishing alert/);
     assert.equal(elements.get('sunbird-email-alert-heading').hidden, true);
     assert.equal(elements.get('sunbird-email-status-filter').disabled, true);
+    assert.equal(elements.get('sunbird-email-threat-filter').disabled, true);
     model.sourceAudit.mailActivityOk = false;
     renderTable(model);
     assert.match(body(), /Mailbox activity is unavailable/);
 
-    state.threat = 'all';
+    elements.get('sunbird-email-show-alerts').click();
     model.alerts = [];
     model.sourceAudit.alertsComplete = false;
     renderTable(model);

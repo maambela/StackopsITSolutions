@@ -14181,6 +14181,28 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   grid-template-columns: minmax(240px, 1fr) repeat(4, minmax(138px, 170px)) auto;
 }
 
+.sunbird-email-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sunbird-email-view-controls .sunbird-id-clear-btn {
+  flex: 0 0 auto;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.sunbird-email-view-controls .sunbird-id-clear-btn[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.sunbird-email-view-controls .sunbird-id-search {
+  min-width: 0;
+}
+
 .sunbird-id-search,
 .sunbird-id-select {
   width: 100%;
