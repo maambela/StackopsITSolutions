@@ -34,6 +34,13 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         'upsertDashboardMetricCaches;'
     ].join('\n'), {
         crypto, readEmailReportRefreshDate, logRuntimeOperation: (event, details) => events.push({ event, ...details }),
+        process: { env: { EMAIL_SECURITY_HUNTING_ENABLED: 'true' } },
+        async refreshEmailDetectionSnapshot(companyId, signal, trigger) {
+            assert.equal(companyId, 7);
+            assert.equal(signal, null);
+            assert.equal(trigger, 'dashboard_cache_worker');
+            starts.push('email-hunting');
+        },
         pool: {
             async query(sql, parameters) {
                 if (sql.includes('FOR SHARE')) return [[{ TenantID: 'tenant-fixture' }]];
@@ -83,6 +90,8 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
     assert.equal(writes.has('IdentityMetricsCache'), false);
     assert.equal(writes.get('DeviceMetricsCache')[1], 12);
     assert.equal(starts.filter(source => source === 'email').length, 1);
+    assert.equal(starts.filter(source => source === 'email-hunting').length, 1);
+    assert.ok(starts.indexOf('email-hunting') < starts.indexOf('email'));
     assert.deepEqual(writes.get('EmailMetricsCache').slice(0, 5), [7, 1, 2, 3, 4]);
     const savedEmail = writes.get('EmailSecurityPayloadCache');
     assert.deepEqual(savedEmail.summary, email.summary);

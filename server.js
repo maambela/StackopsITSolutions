@@ -11226,6 +11226,7 @@ async function writeVerifiedEmailDashboard(companyId, payload, collectionStarted
         }, { transaction: true });
         if (saved) logEmailDashboardCache('email_cache_publication', companyId, saved, { attemptId, outcome: 'saved' });
         else logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'skipped', reason: 'no_newer_verified_source' });
+        return saved;
     } catch (error) {
         logRuntimeOperation('email_cache_publication', { ...trace, outcome: 'rejected', errorCode: error.code || null });
         throw error;
@@ -12052,6 +12053,9 @@ async function upsertDashboardMetricCaches() {
                 );
             },
             async email() {
+                if (process.env.EMAIL_SECURITY_HUNTING_ENABLED === 'true') {
+                    await refreshEmailDetectionSnapshot(companyId, null, 'dashboard_cache_worker');
+                }
                 const collectionStartedAt = new Date();
                 const emailSecurity = await fetchEmailSecurityPayloadFromApi(null, {
                     collectorContext: { companyId, tenantId, collectionTrigger: 'dashboard_cache_worker' }
@@ -17259,7 +17263,7 @@ async function collectDeviceEvidenceForConfiguredTenants({ trigger = 'scheduled_
     return { companyCount: companies.length, results };
 }
 
-async function refreshEmailDetectionSnapshot(companyId, signal) {
+async function refreshEmailDetectionSnapshot(companyId, signal, trigger) {
     const startedAt = new Date();
     let tenantId;
     const writeOutcome = (status, emailDetections) => writeVerifiedEmailDashboard(companyId, {
@@ -17277,6 +17281,7 @@ async function refreshEmailDetectionSnapshot(companyId, signal) {
         if (emailDashboardMatchesTenant(saved, tenantId) && saved?.emailDetections?.windowDays === 30 &&
             Number.isSafeInteger(saved.emailDetections.phishingInInbox) && age >= 0 && age < 60 * 60000) return;
         signal?.throwIfAborted();
+        console.info('[Email Security] Hunting detection collection started', { companyId, trigger });
         const token = await getSecurityAlertsGraphTokenForCompany(companyId);
         signal?.throwIfAborted();
         const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'emailDetections30d', timeoutMs: 15000 });
@@ -17287,12 +17292,12 @@ async function refreshEmailDetectionSnapshot(companyId, signal) {
             console.warn('[Email Security] Hunting did not return verified email telemetry', { companyId });
             return;
         }
-        await writeOutcome('complete', { ...emailDetections, windowDays: 30 });
-        console.info('[Email Security] Hunting detection counts saved', { companyId, ...emailDetections });
+        const published = await writeOutcome('complete', { ...emailDetections, windowDays: 30 });
+        if (published) console.info('[Email Security] Hunting detection counts saved', { companyId, trigger, ...emailDetections });
     } catch (error) {
         if (tenantId && !signal?.aborted) await writeOutcome('failed').catch(() => {});
         console.warn('[Email Security] Hunting detection collection failed', {
-            companyId, code: error.code || null, httpStatus: error.status || null, message: error.message
+            companyId, trigger, code: error.code || null, httpStatus: error.status || null, message: error.message
         });
     }
 }
@@ -17302,6 +17307,9 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
     const sourceEndpoint = 'Microsoft Graph processed by StackCTRL Email Security';
     try {
         const tenantId = await assertSharedGraphTenantForCompany(companyId);
+        if (process.env.EMAIL_SECURITY_HUNTING_ENABLED === 'true' && !collectorContext.signal?.aborted) {
+            await refreshEmailDetectionSnapshot(companyId, collectorContext.signal, collectionTrigger);
+        }
         const collectionStartedAt = new Date();
         const payload = await fetchEmailSecurityPayloadFromApi(null, { signal: collectorContext.signal || null, collectorContext: { ...collectorContext, companyId, tenantId, collectionTrigger, sourceKey: 'email_security' } });
         const dashboardPayload = buildEmailDashboardPayload({
@@ -17326,9 +17334,6 @@ async function performEmailEvidenceCollection(companyId, collectionTrigger, coll
             collectionTrigger,
             sourceEndpoint
         });
-        if (process.env.EMAIL_SECURITY_HUNTING_ENABLED === 'true' && !collectorContext.signal?.aborted) {
-            await refreshEmailDetectionSnapshot(companyId, collectorContext.signal);
-        }
         return snapshot;
     } catch (error) {
         console.error(`[Email Evidence] Collection failed for CompanyID ${companyId}: ${error.message}`);
