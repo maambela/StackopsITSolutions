@@ -207,6 +207,13 @@ function buildSavedIdentityDashboard(users, metrics, tenantId, now = Date.now())
     const enabled = workforce.filter(user => user.mfaEnabled === true).length;
     const mfaCoverage = complete ? Math.round(enabled / workforce.length * 100) : null;
     const derived = buildIdentityDashboardSource({ usersRows: displayUsers }).dashboardMetrics;
+    const rolesComplete = displayUsers.length > 0 && displayUsers.every(user => user.rolesStatus === 'complete');
+    const privileged = workforce.filter(user => privilegedRoleNames(user).length > 0);
+    const privilegedMfaCoverage = rolesComplete && privileged.length > 0 &&
+        displayUsers.every(user => user.isWorkforce === true || user.isExternal === true) &&
+        privileged.every(user => typeof user.mfaEnabled === 'boolean' && user.mfaStatus === 'complete')
+        ? Math.round(privileged.filter(user => user.mfaEnabled).length / privileged.length * 100)
+        : null;
     const scoreInputsVerified = complete && displayUsers.every(user => user.rolesStatus === 'complete');
     const highRiskUsers = displayUsers.filter(user => String(user.riskLevel).toUpperCase() === 'HIGH' ||
         (user.mfaStatus === 'stale' && user.mfaEnabled === false && user.hasAdminRole === true)).length;
@@ -217,7 +224,7 @@ function buildSavedIdentityDashboard(users, metrics, tenantId, now = Date.now())
     return {
         users: displayUsers,
         metrics: {
-            ...metrics, mfaCoverage, securityScore, mfaOutdated,
+            ...metrics, mfaCoverage, privilegedMfaCoverage, securityScore, mfaOutdated,
             privilegedUsers: displayUsers.every(user => user.rolesStatus === 'complete') ? derived.privilegedUsers : null,
             mfaObservedAt: oldest === null ? null : new Date(oldest).toISOString(),
             mfaEnabled: enabled,

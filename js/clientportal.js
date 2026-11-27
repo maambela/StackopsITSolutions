@@ -2574,6 +2574,16 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
     const multiplePrivilegedRoles = users.filter(user => getIdentityRoleNames(user).filter(role => /(admin|global|privileged|security|directory)/i.test(role)).length > 1);
     const signInCollectionStatus = data?.signInCollection?.status ||
         (users.some(user => ['partial', 'unavailable'].includes(user.lastSignIn?.observationStatus)) ? 'incomplete' : 'complete');
+    const activityNow = Date.now();
+    const activityCutoff = activityNow - 30 * 86400000;
+    const activeIn30Days = users.filter(user => {
+        const time = getIdentityLastSignInTime(user);
+        return time >= activityCutoff && time <= activityNow;
+    }).length;
+    const historyComplete = totalUsers > 0 && users.every(user => user.historyComplete === true);
+    const snapshotAge = activityNow - Date.parse(data?.fetchedAt);
+    const activityComplete = historyComplete || (snapshotAge >= 0 && snapshotAge <= 30 * 60000 &&
+        data?.signInCollection?.status === 'complete' && data.signInCollection.windowDays >= 30);
 
     return {
         users,
@@ -2587,11 +2597,14 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
                 : null,
             mfaOutdated: Boolean(data?.metrics?.verifiedMetricTimestamps?.mfaCoverage) || data?.metrics?.mfaOutdated === true,
             mfaObservedAt: data?.metrics?.verifiedMetricTimestamps?.mfaCoverage || data?.metrics?.mfaObservedAt,
-            mfaAssessmentStatus: mfaUnknownUsers.length || unknownUserTypes ? 'incomplete' : 'complete',
             privilegedUsers: Object.hasOwn(data?.metrics || {}, 'privilegedUsers')
                 ? data.metrics.privilegedUsers : privilegedUsers.length,
             privilegedUsersVerifiedAt: data?.metrics?.verifiedMetricTimestamps?.privilegedUsers,
-            rolesComplete: users.every(user => user.rolesStatus === 'complete'),
+            privilegedMfaCoverage: data?.metrics?.privilegedMfaCoverage ?? null,
+            privilegedMfaVerifiedAt: data?.metrics?.verifiedMetricTimestamps?.privilegedMfaCoverage,
+            activityCoverage: totalUsers && (activityComplete || activeIn30Days)
+                ? (activityComplete ? Math.round : Math.floor)(activeIn30Days / totalUsers * 100) : null,
+            activityComplete,
             highRiskUsers: highRiskUsers.length,
             mediumRiskUsers: mediumRiskUsers.length,
             safeUsers,
@@ -2603,7 +2616,7 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
             multiplePrivilegedRoles: multiplePrivilegedRoles.length
         },
         signInCollectionStatus,
-        historyComplete: users.length > 0 && users.every(user => user.historyComplete === true),
+        historyComplete,
         signInCollection: data?.signInCollection,
         fetchedAt: data?.fetchedAt,
         evidence: {
@@ -3135,26 +3148,21 @@ function renderSunbirdPieChart(title, items, total, extraClass = '', toneColor =
 
 function renderSunbirdHealthGraph(model) {
     const mfa = model.metrics.mfaCoverage;
-    const privilegedMfa = model.metrics.mfaAssessmentStatus !== 'complete' || !model.metrics.rolesComplete
-        ? null
-        : model.metrics.privilegedUsers
-        ? Math.round(((model.metrics.privilegedUsers - model.metrics.adminsWithoutMfa) / model.metrics.privilegedUsers) * 100)
-        : 100;
-    const activity = model.signInCollectionStatus === 'complete' && model.metrics.totalUsers
-        ? Math.round(((model.metrics.totalUsers - model.metrics.inactiveUsers) / model.metrics.totalUsers) * 100)
-        : null;
+    const privilegedMfa = model.metrics.privilegedMfaCoverage;
+    const activity = model.metrics.activityCoverage;
+    const privilegedAsOf = model.metrics.privilegedMfaVerifiedAt;
     return `
         <article class="sunbird-id-chart-card sunbird-id-health-card sunbird-id-compact-health-card">
             <h3>Identity posture</h3>
             ${[
                 { label: 'MFA', value: mfa, tone: mfa === null ? 'neutral' : mfa >= 80 ? 'good' : 'warn' },
-                { label: 'Privileged MFA', value: privilegedMfa, tone: privilegedMfa === null ? 'neutral' : privilegedMfa >= 100 ? 'good' : 'bad' },
-                { label: 'Active in 30 days', value: activity, tone: activity === null ? 'neutral' : activity >= 70 ? 'good' : 'warn' }
+                { label: 'Privileged MFA', value: privilegedMfa, asOf: privilegedAsOf, tone: privilegedMfa === null || privilegedAsOf ? 'neutral' : privilegedMfa >= 100 ? 'good' : 'bad' },
+                { label: 'Active in 30 days', value: activity, minimum: !model.metrics.activityComplete, tone: activity === null || !model.metrics.activityComplete ? 'neutral' : activity >= 70 ? 'good' : 'warn' }
             ].map(item => `
                 <div class="sunbird-id-health-row">
                     <span>${item.label}</span>
                     <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${item.tone}" style="width:${item.value ?? 0}%"></div></div>
-                    <strong>${item.value === null ? 'Unavailable' : `${item.value}%`}</strong>
+                    <strong${item.asOf ? ` title="Last verified ${escapeIdentityText(new Date(item.asOf).toLocaleString())}"` : ''}>${item.value === null ? 'Unavailable' : `${item.minimum ? '≥' : ''}${item.value}%${item.asOf ? ' (saved)' : ''}`}</strong>
                 </div>
             `).join('')}
         </article>

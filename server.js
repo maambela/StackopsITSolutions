@@ -16920,7 +16920,7 @@ async function loadStoredIdentityUsers(companyId, tenantId, { requireTenant = fa
 
 async function readIdentityDashboardMetrics(companyId, tenantId, users, metrics, fetchedAt) {
     const dashboard = buildSavedIdentityDashboard(users, metrics, tenantId);
-    const keys = ['mfaCoverage', 'securityScore', 'privilegedUsers', 'activeUsers'];
+    const keys = ['mfaCoverage', 'privilegedMfaCoverage', 'securityScore', 'privilegedUsers', 'activeUsers'];
     const savedMetrics = dashboard.metrics;
     const pending = keys.filter(key => !Number.isFinite(savedMetrics[key]));
     savedMetrics.verifiedMetricTimestamps = {};

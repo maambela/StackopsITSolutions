@@ -188,6 +188,31 @@ test('30-day history restores older events and verifies absence only with comple
     assert.equal(merge(users, scope, { ...history, companyId: 8 }, FIXED_NOW.getTime()), users);
 });
 
+test('Identity posture shows a lower bound until 30-day history is complete', () => {
+    const source = fs.readFileSync(require.resolve('../js/clientportal'), 'utf8');
+    const start = source.indexOf('function buildSunbirdIdentityModel');
+    const end = source.indexOf('function getSunbirdSignInIssueReasons', start);
+    const build = vm.runInNewContext(source.slice(start, end) + '\nbuildSunbirdIdentityModel;', {
+        mergeIdentitySignInHistory: users => users,
+        getSunbirdIdentityUsers: data => data.users,
+        readMicrosoftDashboardCache: () => null,
+        SUNBIRD_IDENTITY_HISTORY_KEY: 'history',
+        isIdentityPrivileged: () => false,
+        getIdentityRoleNames: () => [],
+        getIdentityDaysSinceSignIn: () => null,
+        getIdentityLastSignInTime: user => user.time || 0,
+        getSunbirdSignInIssueReasons: () => []
+    });
+    const data = { signInCollection: { status: 'complete', windowDays: 1 }, users: [
+        { time: Date.now() - 15 * 86400000 }, { time: Date.now() - 31 * 86400000 }, {}
+    ] };
+    assert.equal(build(data).metrics.activityCoverage, 33);
+    assert.equal(build(data).metrics.activityComplete, false);
+    data.users = data.users.map(user => ({ ...user, historyComplete: true }));
+    assert.equal(build(data).metrics.activityComplete, true);
+    assert.equal(build(data).metrics.activityCoverage, 33);
+});
+
 test('Identity dashboard and legacy history route read saved evidence, while scheduled collection refreshes 24 hours', () => {
     const source = fs.readFileSync(require.resolve('../server'), 'utf8');
     const routeStart = source.indexOf("app.get('/api/sunbird/identity-dashboard'");

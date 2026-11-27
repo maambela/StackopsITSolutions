@@ -13885,7 +13885,7 @@ scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .sunbird-id-compact-health-card .sunbird-id-health-row {
-  grid-template-columns: 112px 1fr 44px;
+  grid-template-columns: 112px minmax(0, 1fr) 82px;
 }
 
 .sunbird-id-refresh-state {
