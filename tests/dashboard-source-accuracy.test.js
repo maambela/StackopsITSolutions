@@ -317,6 +317,25 @@ test('privileged MFA uses verified privileged accounts even when a non-admin MFA
         .metrics.privilegedMfaCoverage, null);
 });
 
+test('privileged MFA displays saved registrations and reports incomplete coverage separately', () => {
+    const observedAt = '2026-11-24T17:00:00Z';
+    const now = Date.parse('2026-11-24T18:00:00Z');
+    const admin = { id: 'admin', isWorkforce: true, roles: ['Global Administrator'], rolesStatus: 'complete',
+        mfaEnabled: true, mfaStatus: 'complete' };
+    const second = { ...admin, id: 'second', mfaEnabled: null, mfaStatus: 'unavailable' };
+    const partial = buildSavedIdentityDashboard([admin, second], {}, 'tenant-a', now).metrics;
+    assert.equal(partial.privilegedMfaStatus, 'partial');
+    assert.equal(partial.privilegedMfaCoverage, null);
+    assert.equal(partial.privilegedMfaMinimum, 50);
+
+    second.lastVerifiedMfa = { enabled: false, count: 0, observedAt, tenantId: 'tenant-a' };
+    const saved = buildSavedIdentityDashboard([admin, second], {}, 'tenant-a', now).metrics;
+    assert.equal(saved.privilegedMfaStatus, 'saved');
+    assert.equal(saved.privilegedMfaCoverage, 50);
+    assert.equal(buildSavedIdentityDashboard([admin, second], {}, 'tenant-b', now).metrics.privilegedMfaStatus, 'partial');
+    assert.equal(buildSavedIdentityDashboard([{ ...admin, roles: [] }], {}, 'tenant-a', now).metrics.privilegedMfaStatus, 'not_applicable');
+});
+
 test('Email targets combine native Graph user and mailbox evidence with legacy formats', () => {
     const first = { evidence: [
         { '@odata.type': '#microsoft.graph.security.userEvidence', userAccount: {

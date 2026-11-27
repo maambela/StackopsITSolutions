@@ -2601,6 +2601,8 @@ function buildSunbirdIdentityModel(data = sunbirdDashboardData) {
                 ? data.metrics.privilegedUsers : privilegedUsers.length,
             privilegedUsersVerifiedAt: data?.metrics?.verifiedMetricTimestamps?.privilegedUsers,
             privilegedMfaCoverage: data?.metrics?.privilegedMfaCoverage ?? null,
+            privilegedMfaMinimum: data?.metrics?.privilegedMfaMinimum ?? null,
+            privilegedMfaStatus: data?.metrics?.privilegedMfaStatus,
             privilegedMfaVerifiedAt: data?.metrics?.verifiedMetricTimestamps?.privilegedMfaCoverage,
             activityCoverage: totalUsers && (activityComplete || activeIn30Days)
                 ? (activityComplete ? Math.round : Math.floor)(activeIn30Days / totalUsers * 100) : null,
@@ -3148,21 +3150,35 @@ function renderSunbirdPieChart(title, items, total, extraClass = '', toneColor =
 
 function renderSunbirdHealthGraph(model) {
     const mfa = model.metrics.mfaCoverage;
-    const privilegedMfa = model.metrics.privilegedMfaCoverage;
+    const privilegedMfa = model.metrics.privilegedMfaCoverage ?? model.metrics.privilegedMfaMinimum;
     const activity = model.metrics.activityCoverage;
     const privilegedAsOf = model.metrics.privilegedMfaVerifiedAt;
+    const privilegedStatus = model.metrics.privilegedMfaStatus;
+    const privilegedSaved = Boolean(privilegedAsOf) || privilegedStatus === 'saved';
+    const privilegedMinimum = model.metrics.privilegedMfaCoverage === null && privilegedMfa !== null;
+    const privilegedUnavailable = {
+        roles_unverified: 'Role assignments could not be verified.',
+        mfa_unverified: 'MFA registration could not be verified for privileged accounts.',
+        partial: 'Only some privileged accounts have verified MFA registration.',
+        not_applicable: 'No privileged workforce accounts were found.'
+    }[privilegedStatus];
     return `
         <article class="sunbird-id-chart-card sunbird-id-health-card sunbird-id-compact-health-card">
             <h3>Identity posture</h3>
             ${[
                 { label: 'MFA', value: mfa, tone: mfa === null ? 'neutral' : mfa >= 80 ? 'good' : 'warn' },
-                { label: 'Privileged MFA', value: privilegedMfa, asOf: privilegedAsOf, tone: privilegedMfa === null || privilegedAsOf ? 'neutral' : privilegedMfa >= 100 ? 'good' : 'bad' },
+                { label: 'Privileged MFA', value: privilegedMfa, saved: privilegedSaved, minimum: privilegedMinimum,
+                    emptyLabel: privilegedStatus === 'not_applicable' ? 'N/A' : 'Unavailable',
+                    title: privilegedAsOf ? `Last verified ${new Date(privilegedAsOf).toLocaleString()}`
+                        : privilegedSaved ? 'Uses previously verified MFA registration for one or more privileged accounts.'
+                        : privilegedMinimum || privilegedMfa === null ? privilegedUnavailable : undefined,
+                    tone: privilegedMfa === null || privilegedSaved || privilegedMinimum ? 'neutral' : privilegedMfa >= 100 ? 'good' : 'bad' },
                 { label: 'Active in 30 days', value: activity, minimum: !model.metrics.activityComplete, tone: activity === null || !model.metrics.activityComplete ? 'neutral' : activity >= 70 ? 'good' : 'warn' }
             ].map(item => `
                 <div class="sunbird-id-health-row">
                     <span>${item.label}</span>
                     <div class="sunbird-id-health-track"><div class="sunbird-id-health-fill tone-${item.tone}" style="width:${item.value ?? 0}%"></div></div>
-                    <strong${item.asOf ? ` title="Last verified ${escapeIdentityText(new Date(item.asOf).toLocaleString())}"` : ''}>${item.value === null ? 'Unavailable' : `${item.minimum ? '≥' : ''}${item.value}%${item.asOf ? ' (saved)' : ''}`}</strong>
+                    <strong${item.title ? ` title="${escapeIdentityText(item.title)}"` : ''}>${item.value === null ? item.emptyLabel || 'Unavailable' : `${item.minimum ? '≥' : ''}${item.value}%${item.saved ? ' (saved)' : ''}`}</strong>
                 </div>
             `).join('')}
         </article>

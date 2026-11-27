@@ -16933,6 +16933,7 @@ async function readIdentityDashboardMetrics(companyId, tenantId, users, metrics,
                 const candidate = buildSavedIdentityDashboard(previousUsers, previousMetrics, tenantId).metrics;
                 for (const key of pending) {
                     if (Number.isFinite(savedMetrics[key]) || !Number.isFinite(candidate[key])) continue;
+                    if (key === 'privilegedMfaCoverage' && candidate.privilegedMfaStatus !== 'complete') continue;
                     if (key === 'activeUsers') {
                         if (candidate.signInCollectionStatus !== 'complete' || !previousUsers.every(user =>
                             ['observed', 'no_recent_sign_in', 'no_recorded_sign_in'].includes(user.lastSignIn?.observationStatus))) continue;
