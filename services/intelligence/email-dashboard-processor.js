@@ -228,8 +228,17 @@ function readEmailDetectionCounts(result) {
     const keys = ['Observed', 'Phishing', 'Malware', 'Spam', 'Impersonation'];
     if (!row || !keys.every(key => Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= row.Observed) ||
         row.Observed === 0) return null;
-    return { observed: row.Observed, phishing: row.Phishing, malware: row.Malware, spam: row.Spam,
+    const counts = { observed: row.Observed, phishing: row.Phishing, malware: row.Malware, spam: row.Spam,
         impersonation: row.Impersonation };
+    const outcomes = { PhishingInInbox: row.Phishing, MalwareInInbox: row.Malware,
+        ThreatsBlocked: Math.min(row.Observed, row.Phishing + row.Malware),
+        ThreatsQuarantined: Math.min(row.Observed, row.Phishing + row.Malware) };
+    for (const [key, maximum] of Object.entries(outcomes)) {
+        if (!Object.hasOwn(row, key)) continue;
+        if (!Number.isSafeInteger(row[key]) || row[key] < 0 || row[key] > maximum) return null;
+        counts[key[0].toLowerCase() + key.slice(1)] = row[key];
+    }
+    return counts;
 }
 
 module.exports = {

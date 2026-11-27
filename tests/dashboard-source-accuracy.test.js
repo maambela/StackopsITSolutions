@@ -586,5 +586,12 @@ test('Email card displays zero only for covered sources and keeps mailbox activi
     payload = null;
     await card();
     assert.deepEqual(values(), Array(4).fill(': 0'));
-    assert.deepEqual(calls, Array(5).fill('/api/db/email-security?cacheOnly=1'));
+    payload = { success: true, summary: zeros,
+        sourceAudit: { alertsComplete: true, incidentsComplete: true, emailDetectionsComplete: true },
+        emailDetections: { observed: 150, windowDays: 30, phishing: 12, phishingInInbox: 0,
+            malware: 3, spam: 18, impersonation: 2 } };
+    await card();
+    assert.deepEqual(values(), [': 12', ': 0', ': 0', ': 0']);
+    assert.match(project.cardFooter, /3 malware.*18 spam.*2 impersonation/);
+    assert.deepEqual(calls, Array(6).fill('/api/db/email-security?cacheOnly=1'));
 });

@@ -82,7 +82,8 @@ test('runHuntingQuery posts the supported fixed identity query and preserves sch
 });
 
 test('email hunting publishes aggregate detections without changing alert or incident counts', async () => {
-    const row = { Observed: 30, Phishing: 4, Malware: 1, Spam: 5, Impersonation: 2 };
+    const row = { Observed: 30, Phishing: 4, Malware: 1, Spam: 5, Impersonation: 2,
+        PhishingInInbox: 1, MalwareInInbox: 0, ThreatsBlocked: 2, ThreatsQuarantined: 3 };
     const result = await runMicrosoftSecurityHuntingQuery({
         token: 'fixture', queryId: 'emailDetections30d',
         fetchImpl: async (_url, request) => {
@@ -91,11 +92,14 @@ test('email hunting publishes aggregate detections without changing alert or inc
             assert.match(body.Query, /^EmailEvents/);
             assert.match(body.Query, /ago\(30d\)/);
             assert.match(body.Query, /by NetworkMessageId/);
+            assert.match(body.Query, /DeliveryLocation =~ "Inbox\/Folder"/);
             return graphResponse({ body: { schema: [], results: [row] } });
         }
     });
     const emailDetections = readEmailDetectionCounts(result);
-    assert.deepEqual(emailDetections, { observed: 30, phishing: 4, malware: 1, spam: 5, impersonation: 2 });
+    assert.deepEqual(emailDetections, { observed: 30, phishing: 4, malware: 1, spam: 5, impersonation: 2,
+        phishingInInbox: 1, malwareInInbox: 0, threatsBlocked: 2, threatsQuarantined: 3 });
+    assert.equal(readEmailDetectionCounts({ ...result, results: [{ ...row, PhishingInInbox: 5 }] }), null);
     assert.equal(readEmailDetectionCounts({ ...result, results: [{ ...row, Observed: 0 }] }), null);
     assert.equal(readEmailDetectionCounts({ ...result, results: [] }), null);
     const prior = { success: true, fetchedAt: '2026-11-24T10:00:00Z',

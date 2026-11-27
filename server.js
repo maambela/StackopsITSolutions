@@ -17261,30 +17261,36 @@ async function collectDeviceEvidenceForConfiguredTenants({ trigger = 'scheduled_
 
 async function refreshEmailDetectionSnapshot(companyId, signal) {
     const startedAt = new Date();
+    let tenantId;
+    const writeOutcome = (status, emailDetections) => writeVerifiedEmailDashboard(companyId, {
+        success: true, emailDetections,
+        sourceAudit: { sourceTenantId: tenantId, emailDetectionsComplete: Boolean(emailDetections),
+            sourceOutcomes: { emailDetections: { status } } }
+    }, startedAt);
     try {
-        const tenantId = await assertSharedGraphTenantForCompany(companyId);
+        tenantId = await assertSharedGraphTenantForCompany(companyId);
         const [rows] = await pool.query(
             'SELECT Payload FROM EmailSecurityPayloadCache WHERE CompanyID = ?', [companyId]
         );
         const saved = parseReportJson(rows[0]?.Payload, null);
         const age = startedAt.getTime() - Date.parse(saved?.sourceAudit?.sourceTimestamps?.emailDetections);
-        if (emailDashboardMatchesTenant(saved, tenantId) && saved?.emailDetections?.windowDays === 30 && age >= 0 && age < 60 * 60000) return;
+        if (emailDashboardMatchesTenant(saved, tenantId) && saved?.emailDetections?.windowDays === 30 &&
+            Number.isSafeInteger(saved.emailDetections.phishingInInbox) && age >= 0 && age < 60 * 60000) return;
         signal?.throwIfAborted();
         const token = await getSecurityAlertsGraphTokenForCompany(companyId);
         signal?.throwIfAborted();
         const result = await runMicrosoftSecurityHuntingQuery({ token, queryId: 'emailDetections30d', timeoutMs: 15000 });
         const emailDetections = readEmailDetectionCounts(result);
+        signal?.throwIfAborted();
         if (!emailDetections) {
+            await writeOutcome(result.isResultLimitReached ? 'partial' : 'unavailable');
             console.warn('[Email Security] Hunting did not return verified email telemetry', { companyId });
             return;
         }
-        signal?.throwIfAborted();
-        await writeVerifiedEmailDashboard(companyId, {
-            success: true, emailDetections: { ...emailDetections, windowDays: 30 },
-            sourceAudit: { sourceTenantId: tenantId, emailDetectionsComplete: true }
-        }, startedAt);
+        await writeOutcome('complete', { ...emailDetections, windowDays: 30 });
         console.info('[Email Security] Hunting detection counts saved', { companyId, ...emailDetections });
     } catch (error) {
+        if (tenantId && !signal?.aborted) await writeOutcome('failed').catch(() => {});
         console.warn('[Email Security] Hunting detection collection failed', {
             companyId, code: error.code || null, httpStatus: error.status || null, message: error.message
         });

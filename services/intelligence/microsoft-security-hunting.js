@@ -10,8 +10,10 @@ function emailDetectionQuery(id, days) {
         query: [
             'EmailEvents',
             `| where Timestamp >= ago(${days}d) and isnotempty(NetworkMessageId)`,
-            '| summarize Phish=max(toint(ThreatTypes has "Phish")), Malware=max(toint(ThreatTypes has "Malware")), Spam=max(toint(ThreatTypes has "Spam")), Impersonation=max(toint(EmailActionPolicy contains "impersonation")) by NetworkMessageId',
-            '| summarize Observed=count(), Phishing=countif(Phish == 1), Malware=countif(Malware == 1), Spam=countif(Spam == 1), Impersonation=countif(Impersonation == 1)'
+            '| extend IsPhish = ThreatTypes has "Phish", IsMalware = ThreatTypes has "Malware"',
+            '| extend IsThreat = IsPhish or IsMalware, InInbox = DeliveryLocation =~ "Inbox/Folder"',
+            '| summarize Phish=max(toint(IsPhish)), Malware=max(toint(IsMalware)), Spam=max(toint(ThreatTypes has "Spam")), Impersonation=max(toint(EmailActionPolicy contains "impersonation")), PhishInbox=max(toint(IsPhish and InInbox)), MalwareInbox=max(toint(IsMalware and InInbox)), ThreatBlocked=max(toint(IsThreat and DeliveryAction =~ "Blocked")), ThreatQuarantined=max(toint(IsThreat and DeliveryLocation =~ "Quarantine")) by NetworkMessageId',
+            '| summarize Observed=count(), Phishing=countif(Phish == 1), Malware=countif(Malware == 1), Spam=countif(Spam == 1), Impersonation=countif(Impersonation == 1), PhishingInInbox=countif(PhishInbox == 1), MalwareInInbox=countif(MalwareInbox == 1), ThreatsBlocked=countif(ThreatBlocked == 1), ThreatsQuarantined=countif(ThreatQuarantined == 1)'
         ].join('\n')
     });
 }

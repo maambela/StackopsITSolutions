@@ -1743,7 +1743,9 @@ async function fetchEmailCardData() {
         const activity = mailSummary.activeMailboxes
             ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events`
             : '';
-        project.cardFooter = threats.alertsAvailable && threats.incidentsAvailable
+        project.cardFooter = threats.detections
+            ? `${threats.detections.malware} malware · ${threats.detections.spam} spam · ${threats.detections.impersonation} impersonation (${threats.detections.windowDays === 30 ? '30d' : '24h'})`
+            : threats.alertsAvailable && threats.incidentsAvailable
             ? threats.activeThreats > 0
                 ? `${threats.activeThreats} active threats detected`
                 : activity || 'No active threats in collected alerts'
@@ -4497,6 +4499,7 @@ function getEmailThreatDisplayMetrics(data = {}) {
     return {
         alertsAvailable,
         incidentsAvailable,
+        detections: audit.emailDetectionsComplete === true ? data.emailDetections : null,
         sourceTimestamps: audit.sourceTimestamps || {},
         sourceOutcomes: audit.sourceOutcomes || {},
         activeThreats: (alertsAvailable ? summary.activeThreats : null) ?? 'Unknown',
@@ -4531,12 +4534,17 @@ function emailCardMetrics(threats) {
         const status = threats.sourceOutcomes?.[source]?.status;
         const verifiedAt = threats.sourceTimestamps?.[source];
         const label = verifiedAt ? microsoftDashboardUpdateText({ fetchedAt: verifiedAt }) : '';
-        return ['failed', 'partial'].includes(status) ? ['Refresh incomplete', label].filter(Boolean).join(' · ') : label;
+        return ['failed', 'partial', 'unavailable'].includes(status) ? ['Refresh incomplete', label].filter(Boolean).join(' · ') : label;
     };
+    const detections = threats.detections;
+    const detectionWindow = detections?.windowDays === 30 ? '30d' : '24h';
     return [
-        { label: 'Active Threats', value: `: ${threats.activeThreats}`, title: updated('alerts'), icon: 'fas fa-exclamation-triangle' },
-        { label: 'High Severity', value: `: ${threats.highSeverity}`, title: updated('alerts'), icon: 'fas fa-circle-exclamation' },
-        { label: 'Users Targeted', value: `: ${threats.targetedUsers}`, title: updated('alerts'), icon: 'fas fa-user-shield' },
+        detections ? { label: `Phishing (${detectionWindow})`, value: `: ${detections.phishing}`, title: updated('emailDetections'), icon: 'fas fa-fish' }
+            : { label: 'Open Email Alerts', value: `: ${threats.activeThreats}`, title: updated('alerts'), icon: 'fas fa-exclamation-triangle' },
+        Number.isSafeInteger(detections?.phishingInInbox)
+            ? { label: `Phish to Inbox (${detectionWindow})`, value: `: ${detections.phishingInInbox}`, title: updated('emailDetections'), icon: 'fas fa-inbox' }
+            : { label: 'High Severity Alerts', value: `: ${threats.highSeverity}`, title: updated('alerts'), icon: 'fas fa-circle-exclamation' },
+        { label: 'Users in Alerts', value: `: ${threats.targetedUsers}`, title: updated('alerts'), icon: 'fas fa-user-shield' },
         { label: 'Open Incidents', value: `: ${threats.openIncidents}`, title: updated('incidents'), icon: 'fas fa-bug' }
     ];
 }
@@ -4738,22 +4746,40 @@ function renderSunbirdEmailCharts(model) {
             ? user.reportRefreshDate : latest, '');
     const mailFlowTitle = reportDate ? `Mail flow activity (7-day report · ${reportDate})` : 'Mail flow activity (7-day report)';
     const detections = model.sourceAudit?.emailDetectionsComplete === true ? model.emailDetections : null;
+    const detectionStatus = model.sourceAudit?.sourceOutcomes?.emailDetections?.status;
+    const detectionWindow = detections?.windowDays === 30 ? '30 days' : '24 hours';
+    const detectionUpdate = microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit?.sourceTimestamps?.emailDetections }, 60 * 60000);
+    const detectionNote = {
+        partial: 'Defender returned incomplete results.',
+        failed: 'Defender collection failed.',
+        unavailable: 'Defender returned no verifiable email telemetry.'
+    }[detectionStatus];
     const detectionItems = detections ? [
+        { label: 'Messages observed', value: detections.observed, tone: 'neutral' },
         { label: 'Phishing', value: detections.phishing, tone: 'bad' },
         { label: 'Malware', value: detections.malware, tone: 'warn' },
         { label: 'Spam', value: detections.spam, tone: 'neutral' },
-        { label: 'Impersonation (BEC indicator)', value: detections.impersonation, tone: 'warn' }
+        { label: 'Impersonation', value: detections.impersonation, tone: 'warn' }
     ] : [];
+    const deliveryItems = detections ? [
+        { label: 'Phishing to inbox', value: detections.phishingInInbox, tone: 'bad' },
+        { label: 'Malware to inbox', value: detections.malwareInInbox, tone: 'bad' },
+        { label: 'Phish or malware blocked', value: detections.threatsBlocked, tone: 'good' },
+        { label: 'Phish or malware quarantined', value: detections.threatsQuarantined, tone: 'good' }
+    ].filter(item => Number.isSafeInteger(item.value)) : [];
+    const alertTypes = [
+        { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },
+        { label: 'Malware', value: threats.Malware || model.evidence.malwareAlerts.length, tone: 'warn' },
+        { label: 'Spam', value: threats.Spam || model.evidence.spamAlerts.length, tone: 'neutral' },
+        { label: 'Other', value: threats.Other || 0, tone: 'good' }
+    ];
     el.innerHTML = `
-        ${detections ? renderSunbirdDeviceBars(
-            `Email detections (${detections.windowDays === 30 ? '30 days' : '24 hours'}) · ${microsoftDashboardUpdateText({ fetchedAt: model.sourceAudit.sourceTimestamps?.emailDetections }, 60 * 60000)}`,
-            detectionItems, Math.max(1, ...detectionItems.map(item => item.value))
-        ) : renderAlertChart('Email alert types', [
-            { label: 'Phishing', value: threats.Phishing || model.evidence.phishingAlerts.length, tone: 'bad' },
-            { label: 'Malware', value: threats.Malware || model.evidence.malwareAlerts.length, tone: 'warn' },
-            { label: 'Spam', value: threats.Spam || model.evidence.spamAlerts.length, tone: 'neutral' },
-            { label: 'Other', value: threats.Other || 0, tone: 'good' }
-        ])}
+        ${renderSunbirdDeviceBars(detections ? [`Defender email detections (${detectionWindow})`, detectionNote, detectionUpdate].filter(Boolean).join(' · ')
+            : 'Defender email detections', detectionItems, Math.max(1, ...detectionItems.map(item => item.value)),
+            detectionNote || 'No verified Defender email detections have been collected.')}
+        ${deliveryItems.length ? renderSunbirdDeviceBars(`Threat delivery outcomes (${detectionWindow})`, deliveryItems,
+            Math.max(1, ...deliveryItems.map(item => item.value))) : ''}
+        ${renderAlertChart('Email alert types', alertTypes)}
         ${renderAlertChart('Severity distribution', [
             { label: 'High', value: severity.high || 0, tone: 'bad' },
             { label: 'Medium', value: severity.medium || 0, tone: 'warn' },
@@ -11066,7 +11092,9 @@ function applyMicrosoftDashboardSnapshots(snapshots) {
                 project.cardMetrics = emailCardMetrics(threats);
                 const activity = mailSummary.activeMailboxes
                     ? `${mailSummary.activeMailboxes} active mailboxes | ${mailSummary.totalMailActivity || 0} mail events` : '';
-                project.cardFooter = !threats.alertsAvailable || !threats.incidentsAvailable
+                project.cardFooter = threats.detections
+                    ? `${threats.detections.malware} malware · ${threats.detections.spam} spam · ${threats.detections.impersonation} impersonation (${threats.detections.windowDays === 30 ? '30d' : '24h'})`
+                    : !threats.alertsAvailable || !threats.incidentsAvailable
                     ? ['Threat data incomplete', activity].filter(Boolean).join(' | ')
                     : threats.activeThreats > 0
                     ? `${threats.activeThreats} active threats detected`
@@ -15302,16 +15330,19 @@ function buildEmailPreviewModel() {
     const mailSummary = summary.mailActivity || {};
     const phishing = model.evidence.phishingAlerts.length;
     const malware = model.evidence.malwareAlerts.length;
-    const { activeThreats, highSeverity, targetedUsers, openIncidents, alertsAvailable, incidentsAvailable } = getEmailThreatDisplayMetrics(data);
-    const keyInsight = !alertsAvailable || !incidentsAvailable
+    const { activeThreats, highSeverity, targetedUsers, openIncidents, alertsAvailable, incidentsAvailable, detections } = getEmailThreatDisplayMetrics(data);
+    const detectionWindow = detections?.windowDays === 30 ? '30 days' : '24 hours';
+    const keyInsight = detections
+        ? `Defender recorded ${detections.phishing} phishing detections across ${detections.observed} observed messages (${detectionWindow})`
+        : !alertsAvailable || !incidentsAvailable
         ? 'Email threat coverage is incomplete'
         : targetedUsers > 0
-        ? `${targetedUsers} users targeted by email threats today`
+        ? `${targetedUsers} users identified in collected email alerts`
         : highSeverity > 0
             ? 'High severity malware or phishing alert detected'
             : mailSummary.activeMailboxes
                 ? `${mailSummary.activeMailboxes} active mailboxes with ${mailSummary.totalMailActivity || 0} mail activity events`
-                : 'Email threat activity is currently controlled';
+                : 'No matching email alerts in the collected data';
     const feed = (model.alerts || []).slice(0, 3).map(alert => ({
         icon: 'fas fa-bell',
         text: `${alert.title || alert.description || 'New email threat signal observed'}${alert.created ? ` (${formatSunbirdDateTime(alert.created)})` : ''}`
@@ -15327,14 +15358,19 @@ function buildEmailPreviewModel() {
 
     return {
         topMetrics: [
-            { label: 'Active Threats', value: activeThreats, icon: 'fas fa-radiation', tone: 'critical' },
+            { label: 'Open Email Alerts', value: activeThreats, icon: 'fas fa-radiation', tone: 'critical' },
             { label: 'High Severity Alerts', value: highSeverity, icon: 'fas fa-triangle-exclamation', tone: 'critical' },
             { label: 'Users Targeted', value: targetedUsers, icon: 'fas fa-user-shield', tone: 'warning' },
             { label: 'Open Incidents', value: openIncidents, icon: 'fas fa-bug', tone: 'warning' }
         ],
-        riskBreakdown: [
-            { label: 'Phishing', value: alertsAvailable ? phishing : 'Unknown', tone: 'critical' },
-            { label: 'Malware', value: alertsAvailable ? malware : 'Unknown', tone: 'high' },
+        riskBreakdown: detections ? [
+            { label: `Phishing (${detectionWindow})`, value: detections.phishing, tone: 'critical' },
+            { label: 'Phishing to inbox', value: detections.phishingInInbox ?? 'Unknown', tone: 'critical' },
+            { label: 'Malware', value: detections.malware, tone: 'high' },
+            { label: 'Spam', value: detections.spam, tone: 'medium' }
+        ] : [
+            { label: 'Phishing alerts', value: alertsAvailable ? phishing : 'Unknown', tone: 'critical' },
+            { label: 'Malware alerts', value: alertsAvailable ? malware : 'Unknown', tone: 'high' },
             { label: 'Mail Events', value: mailSummary.totalMailActivity ?? 'Unknown', tone: 'medium' }
         ],
         keyInsight,
