@@ -11,7 +11,7 @@ function timeoutError({ sourceKey, companyId, timeoutMs, runId = null, pipelineE
     return error;
 }
 
-function createTrackedCollectorRegistry({ logger = console, now = () => Date.now(), timeoutMs = 60000 } = {}) {
+function createTrackedCollectorRegistry({ logger = console, now = () => Date.now(), timeoutMs = 60000, retainUntilSettled = false } = {}) {
     const entries = new Map();
     const emit = (event, details = {}) => logger.info?.('[StackCTRL Collector]', {
         event,
@@ -26,7 +26,7 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
         const existing = entries.get(key);
         if (existing) {
             const ageMs = Math.max(0, now() - existing.startedAt);
-            if (ageMs < existing.timeoutMs) {
+            if (retainUntilSettled || ageMs < existing.timeoutMs) {
                 emit('snapshot_source_refresh_joined', { ...trace, ...(existing.attemptId ? { ownerAttemptId: existing.attemptId } : {}), companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, ageMs, ownerRunId: existing.runId, ownerPipelineExecutionId: existing.pipelineExecutionId });
                 return existing.promise;
             }
@@ -38,7 +38,8 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
 
         const controller = new AbortController();
         if (signal?.aborted) controller.abort(signal.reason);
-        else if (signal?.addEventListener) signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+        const abort = () => controller.abort(signal.reason);
+        if (!signal?.aborted) signal?.addEventListener('abort', abort, { once: true });
         const startedAt = now();
         let timer = null;
         const entry = { controller, startedAt, timeoutMs: deadlineMs, sourceKey, collectionTrigger, runId, pipelineExecutionId, attemptId, promise: null };
@@ -52,6 +53,12 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
         });
         emit('snapshot_source_refresh_started', { ...trace, companyId: Number(companyId), runId, pipelineExecutionId, sourceKey, collectionTrigger, elapsedMs: 0 });
         const operation = Promise.resolve().then(() => execute({ signal: controller.signal, controller }));
+        if (retainUntilSettled) {
+            const clearEntry = () => {
+                if (entries.get(key) === entry) entries.delete(key);
+            };
+            operation.then(clearEntry, clearEntry);
+        }
         entry.promise = Promise.race([operation, deadline])
             .then(result => {
                 const skipped = attemptId && result?.status === 'already_running';
@@ -73,7 +80,8 @@ function createTrackedCollectorRegistry({ logger = console, now = () => Date.now
             })
             .finally(() => {
                 clearTimeout(timer);
-                if (entries.get(key) === entry) entries.delete(key);
+                signal?.removeEventListener('abort', abort);
+                if (!retainUntilSettled && entries.get(key) === entry) entries.delete(key);
             });
         entries.set(key, entry);
         return entry.promise;

@@ -270,7 +270,8 @@ async function collectSource(context, definition) {
     let freshness = getLoadedFreshness(loaded, records, capability.freshnessThresholdMinutes);
     const shouldRefresh = capability.refreshMode !== 'stored_only' && (
         (refresh && (!records.length || freshness.stale)) ||
-        (definition.refreshWhenMissing && !records.length)
+        (definition.refreshWhenMissing && !records.length) ||
+        (capability.sourceKey === 'cloudflare_network_security' && refreshContext.forceRefresh === true)
     );
 
     if (shouldRefresh && typeof refreshSource === 'function') {
@@ -280,9 +281,15 @@ async function collectSource(context, definition) {
                 capability.sourceKey,
                 companyId,
                 refreshTimeoutMs,
-                refreshContext
+                capability.sourceKey === 'cloudflare_network_security'
+                    ? { ...refreshContext, freshnessThresholdMinutes: capability.freshnessThresholdMinutes }
+                    : refreshContext
             );
-            if (refreshed) {
+            if (capability.sourceKey === 'cloudflare_network_security' && refreshed?.status === 'disabled') {
+                refreshWarning = records.length
+                    ? 'Network evidence collection is disabled. Showing the last complete snapshot.'
+                    : 'Archived network evidence is unavailable while network evidence collection is disabled.';
+            } else if (refreshed) {
                 loaded = definition.fromRefresh
                     ? definition.fromRefresh(refreshed, loaded)
                     : { ...loaded, ...refreshed };
@@ -337,7 +344,7 @@ async function collectSource(context, definition) {
     if (!records.length) {
         const missingStatus = loaded.notConfigured ? 'not_configured' : 'missing';
         return statusResult(capability, missingStatus, {
-            warnings: loaded.warnings?.length
+            warnings: refreshWarning ? [refreshWarning, ...(supplementalLoadWarning ? [supplementalLoadWarning] : [])] : loaded.warnings?.length
                 ? loaded.warnings
                 : [`${capability.displayName} has no stored evidence for this tenant.`],
             errorMessage: loaded.sourceLineage?.errorMessage || loaded.sourceLineage?.incompleteReason || null,

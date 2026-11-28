@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { buildNetworkDashboardSource } = require('./network-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
+const { assertCollectionOwner } = require('./graph-collection-ownership');
 
 const NETWORK_EVIDENCE_SCHEMA = [
     `CREATE TABLE IF NOT EXISTS StackCTRLNetworkEvidenceSnapshots (
@@ -254,10 +255,12 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
         tenantKey = 'sunbird',
         payload,
         collectionTrigger = 'scheduled_hourly',
-        sourceEndpoint = 'Cloudflare Zero Trust processed by StackCTRL Network Security'
+        sourceEndpoint = 'Cloudflare Zero Trust processed by StackCTRL Network Security',
+        signal, collectionStartedAt, accountScope, verifyCompany
     } = {}) {
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
+        signal?.throwIfAborted();
         const evidence = deriveNetworkEvidence(payload);
         const collectedAt = now();
         const sourceFetchedAt = payload?.fetchedAt || collectedAt;
@@ -265,11 +268,32 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
             rows: evidence.evidenceRows,
             dashboardMetrics: evidence.dashboardMetrics
         })).digest('hex');
+        signal?.throwIfAborted();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
         const ownsConnection = connection !== pool;
         let snapshotId = null;
+        let transactionStarted = false;
         try {
-            if (typeof connection.beginTransaction === 'function') await connection.beginTransaction();
+            signal?.throwIfAborted();
+            if (typeof connection.beginTransaction === 'function') {
+                await connection.beginTransaction();
+                transactionStarted = true;
+            }
+            await assertCollectionOwner(connection, numericCompanyId);
+            if (collectionStartedAt) {
+                const [newer] = await connection.query(
+                    `SELECT latest.ID FROM (
+                         SELECT ID, CollectedAt, SourceFetchedAt FROM StackCTRLNetworkEvidenceSnapshots
+                         WHERE CompanyID = ? AND IsComplete = 1 ORDER BY CollectedAt DESC, ID DESC LIMIT 1
+                     ) latest WHERE latest.CollectedAt > ? OR latest.SourceFetchedAt > ?`,
+                    [numericCompanyId, collectionStartedAt.toISOString().slice(0, 23).replace('T', ' '), mysqlDateTime(sourceFetchedAt)]
+                );
+                if (newer.length) {
+                    if (transactionStarted) await connection.rollback();
+                    return { companyId: numericCompanyId, status: 'superseded' };
+                }
+            }
+            signal?.throwIfAborted();
             const metrics = evidence.dashboardMetrics;
             const snapshotInsert = buildInsert('StackCTRLNetworkEvidenceSnapshots', {
                 CompanyID: numericCompanyId,
@@ -306,6 +330,7 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
                     dashboardFetchedAt: payload?.fetchedAt || null,
                     collectionTrigger,
                     sourceEndpoint,
+                    accountScope,
                     credentialSource: 'environment',
                     credentialPath: 'CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (Azure Key Vault, shared with dashboard)'
                 }),
@@ -316,6 +341,7 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
             snapshotId = snapshotResult.insertId;
 
             for (const row of evidence.evidenceRows) {
+                signal?.throwIfAborted();
                 const evidenceInsert = buildInsert('StackCTRLNetworkEvidence', {
                     SnapshotID: snapshotId,
                     CompanyID: numericCompanyId,
@@ -329,9 +355,12 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
                 });
                 await connection.query(evidenceInsert.sql, evidenceInsert.values);
             }
+            if (verifyCompany) await verifyCompany(connection);
+            await assertCollectionOwner(connection, numericCompanyId);
+            signal?.throwIfAborted();
             if (typeof connection.commit === 'function') await connection.commit();
         } catch (error) {
-            if (typeof connection.rollback === 'function') await connection.rollback();
+            if (transactionStarted) await connection.rollback().catch(() => connection.destroy?.());
             throw error;
         } finally {
             if (ownsConnection && typeof connection.release === 'function') connection.release();
@@ -354,7 +383,7 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
         tenantKey = 'sunbird',
         collectionTrigger = 'scheduled_hourly',
         sourceEndpoint = 'Cloudflare Zero Trust processed by StackCTRL Network Security',
-        error
+        error, database = pool
     } = {}) {
         const numericCompanyId = Number(companyId);
         if (!Number.isFinite(numericCompanyId) || numericCompanyId <= 0) throw new Error('A valid companyId is required');
@@ -385,7 +414,7 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
             IncompleteReason: 'Network evidence collection did not complete.',
             ErrorMessage: message
         });
-        const [result] = await pool.query(failureInsert.sql, failureInsert.values);
+        const [result] = await database.query(failureInsert.sql, failureInsert.values);
         return { snapshotId: result.insertId, companyId: numericCompanyId, status: 'failed', message };
     }
 

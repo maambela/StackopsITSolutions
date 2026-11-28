@@ -468,7 +468,7 @@ const collectorRuntimeLogger = {
 const identityEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
 const deviceEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
 const emailEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
-const networkEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
+const networkEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS, retainUntilSettled: true });
 const backupEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
 const applicationsEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
 const securityEvidenceCollectors = createTrackedCollectorRegistry({ logger: collectorRuntimeLogger, timeoutMs: STACKCTRL_COLLECTOR_TIMEOUT_MS });
@@ -1086,9 +1086,22 @@ if (!useSupabase) {
         
         // Try a simple test connection immediately (don't wait for result)
         pool.getConnection()
-            .then(conn => {
-                console.log('[DB] ✅ Test connection successful - Cloud SQL is reachable');
-                conn.release();
+            .then(async conn => {
+                try {
+                    console.log('[DB] ✅ Test connection successful - Cloud SQL is reachable');
+                    const [[timeZone]] = await conn.query(
+                        'SELECT @@session.time_zone AS mysqlSessionTimeZone, @@system_time_zone AS mysqlSystemTimeZone'
+                    );
+                    logRuntimeOperation('database_runtime_timezone', {
+                        nodeTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        nodeOffsetMinutes: new Date().getTimezoneOffset(),
+                        ...timeZone
+                    });
+                } catch (error) {
+                    console.warn('[DB] Timezone diagnostic unavailable:', error.code || error.message);
+                } finally {
+                    conn.release();
+                }
             })
             .catch(err => {
                 console.error('[DB] ❌ Test connection failed:', err.message);
@@ -17360,31 +17373,81 @@ async function collectEmailEvidenceForConfiguredTenants({ trigger = 'scheduled_h
     return { companyCount: companies.length, results };
 }
 
-async function performNetworkEvidenceCollection(companyId, collectionTrigger) {
+function isNetworkEvidenceCollectionEnabled() {
+    return !['false', '0', 'no'].includes(String(process.env.NETWORK_EVIDENCE_COLLECTION_ENABLED || 'true').toLowerCase());
+}
+
+async function verifyNetworkEvidenceCompany(companyId, database = pool, forPublication = false) {
+    const [companies] = await database.query(
+        `SELECT company.ID FROM Companies company
+         LEFT JOIN StackCTRLClientCapabilities capability ON capability.CompanyID = company.ID
+          AND capability.SourceKey = 'cloudflare_network_security'
+         WHERE company.ID = ? AND ((capability.CompanyID IS NULL AND LOWER(company.CompanyName) LIKE '%sunbird%')
+            OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1))
+         LIMIT 1${forPublication ? ' FOR SHARE' : ''}`, [companyId]
+    );
+    if (!companies.length) throw Object.assign(new Error('Cloudflare network evidence is not configured for this company.'), {
+        code: 'NETWORK_EVIDENCE_SCOPE_UNAVAILABLE', statusCode: 503
+    });
+}
+
+async function performNetworkEvidenceCollection(companyId, collectionTrigger, { signal, forceRefresh, freshnessThresholdMinutes } = {}) {
     if (!networkEvidenceService) throw new Error('Network evidence storage is not initialized');
     const sourceEndpoint = 'Cloudflare Zero Trust processed by StackCTRL Network Security';
+    const readAccountId = () => process.env.CLOUDFLARE_ACCOUNT_ID || getSecret('CLOUDFLARE_ACCOUNT_ID');
+    const collectionStartedAt = new Date();
+    let retrieving = false;
     try {
-        const summary = await getCloudflareNetworkSecuritySummary({ getSecret });
+        signal?.throwIfAborted();
+        await verifyNetworkEvidenceCompany(companyId);
+        const accountId = String(await readAccountId() || '').trim();
+        signal?.throwIfAborted();
+        if (!accountId) throw Object.assign(new Error('Cloudflare network account is not configured.'), { statusCode: 503 });
+        const accountScope = crypto.createHash('sha256').update(accountId).digest('hex');
+        if (!forceRefresh) {
+            const [rows] = await pool.query(
+                `SELECT ID, SourceFetchedAt, JSON_UNQUOTE(JSON_EXTRACT(SourceAuditJson, '$.accountScope')) AS AccountScope
+                 FROM StackCTRLNetworkEvidenceSnapshots WHERE CompanyID = ? AND IsComplete = 1
+                 AND CollectionStatus IN ('complete', 'completed_with_warnings')
+                 ORDER BY CollectedAt DESC, ID DESC LIMIT 1`, [companyId]
+            );
+            const latest = rows[0];
+            const age = Date.now() - new Date(latest?.SourceFetchedAt).getTime();
+            const threshold = Math.min(Math.max(60000, Number(process.env.NETWORK_EVIDENCE_COLLECTION_INTERVAL_MS) || 3600000),
+                (Number(freshnessThresholdMinutes) || 60) * 60000);
+            if (latest?.AccountScope === accountScope && age >= 0 && age < threshold) {
+                logRuntimeOperation('network_evidence_refresh_skipped_fresh', { companyId, collectionTrigger, snapshotId: latest.ID });
+                return { companyId, status: 'fresh', snapshotId: latest.ID };
+            }
+        }
+        retrieving = true;
+        const summary = await getCloudflareNetworkSecuritySummary({ getSecret, accountId, signal });
+        retrieving = false;
+        signal?.throwIfAborted();
+        if (String(await readAccountId() || '').trim() !== accountId) {
+            throw Object.assign(new Error('Cloudflare account changed before network evidence publication.'), { code: 'NETWORK_EVIDENCE_SCOPE_CHANGED' });
+        }
         const dashboardPayload = buildNetworkDashboardPayload({
             tenantKey: 'sunbird',
             payload: summary
         });
-        return networkEvidenceService.persistProcessedEvidence({
+        return await networkEvidenceService.persistProcessedEvidence({
             companyId,
             tenantKey: 'sunbird',
             payload: dashboardPayload,
             collectionTrigger,
-            sourceEndpoint
+            sourceEndpoint, signal, collectionStartedAt, accountScope,
+            verifyCompany: connection => verifyNetworkEvidenceCompany(companyId, connection, true)
         });
     } catch (error) {
         console.error(`[Network Evidence] Collection failed for CompanyID ${companyId}: ${error.message}`);
-        await networkEvidenceService.recordCollectionFailure({
+        if (retrieving && !signal?.aborted) await withCollectionPublication(pool, companyId, connection => networkEvidenceService.recordCollectionFailure({
             companyId,
             tenantKey: 'sunbird',
             collectionTrigger,
             sourceEndpoint,
-            error
-        }).catch(auditError => {
+            error, database: connection
+        })).catch(auditError => {
             console.warn('[Network Evidence] Collection failure could not be audited:', auditError.message);
         });
         throw error;
@@ -17392,17 +17455,36 @@ async function performNetworkEvidenceCollection(companyId, collectionTrigger) {
 }
 
 async function collectAndPersistNetworkEvidence(companyId, collectionTrigger = 'scheduled_hourly', collectorContext = {}) {
-    return networkEvidenceCollectors.run({ companyId, sourceKey: 'cloudflare_network_security', collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout: collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS, execute: ({ signal }) => performNetworkEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal }) });
+    if (!isNetworkEvidenceCollectionEnabled()) {
+        logRuntimeOperation('network_evidence_refresh_skipped_disabled', { companyId, collectionTrigger });
+        return { companyId, status: 'disabled' };
+    }
+    const source = 'cloudflare_network_security';
+    const timeout = collectorContext.timeoutMs || STACKCTRL_COLLECTOR_TIMEOUT_MS;
+    const run = () => networkEvidenceCollectors.run({ companyId, sourceKey: source, collectionTrigger, runId: collectorContext.runId || null, pipelineExecutionId: collectorContext.pipelineExecutionId || null, signal: collectorContext.signal || null, timeout,
+        // One lease per company also serializes overlapping revisions during an account change.
+        execute: ({ signal, controller }) => runWithCollectionOwnership(pool, { companyId, tenantId: 'cloudflare-network', source, signal, maxMs: timeout,
+            onOwnershipLost: error => controller.abort(error) },
+            () => performNetworkEvidenceCollection(companyId, collectionTrigger, { ...collectorContext, signal })) });
+    const result = await run();
+    if (result?.status === 'already_running') {
+        logRuntimeOperation('network_evidence_refresh_skipped_busy', { companyId, collectionTrigger });
+    }
+    return collectorContext.forceRefresh && result?.status === 'fresh' ? run() : result;
 }
 
 async function collectNetworkEvidenceForConfiguredTenants({ trigger = 'scheduled_hourly' } = {}) {
+    if (!isNetworkEvidenceCollectionEnabled()) {
+        logRuntimeOperation('network_evidence_refresh_skipped_disabled', { collectionTrigger: trigger });
+        return { companyCount: 0, results: [], status: 'disabled' };
+    }
     const [companies] = await pool.query(
         `SELECT DISTINCT company.ID AS CompanyID, company.CompanyName
          FROM Companies company
          LEFT JOIN StackCTRLClientCapabilities capability
            ON capability.CompanyID = company.ID
           AND capability.SourceKey = 'cloudflare_network_security'
-         WHERE LOWER(company.CompanyName) LIKE '%sunbird%'
+        WHERE (capability.CompanyID IS NULL AND LOWER(company.CompanyName) LIKE '%sunbird%')
             OR (capability.ProfileKey = 'sunbird' AND capability.IsExpected = 1 AND capability.IsEnabled = 1)`
     );
     const results = [];
@@ -17894,10 +17976,10 @@ async function refreshStackCTRLIntelligenceSource(sourceKey, companyId, collecto
             return null;
         }
         case 'cloudflare_network_security': {
-            if (networkEvidenceService) {
+            if (networkEvidenceService || !isNetworkEvidenceCollectionEnabled()) {
                 try {
-                    await collectAndPersistNetworkEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
-                    return null;
+                    const result = await collectAndPersistNetworkEvidence(companyId, 'enterprise_refresh', { ...collectorContext, sourceKey });
+                    return result?.status === 'disabled' ? result : null;
                 } catch (error) {
                     const refreshError = new Error(`Network evidence refresh failed: ${error.message}`);
                     refreshError.statusCode = error.statusCode || 500;
@@ -18038,7 +18120,7 @@ const networkEvidenceAutomation = createNetworkEvidenceAutomation({
         if (schema?.error) throw schema.error;
         return collectNetworkEvidenceForConfiguredTenants(options);
     },
-    enabled: !['false', '0', 'no'].includes(String(process.env.NETWORK_EVIDENCE_COLLECTION_ENABLED || 'true').toLowerCase()),
+    enabled: isNetworkEvidenceCollectionEnabled(),
     intervalMs: process.env.NETWORK_EVIDENCE_COLLECTION_INTERVAL_MS || (60 * 60 * 1000),
     startupDelayMs: process.env.NETWORK_EVIDENCE_COLLECTION_STARTUP_DELAY_MS || (11 * 60 * 1000)
 });

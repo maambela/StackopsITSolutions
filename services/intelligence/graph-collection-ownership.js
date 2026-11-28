@@ -53,7 +53,7 @@ async function releaseClaim(pool, claim) {
     );
 }
 
-async function runWithCollectionOwnership(pool, { companyId, tenantId, source, signal, maxMs = 180000, ttlMs = 60000, logger = console }, collect) {
+async function runWithCollectionOwnership(pool, { companyId, tenantId, source, signal, maxMs = 180000, ttlMs = 60000, logger = console, onOwnershipLost }, collect) {
     signal?.throwIfAborted();
     const claim = await acquireClaim(pool, claimKey(companyId, tenantId, source), companyId, source, ttlMs, randomUUID());
     if (!claim) return { companyId, source, status: 'already_running' };
@@ -62,7 +62,9 @@ async function runWithCollectionOwnership(pool, { companyId, tenantId, source, s
     let renewal;
     const timer = setInterval(() => {
         if (renewal || signal?.aborted || performance.now() >= deadline) return;
-        renewal = renewClaim(pool, claim, ttlMs).catch(error => {
+        renewal = renewClaim(pool, claim, ttlMs).then(renewed => {
+            if (!renewed) onOwnershipLost?.(collectionOwnershipError());
+        }).catch(error => {
             logger.warn('[Graph Collection Ownership] Renewal failed:', error.message);
         }).finally(() => { renewal = null; });
     }, Math.max(1000, Math.floor(ttlMs / 3)));
@@ -77,6 +79,10 @@ async function runWithCollectionOwnership(pool, { companyId, tenantId, source, s
     }
 }
 
+function collectionOwnershipError() {
+    return Object.assign(new Error('Graph collection ownership expired before publication'), { code: 'GRAPH_COLLECTION_OWNERSHIP_LOST' });
+}
+
 async function assertCollectionOwner(connection, companyId) {
     const claim = ownership.getStore();
     if (!claim) return;
@@ -89,7 +95,7 @@ async function assertCollectionOwner(connection, companyId) {
         );
         if (rows.length) return;
     }
-    throw Object.assign(new Error('Graph collection ownership expired before publication'), { code: 'GRAPH_COLLECTION_OWNERSHIP_LOST' });
+    throw collectionOwnershipError();
 }
 
 async function withCollectionPublication(database, companyId, write, { transaction = false } = {}) {

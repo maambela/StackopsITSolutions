@@ -1,5 +1,5 @@
 const { parseRetryAfterMs } = require('./microsoft-graph-collection');
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const { setTimeout: sleep } = require('node:timers/promises');
 
 function collectionRows(data) {
     if (Array.isArray(data?.result)) return data.result;
@@ -7,12 +7,13 @@ function collectionRows(data) {
     return null;
 }
 
-async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, timeoutMs = 60000, now = Date.now, onPage = () => {}, resumeQuery = null, preview = false, requireCollection = false } = {}) {
+async function fetchCloudflarePages(client, url, query = {}, { wait = (ms, signal) => sleep(ms, undefined, { signal }), timeoutMs = 60000, now = Date.now, onPage = () => {}, resumeQuery = null, preview = false, requireCollection = false, signal } = {}) {
     const rows = [], seen = new Set(), pageContents = new Set();
     let params = { ...(resumeQuery || query) }, pages = 0, retries = 0, rateLimits = 0, httpStatus = null;
     const deadline = now() + timeoutMs;
     try {
         while (true) {
+            signal?.throwIfAborted();
             if (now() >= deadline) throw new Error('Cloudflare collection deadline reached');
             const key = JSON.stringify(params);
             if (seen.has(key)) throw new Error('Cloudflare repeated its pagination cursor');
@@ -20,19 +21,21 @@ async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, tim
             let data;
             for (let attempt = 0; ; attempt++) {
                 try {
-                    const response = await client.get(url, { params, timeout: Math.max(1, deadline - now()) });
+                    const response = await client.get(url, { params, timeout: Math.max(1, deadline - now()), signal });
+                    signal?.throwIfAborted();
                     data = response.data;
                     if (Number.isFinite(Number(response.status))) httpStatus = Number(response.status);
                     if (data?.success === false) throw new Error(data.errors?.map(e => e.message).join('; ') || 'Cloudflare API failure');
                     break;
                 } catch (error) {
+                    signal?.throwIfAborted();
                     const status = error.response?.status;
                     if (status === 429) rateLimits++;
                     if (attempt >= 2 || ![429, 500, 502, 503, 504].includes(status)) throw error;
                     const delay = parseRetryAfterMs(error.response?.headers?.['retry-after']) ?? 1000 * 2 ** attempt;
                     if (now() + delay >= deadline) throw error;
                     retries++;
-                    await wait(delay);
+                    await wait(delay, signal);
                 }
             }
             pages++;
@@ -57,6 +60,7 @@ async function fetchCloudflarePages(client, url, query = {}, { wait = sleep, tim
             if (preview) return { ...data, result: rows, collection: { pages, retries, rateLimits, complete: false, nextQuery: params } };
         }
     } catch (error) {
+        signal?.throwIfAborted();
         if (!pages) throw error;
         return { result: rows, collection: { pages, retries, rateLimits, complete: false, nextQuery: params, error: error.message } };
     }

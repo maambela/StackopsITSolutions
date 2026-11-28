@@ -345,6 +345,7 @@ function summarizeSectionError(error, endpoint = {}) {
 }
 
 async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}) {
+  options.signal?.throwIfAborted();
   const method = String(endpoint.method || 'get').toLowerCase();
   const url = endpoint.path(accountId);
   const collector = endpoint.key === 'zones' ? null : options.collection;
@@ -358,16 +359,17 @@ async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}
     query = { ...query, since, ...(['notificationHistory', 'accountLogs'].includes(endpoint.key) ? { before: range.until } : { until: range.until }) };
     if (['accessLogs', 'auditLogs', 'accountLogs'].includes(endpoint.key)) query.direction = 'desc';
   }
-  if (method === 'post') return (await client.post(url, endpoint.body || {})).data;
+  if (method === 'post') return (await client.post(url, endpoint.body || {}, { signal: options.signal })).data;
   let latest = [];
   let resumeQuery = previous?.continuation || null, head;
   const recordKey = row => row.id || row.uuid || JSON.stringify(row);
   if (previous?.continuation) {
-    head = await fetchCloudflarePages(client, url, query, { preview: true, requireCollection: options.securityOnly, onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', headIds: page.value.map(recordKey), continuation: previous.continuation }) });
+    head = await fetchCloudflarePages(client, url, query, { signal: options.signal, preview: true, requireCollection: options.securityOnly, onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', headIds: page.value.map(recordKey), continuation: previous.continuation }) });
     latest = getList(head);
     if (!latest.some(row => previous.headIds?.includes(recordKey(row)))) resumeQuery = head.collection?.nextQuery || null;
   }
   const result = head && !resumeQuery ? head : await fetchCloudflarePages(client, url, query, {
+    signal: options.signal,
     requireCollection: options.securityOnly,
     resumeQuery,
     onPage: page => collector?.publish('Cloudflare', url, endpoint.key, page.value, { complete: false, status: 'collecting', ...(!head && page.pages === 1 ? { headIds: page.value.map(recordKey) } : {}), continuation: page.nextQuery, pages: page.pages, rateLimits: page.rateLimits, recordsRetrieved: page.recordsRetrieved })
@@ -378,9 +380,10 @@ async function fetchCloudflareEndpoint(client, endpoint, accountId, options = {}
   return result;
 }
 
-async function fetchCloudflareZoneEndpoint(client, endpoint, zones = []) {
+async function fetchCloudflareZoneEndpoint(client, endpoint, zones = [], signal) {
   if (!zones.length) return { result: [] };
-  const settled = await Promise.allSettled(zones.map(zone => fetchCloudflareEndpoint(client, endpoint, zone.id)));
+  const settled = await Promise.allSettled(zones.map(zone => fetchCloudflareEndpoint(client, endpoint, zone.id, { signal })));
+  signal?.throwIfAborted();
   const fulfilled = settled.filter(result => result.status === 'fulfilled').map(result => result.value);
   if (fulfilled.length) return { result: fulfilled.flatMap(value => getList(value)) };
   throw settled.find(result => result.status === 'rejected')?.reason || new Error('Cloudflare zone endpoint failed');
@@ -650,8 +653,10 @@ async function resolveCloudflareSecret(secretName, getSecret) {
 }
 
 async function getCloudflareNetworkSecuritySummary(options = {}) {
+  options.signal?.throwIfAborted();
   const accountId = options.accountId || await resolveCloudflareSecret('CLOUDFLARE_ACCOUNT_ID', options.getSecret);
   const apiToken = options.apiToken || await resolveCloudflareSecret('CLOUDFLARE_API_TOKEN', options.getSecret);
+  options.signal?.throwIfAborted();
 
   if (!accountId || !apiToken) {
     const missing = [
@@ -679,6 +684,7 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
   const settled = await Promise.allSettled(
     accountEndpoints.map(endpoint => fetchCloudflareEndpoint(client, endpoint, accountId, options))
   );
+  options.signal?.throwIfAborted();
 
   const raw = accountEndpoints.map((endpoint, index) => {
     const result = settled[index];
@@ -711,8 +717,9 @@ async function getCloudflareNetworkSecuritySummary(options = {}) {
   const zonesResult = raw.find(item => item.key === 'zones' && item.status === 'ok')?.data;
   const zones = getList(zonesResult).map(zone => ({ id: zone.id, name: zone.name })).filter(zone => zone.id);
   const zoneSettled = await Promise.allSettled(
-    zoneEndpoints.map(endpoint => fetchCloudflareZoneEndpoint(client, endpoint, zones))
+    zoneEndpoints.map(endpoint => fetchCloudflareZoneEndpoint(client, endpoint, zones, options.signal))
   );
+  options.signal?.throwIfAborted();
   zoneEndpoints.forEach((endpoint, index) => {
     const result = zoneSettled[index];
     if (!zones.length) {
