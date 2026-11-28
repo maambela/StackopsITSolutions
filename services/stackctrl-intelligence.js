@@ -4,6 +4,10 @@ const { buildDashboardIntelligenceContexts } = require('./intelligence/dashboard
 const { buildRiskEngine } = require('./intelligence/risk-engine');
 const { DateTime } = require('luxon');
 const { buildCompactIntelligenceContext, sizeBytes } = require('./intelligence/compact-context-builder');
+const { hydrateTenantSnapshot, canonicalEvidenceSql, logicalContextBytesSql } = require('./intelligence/tenant-snapshot-storage');
+
+const snapshotColumns = `ID, CompanyID, TenantKey, PeriodStart, PeriodEnd, CreatedAt,
+                    MetricsJson, ContextJson, ${canonicalEvidenceSql}`;
 
 const ALLOWED_OUTPUT_TYPES = new Set([
     'executive_summary',
@@ -286,15 +290,15 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
         const numericSnapshotId = Number(snapshotId || 0);
         const [rows] = numericSnapshotId
             ? await pool.query(
-                'SELECT * FROM StackCTRLTenantEvidenceSnapshots WHERE ID = ? AND CompanyID = ? LIMIT 1',
+                `SELECT ${snapshotColumns} FROM StackCTRLTenantEvidenceSnapshots WHERE ID = ? AND CompanyID = ? LIMIT 1`,
                 [numericSnapshotId, numericCompanyId]
             )
             : await pool.query(
-                'SELECT * FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ? ORDER BY ID DESC LIMIT 1',
+                `SELECT ${snapshotColumns} FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ? ORDER BY ID DESC LIMIT 1`,
                 [numericCompanyId]
             );
         if (!rows.length) throw new Error('Snapshot not found');
-        return normalizeStoredRow(rows[0]);
+        return normalizeStoredRow(hydrateTenantSnapshot(rows[0], { companyId: numericCompanyId, logger }));
     }
 
     async function buildCompactContext({
@@ -306,6 +310,10 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
         historicalContext = null
     }) {
         const snapshot = await loadSnapshot(companyId, snapshotId);
+        return buildCompactContextFromSnapshot(snapshot, { companyId, periodType, periodStart, periodEnd, historicalContext });
+    }
+
+    async function buildCompactContextFromSnapshot(snapshot, { companyId, periodType, periodStart, periodEnd, historicalContext }) {
         const rollupType = PERIOD_ROLLUP_TYPES[String(periodType).toLowerCase()];
         let periodRollups = [];
         if (rollupType && periodStart && periodEnd) {
@@ -385,7 +393,7 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
         if (!rows.length) return null;
         const row = normalizeStoredRow(rows[0]);
         const [snapshotRows] = await pool.query(
-            `SELECT OCTET_LENGTH(ContextJson) AS FullContextSizeBytes
+            `SELECT ${logicalContextBytesSql} AS FullContextSizeBytes
              FROM StackCTRLTenantEvidenceSnapshots WHERE ID = ? AND CompanyID = ? LIMIT 1`,
             [Number(snapshotId), Number(companyId)]
         );
@@ -865,26 +873,23 @@ ${JSON.stringify(context)}`;
         };
     }
 
-    async function analyseSnapshot({
+    async function analyseSnapshot(options) {
+        const requestedTypes = validateOutputTypes(options.outputTypes);
+        if (!Number(options.snapshotId)) throw new Error('Snapshot not found');
+        const snapshot = await loadSnapshot(options.companyId, options.snapshotId);
+        return analyseLoadedSnapshot(snapshot, { ...options, requestedTypes });
+    }
+
+    async function analyseLoadedSnapshot(snapshot, {
         snapshotId,
         companyId,
-        outputTypes,
+        requestedTypes,
         user = {},
         historicalContext = null,
         analysisMode = 'compact',
         compactContext = null,
         periodType = 'snapshot'
     }) {
-        const requestedTypes = validateOutputTypes(outputTypes);
-        const [snapshots] = await pool.query(
-            `SELECT * FROM StackCTRLTenantEvidenceSnapshots
-             WHERE ID = ? AND CompanyID = ?
-             LIMIT 1`,
-            [snapshotId, companyId]
-        );
-        if (!snapshots.length) throw new Error('Snapshot not found');
-
-        const snapshot = normalizeStoredRow(snapshots[0]);
         const [runResult] = await pool.query(
             `INSERT INTO StackCTRLIntelligenceRuns
              (CompanyID, SnapshotID, Status, RequestedOutputTypes, CreatedByUserID, CreatedByEmail)
@@ -907,9 +912,8 @@ ${JSON.stringify(context)}`;
             } else if (compactContext?.contextType === 'stackctrl_compact_intelligence') {
                 analysisContext = compactContext;
             } else {
-                compactBuild = await buildCompactContext({
+                compactBuild = await buildCompactContextFromSnapshot(snapshot, {
                     companyId,
-                    snapshotId,
                     periodType,
                     historicalContext
                 });
@@ -1110,9 +1114,8 @@ ${JSON.stringify(context)}`;
     }) {
         const window = getPeriodWindow(periodType, referenceDate);
         const snapshot = await loadSnapshot(companyId, snapshotId);
-        const compact = await buildCompactContext({
+        const compact = await buildCompactContextFromSnapshot(snapshot, {
             companyId,
-            snapshotId: snapshot.ID,
             periodType: window.periodType,
             periodStart: window.periodStart,
             periodEnd: window.periodEnd,
@@ -1142,10 +1145,10 @@ ${JSON.stringify(context)}`;
         const periodId = Number(periodResult.insertId);
 
         try {
-            const analysis = await analyseSnapshot({
+            const analysis = await analyseLoadedSnapshot(snapshot, {
                 snapshotId: snapshot.ID,
                 companyId: Number(companyId),
-                outputTypes: requestedTypes,
+                requestedTypes,
                 user,
                 historicalContext,
                 compactContext: compact,

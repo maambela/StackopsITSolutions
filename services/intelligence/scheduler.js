@@ -1,6 +1,13 @@
 const crypto = require('crypto');
 const { DateTime } = require('luxon');
 const { buildHistoricalIntelligence } = require('./historical-engine');
+const { hydrateTenantSnapshot, canonicalEvidenceSql } = require('./tenant-snapshot-storage');
+
+const historicalSnapshotColumns = [
+    'ID', 'CompanyID', 'TenantKey', 'SnapshotType', 'CreatedAt',
+    'DataCompletenessScore', 'MetricsJson', 'ContextJson'
+];
+const aliasedHistoricalProjection = `${historicalSnapshotColumns.map(column => `snapshot.${column}`).join(', ')}, ${canonicalEvidenceSql}`;
 
 const TIME_ZONE = 'Africa/Johannesburg';
 const BUSINESS_START_MINUTE = 8 * 60;
@@ -300,7 +307,7 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
     async function findNearestSnapshot(companyId, current, target) {
         if (target.key === 'previous') {
             const [rows] = await pool.query(
-                `SELECT snapshot.*
+                `SELECT ${aliasedHistoricalProjection}
                  FROM StackCTRLTenantEvidenceSnapshots snapshot
                  WHERE snapshot.ID = (
                     SELECT MAX(previous.ID)
@@ -333,7 +340,7 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
             Math.abs(new Date(left).getTime() - targetAt.getTime()) - Math.abs(new Date(right).getTime() - targetAt.getTime())
         )[0];
         const [rows] = await pool.query(
-            `SELECT snapshot.*
+            `SELECT ${aliasedHistoricalProjection}
              FROM StackCTRLTenantEvidenceSnapshots snapshot
              WHERE snapshot.ID = (
                 SELECT MAX(candidate.ID)
@@ -351,18 +358,19 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
 
     async function getHistoricalSnapshotContext(companyId, currentSnapshotId) {
         const [currentRows] = await pool.query(
-            `SELECT * FROM StackCTRLTenantEvidenceSnapshots
+            `SELECT ${historicalSnapshotColumns.join(', ')}, ${canonicalEvidenceSql} FROM StackCTRLTenantEvidenceSnapshots
              WHERE ID = ? AND CompanyID = ? LIMIT 1`,
             [currentSnapshotId, companyId]
         );
         if (!currentRows.length) throw new Error('Current snapshot not found');
-        const current = currentRows[0];
+        const current = hydrateTenantSnapshot(currentRows[0], { companyId, logger });
         const currentMetrics = parseJson(current.MetricsJson, {});
         const comparisons = {};
         let historicalComparisonsStored = true;
 
         for (const target of HISTORICAL_TARGETS) {
-            const baseline = await findNearestSnapshot(companyId, current, target);
+            const storedBaseline = await findNearestSnapshot(companyId, current, target);
+            const baseline = storedBaseline && hydrateTenantSnapshot(storedBaseline, { companyId, logger });
             const baselineMetrics = baseline ? parseJson(baseline.MetricsJson, {}) : {};
             const metricChanges = baseline ? compareMetrics(currentMetrics, baselineMetrics) : {};
             const targetAt = target.key === 'previous'

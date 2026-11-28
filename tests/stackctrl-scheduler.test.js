@@ -43,7 +43,7 @@ test('08:00 weekday tick collects, freezes a snapshot, and analyses it with hist
             queries.push({ sql, params });
             if (sql.includes('SELECT * FROM StackCTRLIntelligenceSchedules')) return [scheduleRows(), []];
             if (sql.includes('INSERT INTO StackCTRLIntelligenceScheduleRuns')) return [{ insertId: scheduleRunId++ }, []];
-            if (sql.includes('SELECT * FROM StackCTRLTenantEvidenceSnapshots') && sql.includes('WHERE ID = ?')) {
+            if (sql.includes('FROM StackCTRLTenantEvidenceSnapshots') && sql.includes('ContextJson') && sql.includes('WHERE ID = ?')) {
                 return [[currentSnapshot], []];
             }
             if (sql.includes('SELECT MAX(previous.ID)')) {

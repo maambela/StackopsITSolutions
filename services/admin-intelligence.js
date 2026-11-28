@@ -1,3 +1,5 @@
+const { logicalContextBytesSql } = require('./intelligence/tenant-snapshot-storage');
+
 function parseJson(value, fallback = null) {
     if (value == null) return fallback;
     if (Buffer.isBuffer(value)) value = value.toString('utf8');
@@ -197,13 +199,15 @@ function createAdminIntelligenceService({
 
         const [snapshotRows] = await pool.query(
             `SELECT ID, CompanyID, TenantKey, SnapshotType, DataCompletenessScore, CreatedAt,
-                    OCTET_LENGTH(ContextJson) AS ContextSizeBytes
+                    OCTET_LENGTH(ContextJson) AS ContextSizeBytes,
+                    ${logicalContextBytesSql} AS LogicalContextSizeBytes
              FROM StackCTRLTenantEvidenceSnapshots
              WHERE ID = (SELECT MAX(ID) FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ?)
              LIMIT 1`,
             [numericCompanyId]
         );
         const snapshot = normalizeRow(snapshotRows[0]);
+        const { LogicalContextSizeBytes, ...snapshotMetadata } = snapshot || {};
         const snapshotId = snapshot?.ID || 0;
         const readinessTables = [
             'StackCTRLTenantAIOutputs',
@@ -264,7 +268,7 @@ function createAdminIntelligenceService({
                 capabilities: capabilitySummary(capabilityRows[0])
             },
             latestSnapshot: snapshot ? {
-                ...snapshot,
+                ...snapshotMetadata,
                 expectedSources: expectedSources.length,
                 availableSources: availableSources.length,
                 missingSources: expectedSources.filter(source => ['missing', 'not_configured', 'error'].includes(source.Status)).length,
@@ -279,7 +283,7 @@ function createAdminIntelligenceService({
             trends: trendRows[0].map(normalizeRow),
             compactContexts: compactRows[0].map(row => {
                 const normalized = normalizeRow(row);
-                const fullSize = Number(snapshot?.ContextSizeBytes || 0);
+                const fullSize = Number(LogicalContextSizeBytes || 0);
                 return {
                     ...normalized,
                     FullContextSizeBytes: fullSize,

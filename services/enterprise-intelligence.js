@@ -1,6 +1,11 @@
 const { DateTime } = require('luxon');
 const { buildDashboardIntelligenceContext } = require('./intelligence/dashboard-context');
 const { getExplicitSecurityIocs } = require('./intelligence/security-ioc');
+const { hydrateTenantSnapshot, canonicalEvidenceSql } = require('./intelligence/tenant-snapshot-storage');
+
+const enterpriseSnapshotColumns = `ID, CompanyID, TenantKey, SnapshotType, PeriodStart, PeriodEnd,
+                    SourceFreshnessJson, MetricsJson, ContextJson, DataCompletenessScore, CreatedAt,
+                    ${canonicalEvidenceSql}`;
 
 const ENTERPRISE_DOMAINS = Object.freeze([
     { key: 'identity', name: 'Identity Protection', sourceKey: 'identity', mode: 'enterprise_domain_identity', riskKey: 'identity', healthKey: 'identityHealth', focus: ['MFA coverage', 'users without MFA', 'privileged accounts', 'admin roles', 'legacy authentication', 'risky sign-ins', 'external users', 'Conditional Access gaps'] },
@@ -4377,13 +4382,12 @@ function createEnterpriseIntelligenceService({
         const where = snapshotId ? 'ID = ? AND CompanyID = ?' : 'CompanyID = ? ORDER BY ID DESC LIMIT 1';
         const params = snapshotId ? [Number(snapshotId), Number(companyId)] : [Number(companyId)];
         const [rows] = await pool.query(
-            `SELECT ID, CompanyID, TenantKey, SnapshotType, PeriodStart, PeriodEnd,
-                    SourceFreshnessJson, MetricsJson, ContextJson, DataCompletenessScore, CreatedAt
+            `SELECT ${enterpriseSnapshotColumns}
              FROM StackCTRLTenantEvidenceSnapshots WHERE ${where}`,
             params
         );
         if (!rows.length) throw new Error('Create a frozen StackCTRL snapshot before running Enterprise Deep Reporting');
-        return rows[0];
+        return hydrateTenantSnapshot(rows[0], { companyId, logger });
     }
 
     async function loadKnowledge(domainKey) {
@@ -8689,7 +8693,12 @@ Return exactly these top-level fields:
     async function runRollupReport({ companyId, periodType, referenceDate = new Date(), deduplicationKey = null }) {
         if (!LOWER_PERIOD[periodType]) throw new Error('Rollup period must be weekly, monthly, or yearly');
         assertRateLimitCircuitClosed();
-        const latestSnapshot = await loadSnapshot(companyId, null);
+        const [snapshots] = await pool.query(
+            'SELECT ID FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ? ORDER BY ID DESC LIMIT 1',
+            [Number(companyId)]
+        );
+        const latestSnapshot = snapshots[0];
+        if (!latestSnapshot) throw new Error('Create a frozen StackCTRL snapshot before running Enterprise Deep Reporting');
         const run = await createRun({ companyId: Number(companyId), snapshotId: latestSnapshot.ID, periodType, referenceDate, mode: `enterprise_${periodType}_synthesis`, deduplicationKey });
         if (run.duplicate) return { status: 'duplicate', runId: run.id, periodType };
         try {
@@ -9954,9 +9963,12 @@ Return exactly these top-level fields:
     }
     async function getPowerBIRaw(companyId, domainKey = null) {
         if (domainKey && !DOMAIN_BY_KEY[domainKey]) { const error = new Error(`Unsupported enterprise domain: ${domainKey}`); error.statusCode = 400; throw error; }
-        const [rows] = await pool.query('SELECT * FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ? ORDER BY ID DESC LIMIT 1', [Number(companyId)]);
-        const snapshot = rows[0];
-        if (!snapshot) { const error = new Error('StackCTRL evidence snapshot not found'); error.statusCode = 404; throw error; }
+        const [rows] = await pool.query(
+            `SELECT ${enterpriseSnapshotColumns} FROM StackCTRLTenantEvidenceSnapshots WHERE CompanyID = ? ORDER BY ID DESC LIMIT 1`,
+            [Number(companyId)]
+        );
+        if (!rows.length) { const error = new Error('StackCTRL evidence snapshot not found'); error.statusCode = 404; throw error; }
+        const snapshot = hydrateTenantSnapshot(rows[0], { companyId, logger });
         const context = parseJson(snapshot.ContextJson, {});
         const sources = array(context.sources);
         const selectedSources = domainKey ? sources.filter(source => source.sourceKey === DOMAIN_BY_KEY[domainKey].sourceKey) : sources;
