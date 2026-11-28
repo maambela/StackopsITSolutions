@@ -17,6 +17,7 @@ test('dashboard cache writes keep the newest complete company snapshot and its o
     const write = vm.runInNewContext(
         section(server, 'async function writeMicrosoftDashboardCache', 'async function writeBackupRecoveryPayloadCache') +
         '\nwriteMicrosoftDashboardCache;', {
+            ...require('../services/intelligence/sql-payload-diagnostics'),
             console: { warn() {} },
             withCollectionPublication: (database, _company, publish) => publish(database)
         }

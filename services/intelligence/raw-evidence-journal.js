@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const { rawSecurityRecord } = require('./raw-security-records');
 const { fetchGraphCollectionPagesWithRetry } = require('./microsoft-graph-collection');
 const { SECURITY_ALERT_STORAGE_ENABLED } = require('./security-storage-policy');
+const { createSqlPayloadDiagnostics, sqlPayloadErrorMessage } = require('./sql-payload-diagnostics');
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const parse = value => typeof value === 'string' ? JSON.parse(value) : value;
 const GRAPH_RESULT_CACHE_TTLS_MS = Object.freeze({
@@ -122,6 +123,9 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
         const task = (queues.get(companyId) || Promise.resolve()).then(async () => {
             await ensureSchema();
             const connection = await pool.getConnection();
+            const diagnostics = createSqlPayloadDiagnostics(connection, {
+                companyId, logger, evidenceCounts: { raw_security: records.length }
+            });
             try {
                 await connection.beginTransaction();
                 if (assertGraphOwner && state?.provider === 'Microsoft Graph') await assertGraphOwner(connection, companyId);
@@ -129,16 +133,18 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
                     .filter(item => item.digest !== item.prior?.digest || now().getTime() - item.prior.at >= 300000);
                 for (let offset = 0; offset < changed.length; offset += 100) {
                     const batch = changed.slice(offset, offset + 100);
-                    await connection.query(
+                    await diagnostics.query('raw_security_record_batch_insert',
                     `INSERT INTO StackCTRLRawSecurityRecords (CompanyID, RecordKey, Provider, Endpoint, ProviderRecordID, EventTime, FirstRetrievedAt, LastRetrievedAt, ProviderVersion, RecordJson)
                      VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')} ON DUPLICATE KEY UPDATE
                      EventTime = IF(VALUES(ProviderVersion) >= ProviderVersion, VALUES(EventTime), EventTime), LastRetrievedAt = VALUES(LastRetrievedAt), RecordJson = IF(VALUES(ProviderVersion) >= ProviderVersion, VALUES(RecordJson), RecordJson), ProviderVersion = GREATEST(ProviderVersion, VALUES(ProviderVersion))`,
-                    batch.flatMap(({ record }) => [companyId, hash(record.uid), record.provider, record.endpoint, String(record.id), Number.isFinite(Date.parse(record.timestamp)) ? new Date(record.timestamp).toISOString() : null, record.retrievedAt, record.retrievedAt, record.providerVersion || 0, JSON.stringify(record)]));
+                    batch.flatMap(({ record }) => [companyId, hash(record.uid), record.provider, record.endpoint, String(record.id), Number.isFinite(Date.parse(record.timestamp)) ? new Date(record.timestamp).toISOString() : null, record.retrievedAt, record.retrievedAt, record.providerVersion || 0, JSON.stringify(record)]),
+                    { quiet: offset > 0, columns: { RecordJson: batch.map((_, index) => index * 10 + 9) } });
                 }
                 if (state && storageFailures.has(key(companyId, state.provider, state.endpoint))) { state.complete = false; state.status = 'partial'; state.continuation = null; state.storageError = 'An earlier page failed to store; a full replay is required.'; }
-                if (state) await connection.query(
+                if (state) await diagnostics.query('raw_security_sync_upsert',
                     `INSERT INTO StackCTRLRawSecuritySync (CompanyID, SourceKey, StateJson) VALUES (?, ?, ?)
-                     ON DUPLICATE KEY UPDATE StateJson = VALUES(StateJson)`, [companyId, hash(`${state.provider}:${state.endpoint}`), JSON.stringify({ ...state, storageStatus: 'stored' })]);
+                     ON DUPLICATE KEY UPDATE StateJson = VALUES(StateJson)`, [companyId, hash(`${state.provider}:${state.endpoint}`), JSON.stringify({ ...state, storageStatus: 'stored' })],
+                    { columns: { StateJson: 2 } });
                 if (assertGraphOwner && state?.provider === 'Microsoft Graph') await assertGraphOwner(connection, companyId);
                 await connection.commit();
                 for (const { record, digest } of changed) { persisted.delete(record.uid); persisted.set(record.uid, { digest, at: now().getTime() }); }
@@ -150,9 +156,9 @@ function createRawEvidenceJournal({ pool, now = () => new Date(), logger = conso
             if (state) storageFailures.add(key(companyId, state.provider, state.endpoint));
             if (state) {
                 const current = states.get(key(companyId, state.provider, state.endpoint));
-                if (current) { current.storageStatus = 'failed'; current.storageError = error.message; current.continuation = null; }
+                if (current) { current.storageStatus = 'failed'; current.storageError = sqlPayloadErrorMessage(error); current.continuation = null; }
             }
-            logger.warn('[Raw evidence] Persistence failed:', error.message);
+            logger.warn('[Raw evidence] Persistence failed:', sqlPayloadErrorMessage(error));
         });
         queues.set(companyId, handled);
         return task;

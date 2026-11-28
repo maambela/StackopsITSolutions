@@ -231,6 +231,7 @@ test('isolated MySQL serializes claims, fences old writers and rolls back failed
         const from = source.indexOf('async function writeVerifiedEmailDashboard');
         const to = source.indexOf('function hasCompleteSecurityDashboard', from);
         const writeEmail = vm.runInNewContext(source.slice(from, to) + '\nwriteVerifiedEmailDashboard;', {
+            ...require('../services/intelligence/sql-payload-diagnostics'),
             pool, hasEmailDashboardState, mergeVerifiedEmailSources, readEmailReportRefreshDate,
             withCollectionPublication, parseReportJson: (payload, fallback) => payload ? JSON.parse(payload) : fallback,
             crypto: { randomUUID }, logRuntimeOperation() {}

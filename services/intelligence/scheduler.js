@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const { DateTime } = require('luxon');
 const { buildHistoricalIntelligence } = require('./historical-engine');
 const { hydrateTenantSnapshot, canonicalEvidenceSql } = require('./tenant-snapshot-storage');
+const { createSqlPayloadDiagnostics, onSqlPayloadConnection, sourceEvidenceCounts, sqlPayloadErrorMessage, withSnapshotSqlRequest } =
+    require('./sql-payload-diagnostics');
 
 const historicalSnapshotColumns = [
     'ID', 'CompanyID', 'TenantKey', 'SnapshotType', 'CreatedAt',
@@ -242,17 +244,16 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
         }
     }
 
-    async function completeScheduleRun(runId, details = {}) {
+    async function completeScheduleRun(runId, details, companyId) {
         if (!runId) return;
-        await pool.query(
-            `UPDATE StackCTRLIntelligenceScheduleRuns
+        const sql = `UPDATE StackCTRLIntelligenceScheduleRuns
              SET Status = ?, SnapshotID = COALESCE(?, SnapshotID),
                  IntelligenceRunID = COALESCE(?, IntelligenceRunID),
                  CollectionSummaryJson = COALESCE(?, CollectionSummaryJson),
                  HistoricalContextJson = COALESCE(?, HistoricalContextJson),
                  ErrorMessage = ?, CompletedAt = NOW()
-             WHERE ID = ?`,
-            [
+             WHERE ID = ?`;
+        const values = [
                 details.status || 'completed',
                 details.snapshotId || null,
                 details.intelligenceRunId || null,
@@ -260,8 +261,16 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
                 details.historicalContext ? JSON.stringify(details.historicalContext) : null,
                 details.errorMessage || null,
                 runId
-            ]
-        );
+        ];
+        if (!details.collectionSummary && !details.historicalContext) {
+            await pool.query(sql, values);
+            return;
+        }
+        await onSqlPayloadConnection(pool, connection => createSqlPayloadDiagnostics(connection, {
+            companyId, logger, evidenceCounts: sourceEvidenceCounts(details.collectionSummary?.context?.sources)
+        }).query('intelligence_schedule_update', sql, values, {
+            columns: { CollectionSummaryJson: 3, HistoricalContextJson: 4, ErrorMessage: 5 }
+        }));
     }
 
     async function runTenantDataCollection(companyId) {
@@ -599,16 +608,20 @@ function createStackCTRLIntelligenceScheduler({ pool, intelligenceService, logge
         const runId = await beginScheduleRun(options);
         if (!runId) return { status: 'duplicate', scheduleKey: options.scheduleKey };
         try {
-            const result = await task(runId);
-            await completeScheduleRun(runId, { status: 'completed', ...result.audit });
+            const result = await withSnapshotSqlRequest(async () => {
+                const value = await task(runId);
+                await completeScheduleRun(runId, { status: 'completed', ...value.audit }, options.companyId);
+                return value;
+            });
             if (options.schedule?.ID) {
                 await pool.query('UPDATE StackCTRLIntelligenceSchedules SET LastRunAt = NOW() WHERE ID = ?', [options.schedule.ID]);
             }
             return { status: 'completed', runId, ...result.value };
         } catch (error) {
-            await completeScheduleRun(runId, { status: 'failed', errorMessage: error.message });
-            logger.error(`[StackCTRL Intelligence Scheduler] ${options.scheduleKey} failed:`, error.message);
-            return { status: 'failed', runId, message: error.message };
+            const message = sqlPayloadErrorMessage(error);
+            await completeScheduleRun(runId, { status: 'failed', errorMessage: message });
+            logger.error(`[StackCTRL Intelligence Scheduler] ${options.scheduleKey} failed:`, message);
+            return { status: 'failed', runId, message };
         }
     }
 

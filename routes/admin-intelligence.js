@@ -1,4 +1,12 @@
 const express = require('express');
+const { snapshotFailureCode, withSnapshotSqlRequest } = require('../services/intelligence/sql-payload-diagnostics');
+
+const snapshotFailureMessages = {
+    SNAPSHOT_SQL_PAYLOAD_TOO_LARGE: 'Snapshot data exceeds the database packet limit. The previous snapshot remains available.',
+    SNAPSHOT_DATABASE_UNAVAILABLE: 'The database connection was interrupted during snapshot creation.',
+    SNAPSHOT_COMMIT_OUTCOME_UNKNOWN: 'Snapshot commit could not be verified. Check the latest snapshot before trying again.',
+    SNAPSHOT_CREATION_FAILED: 'Snapshot creation failed.'
+};
 
 function createAdminIntelligenceRouter({ authenticateToken, adminIntelligenceService, enterpriseIntelligenceService = null } = {}) {
     if (!authenticateToken || !adminIntelligenceService) {
@@ -70,16 +78,17 @@ function createAdminIntelligenceRouter({ authenticateToken, adminIntelligenceSer
         }
     });
 
-    router.post('/tenant/:companyId/snapshot', async (req, res) => {
+    router.post('/tenant/:companyId/snapshot', (req, res) => withSnapshotSqlRequest(async requestId => {
         try {
             const companyId = companyIdFrom(req, res);
             if (!companyId) return;
             const result = await adminIntelligenceService.createSnapshot(companyId, req.user);
             res.status(201).json({ success: true, ...result });
         } catch (error) {
-            sendError(res, error, 'Snapshot creation failed');
+            const code = snapshotFailureCode(error);
+            res.status(500).json({ success: false, code, message: snapshotFailureMessages[code], requestId });
         }
-    });
+    }));
 
     router.post('/tenant/:companyId/analyze', async (req, res) => {
         try {

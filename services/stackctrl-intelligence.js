@@ -5,6 +5,8 @@ const { buildRiskEngine } = require('./intelligence/risk-engine');
 const { DateTime } = require('luxon');
 const { buildCompactIntelligenceContext, sizeBytes } = require('./intelligence/compact-context-builder');
 const { hydrateTenantSnapshot, canonicalEvidenceSql, logicalContextBytesSql } = require('./intelligence/tenant-snapshot-storage');
+const { connectionUnusable, createSqlPayloadDiagnostics, markSnapshotFailure, sourceEvidenceCounts, sqlPayloadErrorMessage } =
+    require('./intelligence/sql-payload-diagnostics');
 
 const snapshotColumns = `ID, CompanyID, TenantKey, PeriodStart, PeriodEnd, CreatedAt,
                     MetricsJson, ContextJson, ${canonicalEvidenceSql}`;
@@ -609,10 +611,16 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
     async function persistBuiltSnapshot({ built, snapshotType, user }) {
         const actor = user && typeof user === 'object' ? user : {};
         const connection = await pool.getConnection();
+        const diagnostics = createSqlPayloadDiagnostics(connection, {
+            companyId: built.companyId, logger, evidenceCounts: sourceEvidenceCounts(built.sources)
+        });
         let snapshotId;
+        let phase = 'begin';
+        let reusable = true;
         try {
             await connection.beginTransaction();
-            const [result] = await connection.query(
+            phase = 'write';
+            const [result] = await diagnostics.query('tenant_snapshot_insert',
                 `INSERT INTO StackCTRLTenantEvidenceSnapshots
                  (CompanyID, TenantKey, PeriodStart, PeriodEnd, SnapshotType,
                   SourceFreshnessJson, MetricsJson, EvidenceJson, ContextJson,
@@ -631,13 +639,14 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
                     built.dataCompletenessScore,
                     actor.id || actor.userId || null,
                     actor.email || null
-                ]
+                ],
+                { columns: { SourceFreshnessJson: 5, MetricsJson: 6, EvidenceJson: 7, ContextJson: 8 } }
             );
             snapshotId = result.insertId;
 
             // We store one status row per adapter so every snapshot can be audited source by source.
             for (const source of built.sources) {
-                const [statusResult] = await connection.query(
+                const [statusResult] = await diagnostics.query('tenant_snapshot_source_status_insert',
                     `INSERT INTO StackCTRLIntelligenceSourceStatus
                      (CompanyID, SnapshotID, SourceKey, DisplayName, Status, IsExpected,
                       LastUpdated, AgeMinutes, EvidenceCount, MetricsJson, WarningsJson,
@@ -657,11 +666,12 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
                         JSON.stringify(source.warnings || []),
                         JSON.stringify(source.rawReference || {}),
                         source.errorMessage || null
-                    ]
+                    ],
+                    { quiet: true, columns: { MetricsJson: 9, WarningsJson: 10, RawReferenceJson: 11, ErrorMessage: 12 } }
                 );
 
                 for (const metric of flattenMetrics(source.metrics || {})) {
-                    await connection.query(
+                    await diagnostics.query('tenant_snapshot_metric_insert',
                         `INSERT INTO StackCTRLIntelligenceMetrics
                          (CompanyID, SnapshotID, SourceStatusID, SourceKey, MetricName,
                           MetricLabel, MetricType, NumericValue, TextValue, BooleanValue,
@@ -681,16 +691,42 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
                             metric.jsonValue == null ? null : JSON.stringify(metric.jsonValue),
                             built.periodStart,
                             built.periodEnd
-                        ]
+                        ],
+                        { quiet: true, columns: { TextValue: 8, JsonValue: 10 } }
                     );
                 }
             }
+            phase = 'commit';
             await connection.commit();
         } catch (error) {
-            await connection.rollback();
+            const lost = connectionUnusable(connection, error);
+            reusable = !lost && phase !== 'commit';
+            if (phase !== 'write') {
+                diagnostics.failure('snapshot_sql_execution_failed', `tenant_snapshot_${phase}`, error, {
+                    commitOutcomeUnknown: phase === 'commit'
+                });
+            }
+            if (phase === 'commit') markSnapshotFailure(error, 'SNAPSHOT_COMMIT_OUTCOME_UNKNOWN');
+            if (phase !== 'begin' && !lost) {
+                try {
+                    await connection.rollback();
+                } catch (rollbackError) {
+                    reusable = false;
+                    diagnostics.failure('snapshot_transaction_rollback_failed', 'tenant_snapshot_rollback', rollbackError, {
+                        failedPhase: phase
+                    });
+                }
+            }
             throw error;
         } finally {
-            connection.release();
+            if (reusable) connection.release();
+            else {
+                try {
+                    connection.destroy();
+                } catch (disposeError) {
+                    diagnostics.failure('snapshot_sql_execution_failed', 'tenant_snapshot_dispose', disposeError);
+                }
+            }
         }
 
         return {
@@ -753,8 +789,9 @@ function createStackCTRLIntelligenceService({ pool, azureOpenAI, refreshSource =
                 });
                 results.push({ companyId: company.ID, snapshotId: snapshot.snapshotId, status: 'stored' });
             } catch (error) {
-                logger.warn(`[StackCTRL Intelligence] Deployment bootstrap skipped company ${company.ID}:`, error.message);
-                results.push({ companyId: company.ID, status: 'failed', message: error.message });
+                const message = sqlPayloadErrorMessage(error);
+                logger.warn(`[StackCTRL Intelligence] Deployment bootstrap skipped company ${company.ID}:`, message);
+                results.push({ companyId: company.ID, status: 'failed', message });
             }
         }
         return results;

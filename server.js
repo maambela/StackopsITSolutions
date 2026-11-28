@@ -48,6 +48,7 @@ const {
 const { getCloudflareNetworkSecuritySummary } = require('./services/cloudflare');
 const { createAzureOpenAIService } = require('./services/azure-openai');
 const { createStackCTRLIntelligenceService } = require('./services/stackctrl-intelligence');
+const { createSqlPayloadDiagnostics, onSqlPayloadConnection, sqlPayloadErrorMessage } = require('./services/intelligence/sql-payload-diagnostics');
 const { createStackCTRLIntelligenceScheduler, DEFAULT_OUTPUT_TYPES } = require('./services/intelligence/scheduler');
 const { buildSavedIdentityDashboard } = require('./services/intelligence/identity-dashboard-source');
 const { buildIdentityDashboardPayload } = require('./services/intelligence/identity-dashboard-processor');
@@ -523,10 +524,13 @@ async function writeMicrosoftDashboardCache(connection, table, columnList, value
     const updates = columns.slice(1).concat('LastUpdated').map(column =>
         `${column} = IF(LastUpdated IS NULL OR VALUES(LastUpdated) > LastUpdated, VALUES(${column}), ${column})`
     );
-    return withCollectionPublication(connection, values[0], writer => writer.query(
-        `${insert} VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updates.join(', ')}`,
-        [...values, timestamp]
-    ));
+    return withCollectionPublication(connection, values[0], writer =>
+        onSqlPayloadConnection(writer, borrowed => createSqlPayloadDiagnostics(borrowed, { companyId: values[0], table }).query(
+            'microsoft_dashboard_payload_cache_write',
+            `${insert} VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updates.join(', ')}`,
+            [...values, timestamp],
+            { columns: Object.fromEntries(columns.slice(1).map((column, index) => [column, index + 1])) }
+        )));
 }
 
 async function writeBackupRecoveryPayloadCache(companyId, payload, { collectionStartedAt, signal = null, collectorContext = {} } = {}) {
@@ -11215,9 +11219,10 @@ async function writeVerifiedEmailDashboard(companyId, payload, collectionStarted
             if (!merged) return null;
             merged.sourceAudit.cacheVersion = attemptId || crypto.randomUUID();
             merged.sourceAudit.cacheSequence = (previous?.sourceAudit?.cacheSequence || 0) + 1;
-            await connection.query(
+            await createSqlPayloadDiagnostics(connection, { companyId }).query('email_dashboard_payload_cache_update',
                 'UPDATE EmailSecurityPayloadCache SET Payload = ?, LastUpdated = ? WHERE CompanyID = ?',
-                [JSON.stringify(merged), merged.fetchedAt ? new Date(merged.fetchedAt) : collectionStartedAt, companyId]
+                [JSON.stringify(merged), merged.fetchedAt ? new Date(merged.fetchedAt) : collectionStartedAt, companyId],
+                { columns: { Payload: 0 } }
             );
             return merged;
         }, { transaction: true });
@@ -12827,12 +12832,13 @@ async function upsertSunbirdPayloadCache(tableName, companyId, payload) {
     if (!pool || !companyId || !payload || !SUNBIRD_PAYLOAD_CACHE_TABLES.has(tableName)) return;
 
     try {
-        await pool.query(
+        await onSqlPayloadConnection(pool, connection => createSqlPayloadDiagnostics(connection, { companyId, table: tableName }).query(
+            'sunbird_dashboard_payload_cache_replace',
             `REPLACE INTO ${tableName} (CompanyID, Payload, LastUpdated) VALUES (?, ?, NOW())`,
-            [companyId, JSON.stringify(payload)]
-        );
+            [companyId, JSON.stringify(payload)], { columns: { Payload: 1 } }
+        ));
     } catch (error) {
-        console.warn(`[Sunbird Cache] Unable to write ${tableName}:`, error.message);
+        console.warn(`[Sunbird Cache] Unable to write ${tableName}:`, sqlPayloadErrorMessage(error));
     }
 }
 

@@ -33,6 +33,7 @@ test('cache worker limits domain fan-out and persists healthy domains after anot
         section('async function upsertDashboardMetricCaches', 'let dashboardMetricRefreshRunning'),
         'upsertDashboardMetricCaches;'
     ].join('\n'), {
+        ...require('../services/intelligence/sql-payload-diagnostics'),
         crypto, readEmailReportRefreshDate, logRuntimeOperation: (event, details) => events.push({ event, ...details }),
         process: { env: { EMAIL_SECURITY_HUNTING_ENABLED: 'true' } },
         async refreshEmailDetectionSnapshot(companyId, signal, trigger) {

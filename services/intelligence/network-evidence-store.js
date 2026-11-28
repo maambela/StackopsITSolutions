@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { buildNetworkDashboardSource } = require('./network-dashboard-source');
 const { buildRiskEngine } = require('./risk-engine');
 const { assertCollectionOwner } = require('./graph-collection-ownership');
+const { createSqlPayloadDiagnostics } = require('./sql-payload-diagnostics');
 
 const NETWORK_EVIDENCE_SCHEMA = [
     `CREATE TABLE IF NOT EXISTS StackCTRLNetworkEvidenceSnapshots (
@@ -271,6 +272,9 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
         signal?.throwIfAborted();
         const connection = typeof pool.getConnection === 'function' ? await pool.getConnection() : pool;
         const ownsConnection = connection !== pool;
+        const diagnostics = createSqlPayloadDiagnostics(connection, {
+            companyId, logger, evidenceCounts: { cloudflare_network_security: evidence.evidenceRows.length }
+        });
         let snapshotId = null;
         let transactionStarted = false;
         try {
@@ -337,7 +341,9 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
                 EvidenceSha256: evidenceHash,
                 IncompleteReason: evidence.incompleteReason
             });
-            const [snapshotResult] = await connection.query(snapshotInsert.sql, snapshotInsert.values);
+            const [snapshotResult] = await diagnostics.query('network_evidence_snapshot_insert', snapshotInsert.sql, snapshotInsert.values, {
+                signal, columns: { ServiceCoverageJson: 23, AccessActivityJson: 24, DashboardMetricsJson: 27, SourceAuditJson: 28 }
+            });
             snapshotId = snapshotResult.insertId;
 
             for (const row of evidence.evidenceRows) {
@@ -353,7 +359,9 @@ function createNetworkEvidenceStore({ pool, logger = console, now = () => new Da
                     ProcessedEvidenceJson: JSON.stringify(row.processed),
                     CollectedAt: mysqlDateTime(collectedAt)
                 });
-                await connection.query(evidenceInsert.sql, evidenceInsert.values);
+                await diagnostics.query('network_evidence_record_insert', evidenceInsert.sql, evidenceInsert.values, {
+                    signal, quiet: true, columns: { ProcessedEvidenceJson: 7 }
+                });
             }
             if (verifyCompany) await verifyCompany(connection);
             await assertCollectionOwner(connection, numericCompanyId);
