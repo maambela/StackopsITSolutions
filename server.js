@@ -3299,22 +3299,6 @@ const authenticateToken = (req, res, next) => {
 app.get('/api/cloudflare/network-security/summary', authenticateToken, async (req, res) => {
     try {
         const summary = await getCloudflareNetworkSecuritySummary({ getSecret });
-        const tenant = getTenantByEmail(req.user?.email);
-        if (networkEvidenceService && tenant?.companyId) {
-            const dashboardPayload = buildNetworkDashboardPayload({
-                tenantKey: tenant.clientId || 'sunbird',
-                payload: summary
-            });
-            networkEvidenceService.persistProcessedEvidence({
-                companyId: tenant.companyId,
-                tenantKey: tenant.clientId || 'sunbird',
-                payload: dashboardPayload,
-                collectionTrigger: 'dashboard_request',
-                sourceEndpoint: '/api/cloudflare/network-security/summary'
-            }).catch(error => {
-                console.warn('[Network Evidence] Dashboard response could not be stored:', error.message);
-            });
-        }
         res.json(summary);
     } catch (error) {
         const statusCode = error.statusCode || 500;
